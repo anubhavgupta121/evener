@@ -57,6 +57,7 @@ var floorPrefixDrops = []string{
 func ApplyEnvFloor(env []string, policy ResolvedPolicy, sessionScratch string) []string {
 	out := make([]string, 0, len(env)+4)
 	redirected, pinned := redirectedCacheVars(env, policy)
+	goEnvOff := spawnGoEnvFileRefused(env, policy)
 	for _, kv := range env {
 		name, val, ok := strings.Cut(kv, "=")
 		if !ok {
@@ -75,9 +76,18 @@ func ApplyEnvFloor(env []string, policy ResolvedPolicy, sessionScratch string) [
 		if _, ok := pinned[name]; ok {
 			continue // re-added below, pinned to the served cache
 		}
+		if name == envvars.GoEnv.Name && goEnvOff {
+			continue // re-added below as off
+		}
 		out = append(out, kv)
 	}
 
+	// A go env file that cannot be read now (a FIFO, a device) would block or
+	// flood the spawned go, so it is turned off for this spawn; one repaired,
+	// or a healthy one the spawn names instead, is read as usual.
+	if goEnvOff {
+		out = append(out, envvars.GoEnv.Assignment("off"))
+	}
 	for name, value := range pinned {
 		out = append(out, name+"="+value)
 	}
@@ -104,9 +114,9 @@ func ApplyEnvFloor(env []string, policy ResolvedPolicy, sessionScratch string) [
 // overlay, any Go cache whose directory the overlay does not serve
 // (overlayGoCacheDirs; its root was dropped, say inside the worktree) or that
 // lies in a persistent write root re-bound on top of the overlay, which would
-// otherwise stay persistently writable, and all of them when the spawn's go
-// reads a go env file (see overlayGoCacheDirs), since the overlay cannot know
-// where go will write.
+// otherwise stay persistently writable, and all of them when the spawn's
+// go env file cannot be judged (unreadable now, relative, or not the probe's),
+// since the overlay cannot know where go will write.
 //
 // GOMODCACHE goes alongside GOCACHE because an ambient value can name any
 // directory. GOPATH goes because Go writes the checksum database's tree heads to
@@ -133,7 +143,7 @@ func redirectedCacheVars(env []string, policy ResolvedPolicy) (map[string]bool, 
 		// cache root of theirs dropped from CacheRoots lies at or inside a
 		// directory the user made writable on purpose, whose writes this
 		// must not override.
-		dirs, unknown := overlayGoCacheDirs(env, policy.resolveHost)
+		dirs, unknown := overlayGoCacheDirs(env, policy)
 		writeRoots := bwrapWriteRoots(policy)
 		for _, name := range []string{envvars.GoCache.Name, envvars.GoModCache.Name, envvars.GoPath.Name} {
 			if dir := dirs[name]; unknown[name] || (filepath.IsAbs(dir) && (!overlayServes(policy, dir) || overlapsAnyRoot(dir, writeRoots))) {
@@ -210,40 +220,67 @@ func canBeDirectory(dir string) bool {
 }
 
 // overlayGoCacheDirs returns, for each Go cache variable, the directory a
-// spawned go would write that cache to: the spawn's own setting, else Go's
-// default under the spawn's own HOME and XDG_CACHE_HOME. GOPATH maps to its
-// first absolute entry's pkg, where the checksum database lives. A spawn whose
-// go reads an existing go env file may configure there any cache its
-// environment does not set explicitly (the environment overrides the file);
-// those it reports as unknown.
-func overlayGoCacheDirs(env []string, host HostFacts) (map[string]string, map[string]bool) {
+// spawned go would write that cache to: the spawn's own setting, else the
+// value in the go env file it reads, else Go's default under the spawn's own
+// HOME and XDG_CACHE_HOME. GOPATH maps to its first absolute entry's pkg,
+// where the checksum database lives. The file counts only when it is the one
+// the probe read and the floor can read it as the spawn will (see below);
+// otherwise every setting the spawn's environment leaves to it is reported
+// unknown (the environment overrides the file).
+func overlayGoCacheDirs(env []string, policy ResolvedPolicy) (map[string]string, map[string]bool) {
+	host := policy.resolveHost
 	vars := envVars(env)
+	firstOr := func(values ...string) string {
+		for _, v := range values {
+			if v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 	// Defaults follow the spawn's own HOME and XDG_CACHE_HOME, never the
 	// host's: a child run with its own (or none) writes where its tools decide.
 	home := vars[envvars.Home.Name]
 	out := map[string]string{}
-
-	// Go settings come from the spawn's environment. A go env file the
-	// spawn's go reads could set them too, so one that exists (or a relative
-	// path, which resolves where the floor cannot see) leaves them unknown.
 	unknown := map[string]bool{}
+
+	// Go settings come from the spawn's environment, then the go env file it
+	// reads: that file's own values (never the host process's environment
+	// overrides) as they are now.
+	file := map[string]string{}
 	if spawnFile := goEnvFileFor(vars, host.OS); spawnFile != "" {
-		if _, err := os.Lstat(spawnFile); !filepath.IsAbs(spawnFile) || !errors.Is(err, fs.ErrNotExist) {
+		// A relative file resolves against the spawn's own directory, which
+		// the floor does not know, so it may not be the probe's file. One
+		// spelled under /tmp or /dev, or whose link chain passes through or
+		// into them at any step, is hidden by bwrap's private mounts (the
+		// overlay strategy is bwrap's), and so is one under a mask at any step
+		// (currentGoEnvSettings refuses both). A file the session can write
+		// (one kept in the worktree) changed by `go env -w` mid-command sends
+		// later go runs in that command to caches where the session said,
+		// inside its own writable storage (docs/sandboxing.md#threat-model).
+		judged := spawnFile == host.GoEnvFile && filepath.IsAbs(spawnFile)
+		if judged {
+			var ok bool
+			file, ok = currentGoEnvSettings(policy, spawnFile)
+			judged = ok
+		}
+		if !judged {
+			file = map[string]string{}
 			for _, name := range []string{envvars.GoCache.Name, envvars.GoModCache.Name, envvars.GoPath.Name} {
 				unknown[name] = vars[name] == ""
 			}
 		}
 	}
 	gopath := ""
-	if entries := goPathEntries(HostFacts{Home: home, GoPath: vars[envvars.GoPath.Name]}); len(entries) > 0 {
+	if entries := goPathEntries(HostFacts{Home: home, GoPath: firstOr(vars[envvars.GoPath.Name], file[envvars.GoPath.Name])}); len(entries) > 0 {
 		gopath = entries[0]
 	}
 	cacheHome := vars[envvars.XDGCacheHome.Name]
 	if cacheHome == "" && home != "" {
 		cacheHome = filepath.Join(home, ".cache")
 	}
-	out[envvars.GoModCache.Name] = vars[envvars.GoModCache.Name]
-	out[envvars.GoCache.Name] = vars[envvars.GoCache.Name]
+	out[envvars.GoModCache.Name] = firstOr(vars[envvars.GoModCache.Name], file[envvars.GoModCache.Name])
+	out[envvars.GoCache.Name] = firstOr(vars[envvars.GoCache.Name], file[envvars.GoCache.Name])
 	if gopath != "" {
 		// GOPATH is judged at pkg, the overlay's root, not at each entry go
 		// writes under it (pkg/sumdb). A host whose pkg/sumdb is a file or a
@@ -270,6 +307,106 @@ func envVars(env []string) map[string]string {
 		vars[name] = val
 	}
 	return vars
+}
+
+// spawnGoEnvFileRefused reports whether the go env file a spawn's go would read
+// exists now but cannot be read as a small regular file (a FIFO, a device, an
+// oversized file), the way the probe reads it.
+func spawnGoEnvFileRefused(env []string, policy ResolvedPolicy) bool {
+	file := goEnvFileFor(envVars(env), policy.resolveHost.OS)
+	// A relative file resolves against the spawn's own directory, which the
+	// floor does not know, so it is left to the spawn: its caches are already
+	// unknown (overlayGoCacheDirs), and turning it off would drop its other
+	// settings (GOPROXY, GOPRIVATE). A FIFO there is the session's own doing.
+	if file == "" || !filepath.IsAbs(file) {
+		return false
+	}
+	// One under a mask is never read: the spawn sees the mask, not the file.
+	// One merely under /tmp or /dev is still probed, since bwrap may rebind
+	// the worktree holding it; a host file the private /tmp hides then turns
+	// GOENV off needlessly, which costs that spawn only `go env -w`.
+	if goEnvFileMasked(policy, file) {
+		return false
+	}
+	_, err := readGoEnvFileSettings(hostProbeSystem{}, file)
+	return err != nil && !errors.Is(err, fs.ErrNotExist)
+}
+
+// currentGoEnvSettings reads the go env file at path as it is now, since the
+// spawned go reads it at every run (a `go env -w` mid-session changes what the
+// next spawn does). ok is false when the file exists but cannot be read, or
+// when the spawn cannot see it (goEnvFileHidden); a missing file has no
+// settings. The floor reads it outside the sandbox, so the file actually
+// opened is judged on its descriptor as well: a link a sandboxed process swaps
+// to a masked file between the check and the open is refused, not read into
+// the spawn's environment.
+func currentGoEnvSettings(policy ResolvedPolicy, path string) (map[string]string, bool) {
+	// A relative path resolves against the spawn's directory, which the floor
+	// does not know; read from the floor's own, it would name another file.
+	if !filepath.IsAbs(path) || goEnvFileHidden(policy, path) {
+		return nil, false
+	}
+	beforeGoEnvFileOpen(path)
+	f, err := openGoEnvFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]string{}, true
+	}
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	// Only masks are checked on the descriptor: they guard what the floor
+	// reads. A swap into bwrap's private /tmp or /dev at worst leaves the
+	// spawn's caches where its own defaults put them, inside its grants
+	// (docs/sandboxing.md#threat-model).
+	opened, err := FdPath(int(f.Fd()))
+	if err != nil || underAMask(policy, StripDataVolumeAlias(opened)) {
+		return nil, false
+	}
+	data, err := readGoEnvFile(f, path)
+	if err != nil {
+		return nil, false
+	}
+	return parseGoEnvSettings(data), true
+}
+
+// beforeGoEnvFileOpen runs between currentGoEnvSettings' path check and its
+// open, a seam for tests that race the two.
+var beforeGoEnvFileOpen = func(string) {}
+
+// goEnvFileHidden reports whether the spawn cannot see the go env file at
+// path: under a mask at any step of resolving it (every link and directory
+// walkPhysical visits), or, outside Seatbelt, spelled in or linked through
+// bwrap's private /tmp or /dev. A file in a /tmp worktree bwrap rebinds is
+// counted hidden too; that spawn's GOPATH-mode builds lose the file's GOPATH
+// (friction only, nothing leaves its grants).
+func goEnvFileHidden(policy ResolvedPolicy, path string) bool {
+	if policy.Backend != BackendSeatbelt && (inPrivateMount(path) || linksThroughPrivateMount(path)) {
+		return true
+	}
+	return goEnvFileMasked(policy, path)
+}
+
+// goEnvFileMasked reports whether the go env file at path is under a mask at
+// any step of resolving it: every link and directory walkPhysical visits. A
+// carve-out inside a mask (the plugin store, the skills directory) counts as
+// masked too: no one keeps a go env file there, and treating one as hidden
+// costs only its GOPATH.
+func goEnvFileMasked(policy ResolvedPolicy, path string) bool {
+	masked := underAMask(policy, path)
+	walkPhysical(path, func(p string, _, _ bool) bool {
+		masked = masked || underAMask(policy, p)
+		return masked
+	})
+	return masked
+}
+
+// underAMask reports whether p lies at or under a masked path, by its spelling
+// or where the mask resolves.
+func underAMask(policy ResolvedPolicy, p string) bool {
+	return slices.ContainsFunc(policy.MaskedPaths, func(m string) bool {
+		return isUnderAnyRoot(p, []string{m, physicalLanding(m)})
+	})
 }
 
 // sessionGoPath returns the GOPATH a session-private spawn gets: the scratch
@@ -305,7 +442,9 @@ func sessionGoPath(env []string, policy ResolvedPolicy, sessionScratch string) s
 		host := policy.resolveHost
 		configured := ""
 		if file := goEnvFileFor(vars, host.OS); file != "" && file == host.GoEnvFile {
-			configured = host.GoPath
+			if settings, ok := currentGoEnvSettings(policy, file); ok {
+				configured = settings[envvars.GoPath.Name]
+			}
 		}
 		ambient = goPathEntries(HostFacts{Home: vars[envvars.Home.Name], GoPath: configured})
 	}
