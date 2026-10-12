@@ -84,6 +84,16 @@
   overflow-y: auto;
   padding: var(--space-2) var(--space-3) var(--space-3);
   min-height: 0;
+  /* A containing block, so this scroll container clips what it owns: an
+   * absolutely positioned row decoration whose nearest positioned ancestor
+   * would otherwise sit OUTSIDE this box (the task rows' visually-hidden
+   * status words are position: absolute with no nearer anchor) escapes the
+   * clip entirely, and the deepest row's span then sets the page's height -
+   * a task list taller than the viewport made the whole page frame scroll.
+   * The same page-frame contract the rail's own body carries; the rail
+   * anchors its rows' positioned decorations on the rows (railRow position:
+   * relative), while the Overview's tab bodies share this one viewport. */
+  position: relative;
 }
 
 .stack {
