@@ -27,6 +27,9 @@ It reads one line at a time, so it can misjudge:
     line;
   - assertion forms it doesn't recognise, such as `expect.soft` and
     `expect.poll`.
+  - quotes in TS: a quote straight after a word is read as JSX text unless
+    the word is a known keyword, so an unusual construct can still blur a
+    test's boundaries.
 Read every listed test before deleting or converting it.
 
 A literal counts as copy only when it also appears in production source (or a
@@ -256,6 +259,23 @@ GO_SETUP_GUARD = re.compile(r"^\s*if\s+err\s*!=\s*nil\s*\{")
 TS_REGEX_PRECEDERS = set("(,=:[!&|?{};+-*%~^")
 
 
+TS_EXPRESSION_KEYWORDS = {"return", "case", "typeof", "in", "of", "await", "yield", "else", "throw",
+                          "void", "delete", "new", "instanceof", "do",
+                          # type positions: `value as "x"`, `satisfies "x"`, `extends "x"`
+                          "as", "satisfies", "extends", "keyof", "is"}
+
+
+def word_before(line, i):
+    """The identifier-like word ending just before position i, skipping spaces."""
+    j = i
+    while j > 0 and line[j - 1].isspace():
+        j -= 1
+    k = j
+    while k > 0 and (line[k - 1].isalnum() or line[k - 1] in "_$"):
+        k -= 1
+    return line[k:j]
+
+
 def sanitize(line, lang):
     """The line with the contents of strings, TS regex literals and comments
     replaced by spaces. Its length is unchanged, so offsets found in it apply
@@ -272,7 +292,10 @@ def sanitize(line, lang):
         if c == "/" and i + 1 < n and line[i + 1] == "/":
             blank(i, n)
             break
-        if c in "\"'`":
+        # In TS, a quote straight after a word is JSX text ("Don't retry"),
+        # unless that word is a keyword that takes an expression (`return "x"`).
+        if c in "\"'`" and not (lang == "ts" and c != "`" and prev.isalnum()
+                                 and word_before(line, i) not in TS_EXPRESSION_KEYWORDS):
             j = i + 1
             while j < n and line[j] != c:
                 j += 2 if line[j] == "\\" else 1
@@ -305,6 +328,17 @@ def go_copy_term(term):
     checks state, not wording)."""
     literals = [go_unquote(m.group(1), m.group(2)).strip() for m in re.finditer(GO_STR, term)]
     return bool(GO_COPY_OPERATOR.search(term)) and any(not contract_shaped(lit) for lit in literals)
+
+
+def go_if_initializer(line):
+    """The `init` statement of `if init; cond {`, or "" when there is none."""
+    code = sanitize(line, "go")
+    m = re.search(r"\bif\b", code)
+    if not m:
+        return ""
+    hi = code.rfind("{")
+    semi = code.rfind(";", m.end(), hi if hi > m.end() else len(code))
+    return line[m.end():semi] if semi >= 0 else ""
 
 
 def go_condition_terms(line):
@@ -398,8 +432,16 @@ def copy_only_tests(text, hit_lines, lang, purpose="copy"):
                 return False
             if lang == "go" and not all(go_copy_term(t) for t in go_condition_terms(line)):
                 return False
-            literals = [first(m.groups()) for m in QUOTED.finditer(line)]
-            return not any(lit and lit in inputs for lit in literals)
+            if lang == "go":
+                # Compare the condition's literals with what the test supplied,
+                # the `if` initializer included; the initializer's own literals
+                # are inputs, not assertions.
+                supplied = inputs + "\n" + go_if_initializer(line)
+                asserted = " ".join(go_condition_terms(line))
+            else:
+                supplied, asserted = inputs, line
+            literals = [first(m.groups()) for m in QUOTED.finditer(asserted)]
+            return not any(lit and lit in supplied for lit in literals)
 
         if not checks or not all(copy_claim(n, line) for n, line in checks):
             continue

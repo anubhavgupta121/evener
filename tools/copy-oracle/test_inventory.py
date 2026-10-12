@@ -271,5 +271,74 @@ test("shows the hint", () => {
         self.assertEqual([n for _, n in inventory.copy_only_tests(src, {5}, "ts")], ["shows the hint"])
 
 
+class FastFollow(unittest.TestCase):
+    def test_an_apostrophe_in_jsx_text_does_not_merge_neighbouring_tests(self):
+        src = """test("renders the advice", () => render(<span>Don't retry</span>));
+
+test("shows the hint", () => {
+  expect(screen.getByText("Try again")).toBeTruthy();
+});
+"""
+        blocks = inventory.test_blocks(src, "ts")
+        self.assertEqual([name for _, name, _ in blocks], ["renders the advice", "shows the hint"])
+
+    def test_text_supplied_in_an_if_initializer_is_fixture(self):
+        src = """func TestRenderShowsTheLabel(t *testing.T) {
+	if got := render("Try again"); got != "Try again" {
+		t.Fatalf("got %q", got)
+	}
+}
+"""
+        self.assertEqual(inventory.copy_only_tests(src, {2}, "go"), [])
+
+
+class FastFollowRound2(unittest.TestCase):
+    def test_a_string_after_a_keyword_is_still_a_string(self):
+        src = """test("shows the retry label", () => {
+  const label = () => { return "Retry("; };
+  expect(screen.getByText(label())).toBeTruthy();
+  expect(fake.calls).toHaveLength(1);
+});
+
+test("renders the hint", () => {
+  expect(screen.getByText("Try again")).toBeTruthy();
+});
+"""
+        blocks = inventory.test_blocks(src, "ts")
+        self.assertEqual([name for _, name, _ in blocks], ["shows the retry label", "renders the hint"])
+
+    def test_only_condition_literals_are_compared_with_supplied_text(self):
+        unrelated = """func TestRenderShowsEmpty(t *testing.T) {
+	if got := render("empty"); got != "No sessions yet" {
+		t.Fatalf("got %q", got)
+	}
+}
+"""
+        self.assertEqual([n for _, n in inventory.copy_only_tests(unrelated, {2}, "go")], ["TestRenderShowsEmpty"])
+        passthrough = """func TestRenderShowsTheLabel(t *testing.T) {
+	if got := render("Try again"); got != "Try again" {
+		t.Fatalf("got %q", got)
+	}
+}
+"""
+        self.assertEqual(inventory.copy_only_tests(passthrough, {2}, "go"), [])
+
+
+class TypePositionStrings(unittest.TestCase):
+    def test_a_literal_type_after_as_or_satisfies_is_a_string(self):
+        for kw in ("as", "satisfies"):
+            src = f"""test("shows the retry label", () => {{
+  const label = value {kw} "Retry(";
+  expect(fake.calls).toHaveLength(1);
+}});
+
+test("renders the hint", () => {{
+  expect(screen.getByText("Try again")).toBeTruthy();
+}});
+"""
+            blocks = inventory.test_blocks(src, "ts")
+            self.assertEqual([name for _, name, _ in blocks], ["shows the retry label", "renders the hint"], kw)
+
+
 if __name__ == "__main__":
     unittest.main()
