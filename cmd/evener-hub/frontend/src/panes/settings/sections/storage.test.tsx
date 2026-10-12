@@ -4,7 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
 import { connectionStore } from "../../../stores/connection";
 import { resetSettingsOverviewStoreForTests } from "../../../stores/settingsOverview";
-import { settingsFieldIds, settingsFieldRow } from "./settingsFieldTestUtils";
+import { settingsFieldHelp, settingsFieldIds, settingsFieldValue } from "./settingsFieldTestUtils";
 import { StorageSection } from "./storage";
 
 function connectFakeClient(): FakeClient {
@@ -31,8 +31,8 @@ test("renders State dir (from storage, not hub), Run dir (from hub), and the sta
   expect(await screen.findByText("/home/user/.evener")).toBeTruthy();
   expect(screen.getByText("/tmp/evener-run")).toBeTruthy();
   expect(settingsFieldIds()).toEqual(["state-dir", "run-dir", "hub-config", "session-cache"]);
-  expect(within(settingsFieldRow("state-dir")).getByRole("definition").textContent).toBe("/home/user/.evener");
-  expect(settingsFieldRow("hub-config").querySelector("p")).not.toBeNull();
+  expect(settingsFieldValue("state-dir").textContent).toBe("/home/user/.evener");
+  expect(settingsFieldHelp("hub-config")).not.toBeNull();
 });
 
 test("Hub config's dd carries no 'edit to change' dim hint (unlike General's own row)", async () => {
@@ -42,8 +42,9 @@ test("Hub config's dd carries no 'edit to change' dim hint (unlike General's own
   render(<StorageSection />);
 
   await waitFor(() => expect(settingsFieldIds()).toContain("hub-config"));
-  const configValue = within(settingsFieldRow("hub-config")).getByRole("definition");
-  expect(configValue.querySelector("span")).toBeNull();
+  // The value is the path alone, with no note beside it.
+  const configValue = settingsFieldValue("hub-config");
+  expect(configValue.textContent).toBe(configValue.querySelector("code")?.textContent);
 });
 
 test("omits the Past index row entirely when pastIndex is absent (no configured past-session index)", async () => {
@@ -69,7 +70,7 @@ test("renders the Past index row with its size and a pluralized live session cou
   render(<StorageSection />);
 
   await waitFor(() => expect(settingsFieldIds()).toContain("past-index"));
-  expect(within(settingsFieldRow("past-index")).getByText("size-from-hub")).toBeTruthy();
+  expect(within(settingsFieldValue("past-index")).getByText("size-from-hub")).toBeTruthy();
   expect(screen.getByText(/Currently tracking 3 sessions\./)).toBeTruthy();
 });
 

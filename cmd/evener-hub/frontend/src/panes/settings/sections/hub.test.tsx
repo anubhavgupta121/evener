@@ -8,7 +8,7 @@ import { resetDaemonResidentsStoreForTests } from "../../../stores/daemonResiden
 import { resetSettingsOverviewStoreForTests } from "../../../stores/settingsOverview";
 import { emptyStateReasons } from "../../../widgets/emptystate/emptyStateTestUtils";
 import { HubSection } from "./hub";
-import { settingsFieldIds, settingsFieldRow } from "./settingsFieldTestUtils";
+import { settingsFieldHelp, settingsFieldIds } from "./settingsFieldTestUtils";
 
 function connectFakeClient(): FakeClient {
   const fake = new FakeClient("ready");
@@ -43,7 +43,7 @@ test("fetches the overview on mount and renders the 3 read-only fields with thei
   expect(screen.getByText("30s")).toBeTruthy();
   expect(settingsFieldIds()).toEqual(["listen-address", "run-dir", "spawn-timeout"]);
   for (const field of settingsFieldIds()) {
-    expect(settingsFieldRow(field ?? "").querySelector("p")).not.toBeNull();
+    expect(settingsFieldHelp(field ?? "")).not.toBeNull();
   }
   await waitFor(() =>
     expect(fake.calls).toEqual([
