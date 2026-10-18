@@ -14,6 +14,7 @@ import {
 	snapshotResource,
 } from "@evener/appwire-client/state/navigation";
 import type { ConversationClientLike } from "../../mobile/src/services/conversation";
+import { reconnectDelay } from "./hubConnection";
 import { singleFlight } from "./singleFlight";
 
 export interface PageState<T> {
@@ -79,16 +80,67 @@ export class NavigationPages<T> implements PageSource<T> {
 	private owner: (() => void) | null = null;
 	private paused = false;
 	private rereads = singleFlight(
-		() => this.rereadLoadedDepth(),
+		() => this.recover(),
 		() => !this.paused && !this.state.loading,
 	);
+	/** The recovery flight a joined refresh observes, resolved when the
+	 * re-read settles: handing a refresh to the flight must not report done
+	 * while pages are still loading. */
+	private recovery: Promise<boolean> | null = null;
+	private recover(): Promise<boolean> {
+		const flight = (async () => {
+			try {
+				return await this.rereadLoadedDepth();
+			} finally {
+				this.recovery = null;
+			}
+		})();
+		this.recovery = flight;
+		return flight;
+	}
+	/** The retry a failed read arms on its own when the constructor's readRetry
+	 * opts in (the same capped backoff the Board's failed reads retry on,
+	 * useBoardReadRetry): grows with each failure in a row, retires when a read
+	 * lands, and never runs while the page is paused (out of view) — cancel()
+	 * abandons it and resume() re-arms what the page still owes. */
+	private retryTimer: ReturnType<typeof setTimeout> | null = null;
+	private retryCount = 0;
+	/** The row depth a failed re-read still owes: the reader had reached it,
+	 * so a retry re-reads to THIS depth, not to whatever survived the last
+	 * partial refresh. Cleared when the re-read finally reaches it. */
+	private owedDepth: number | null = null;
+	/** Whether a failed read re-arms on its own. Off by default: a consumer
+	 * whose reads another owner already retries (the Board's own rebind,
+	 * useBoardReadRetry) must not double-fire it. */
+	private readonly readRetry: boolean;
+	/** Re-reads from the first page down to the loaded depth, so a retry of a
+	 * loaded page keeps the list's length; on the shared rereads flight so an
+	 * invalidation's re-read and a retry's never run twice at once. */
+	private retryRead = () => {
+		this.retryTimer = null;
+		this.rereads.request();
+	};
+	private armRetry() {
+		if (!this.readRetry || this.paused || this.retryTimer !== null) return;
+		this.retryCount += 1;
+		this.retryTimer = setTimeout(this.retryRead, reconnectDelay(this.retryCount));
+	}
+	private clearRetry(success: boolean) {
+		if (this.retryTimer !== null) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = null;
+		}
+		if (success) this.retryCount = 0;
+	}
 	constructor(
 		private client: ConversationClientLike,
 		private params: NativeNavigationParams,
 		private field: "projects" | "sessions" | "pin_sections",
 		private key: (row: T) => string,
 		private limit = 50,
+		{ readRetry = false }: { readRetry?: boolean } = {},
 	) {
+		this.readRetry = readRetry;
 		this.resourceKey = navigationParamsToResourceKey({
 			...params,
 			representationVersion: 3,
@@ -126,9 +178,27 @@ export class NavigationPages<T> implements PageSource<T> {
 	/** Re-read from the first page down to the depth the user had scrolled
 	 * to, so the list keeps its length and their place in it. */
 	private async rereadLoadedDepth() {
-		const depth = this.offset;
-		if ((await this.load(true)) !== true) return;
-		while (this.offset < depth && this.state.remaining > 0) if ((await this.load(false)) !== true) return;
+		// A partial refresh can leave fewer rows loaded than the reader had
+		// reached; the owed depth remembers it until the re-read catches up.
+		const depth = Math.max(this.offset, this.owedDepth ?? 0);
+		// Hold the target across the reads: a failure of the reset read (page
+		// one) must not shrink the depth the retry still owes to what survived.
+		this.owedDepth = depth;
+		const landed =
+			(await this.load(true)) === true &&
+			(this.offset >= depth || this.state.remaining <= 0 || (await this.walkToDepth(depth)) === true);
+		// Recovery completes at the depth it owed, or when the results end;
+		// a failure keeps what it owes for the next attempt to reach for.
+		if (landed) {
+			this.owedDepth = null;
+			if (this.state.error !== null) this.publish({ error: null });
+		}
+		return landed;
+	}
+	/** Walk the remaining pages to the depth a recovery owes. */
+	private async walkToDepth(depth: number): Promise<boolean> {
+		while (this.offset < depth && this.state.remaining > 0) if ((await this.load(false)) !== true) return false;
+		return true;
 	}
 	private invalidate(p: NavigationInvalidatedPayload) {
 		if (this.notifiedGeneration !== p.generationId) {
@@ -165,6 +235,7 @@ export class NavigationPages<T> implements PageSource<T> {
 	cancel() {
 		this.request++;
 		this.paused = true;
+		this.clearRetry(false);
 		this.rereads.abandon();
 		this.publish({ loading: false });
 		if (this.state.stale) this.scheduleReread();
@@ -172,12 +243,26 @@ export class NavigationPages<T> implements PageSource<T> {
 	resume() {
 		this.paused = false;
 		if (this.state.stale) this.scheduleReread();
+		// A failed read the pause held back is still owed: read it now, the
+		// same way an owed stale re-read runs on resume — but only where the
+		// page retries its own reads; an owner's resume path stands as before.
+		if (this.readRetry && this.state.error !== null) this.rereads.request();
 		this.rereads.drain();
 	}
 	/** An explicit read means the owner is active again; its result stands
 	 * in for any re-read owed while paused. */
 	refresh() {
 		this.paused = false;
+		// A refresh while depth is owed is the reader pressing Try again: it
+		// completes the recovery the automatic retry would, to the owed depth,
+		// so it cannot strand what it owes on a changed first page.
+		if (this.owedDepth !== null) {
+			this.rereads.request();
+			// The caller observes the flight's own completion — a recovery
+			// already running, or one queued behind the request in flight —
+			// never an immediate true while pages are loading.
+			return this.rereads.settled().then(() => this.recovery === null);
+		}
 		return this.load(true);
 	}
 	more() {
@@ -201,7 +286,13 @@ export class NavigationPages<T> implements PageSource<T> {
 		const request = ++this.request,
 			uncertain = this.uncertain,
 			epoch = this.notificationEpoch;
-		this.publish({ loading: true, error: null });
+		this.publish({
+			loading: true,
+			// A re-read that still owes depth keeps its error: recovery is not
+			// done until the depth it owes is restored.
+			error: this.owedDepth !== null && this.offset < this.owedDepth ? this.state.error : null,
+		});
+		this.clearRetry(false);
 		try {
 			const offset = reset ? 0 : this.offset,
 				params = {
@@ -263,6 +354,7 @@ export class NavigationPages<T> implements PageSource<T> {
 				this.version = null;
 				this.mutationFloor = 0;
 				this.rereads.settle();
+				this.clearRetry(true);
 				this.publish({
 					loaded: true,
 					rows: [],
@@ -278,6 +370,10 @@ export class NavigationPages<T> implements PageSource<T> {
 				this.version = decoded.version;
 				if (decoded.version.revision >= this.mutationFloor) this.mutationFloor = 0;
 				this.rereads.settle();
+				// A first page that stands can still owe deeper pages: the
+				// count retires with the recovery, not with one page.
+				if (this.owedDepth === null) this.clearRetry(true);
+				else this.clearRetry(false);
 				this.publish({
 					loaded: true,
 					loading: false,
@@ -322,21 +418,49 @@ export class NavigationPages<T> implements PageSource<T> {
 			this.version = decoded.version;
 			if (decoded.version.revision >= this.mutationFloor) this.mutationFloor = 0;
 			this.rereads.settle();
+			// Recovery completes when the read reaches the depth it owes or
+			// the results end — only then does the failure count retire, so a
+			// later page that keeps failing grows the backoff instead of
+			// resetting it on every intermediate page that lands.
+			const owed = this.owedDepth;
+			const exhausted = Number(data.remaining) === 0;
+			if (owed === null || this.offset >= owed || exhausted) {
+				this.owedDepth = null;
+				this.clearRetry(true);
+			} else {
+				this.clearRetry(false);
+				// A direct paging request that landed short of the owed depth
+				// (a manual Retry loading more) continues the recovery the same
+				// flight owns: the reread walks to the depth, and the flight's
+				// own retry pacing covers a read that cannot run yet.
+				this.rereads.request();
+			}
+			// The error says the page still owes its recovery: it holds until
+			// the depth is restored or the results end, whichever completes it.
+			const incomplete = this.owedDepth !== null && this.offset < this.owedDepth;
 			this.publish({
 				loaded: true,
 				rows: [...unique.values()],
 				remaining: Number(data.remaining),
 				loading: false,
 				stale: false,
-				error: null,
+				error: incomplete ? this.state.error : null,
 			});
 			return true;
 		} catch (cause) {
 			if (request !== this.request) return;
+			// A paging read that fails owed its next page: remember the depth
+			// it was reaching for, so the retry's re-read restores the reader's
+			// full depth instead of ending at whatever survived.
+			if (!reset) this.owedDepth = Math.max(this.owedDepth ?? 0, this.offset + this.limit);
 			this.publish({
 				loading: false,
 				error: cause instanceof Error ? cause.message : "Could not load this page. Try again.",
 			});
+			// Nothing else would retry a failed read while the page stays in
+			// view: an idle hub sends no invalidation, so the page arms its own
+			// re-read, on the same capped backoff the Board's reads retry on.
+			this.armRetry();
 		} finally {
 			this.rereads.drain();
 		}
