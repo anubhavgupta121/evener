@@ -45,7 +45,7 @@ func newManagerCtx(t *testing.T) (*Manager, context.Context) {
 
 // mustAddMarketplace registers a marketplace or fails the test with the
 // package-standard AddMarketplace fatal.
-func mustAddMarketplace(t *testing.T, m *Manager, ctx context.Context, name string, src Source) {
+func mustAddMarketplace(ctx context.Context, t *testing.T, m *Manager, name string, src Source) {
 	t.Helper()
 	if _, err := m.AddMarketplace(ctx, name, src); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
@@ -314,7 +314,7 @@ func TestEditMarketplace_RenameMovesCloneAndRekeysRegistry(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(ctx, "widget", name)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -529,7 +529,7 @@ func TestFailedFetch_LeavesNoPartialClone(t *testing.T) {
 func TestEditMarketplace_DirectorySourceRenameKeepsThePath(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestEditMarketplace_ResourceSwapsTheClone(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	stamp := time.Date(2031, 4, 1, 0, 0, 0, 0, time.UTC)
 	m.Now = func() time.Time { return stamp }
 	ref, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB})
@@ -594,7 +594,7 @@ func TestEditMarketplace_ResourceClearsAStaleAsideDirectory(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	stale := m.marketplaceDir(asideCloneName)
 	if err := os.MkdirAll(filepath.Join(stale, "residue"), 0o755); err != nil {
 		t.Fatal(err)
@@ -626,7 +626,7 @@ func TestEditMarketplace_RetriesTheAsideRestoreAfterADoubleFault(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	before := readStoreFile(t, m.marketplacesFile())
 
 	dest := m.marketplaceDir("acme")
@@ -680,7 +680,7 @@ func TestEditMarketplace_RenameAndResourceTogether(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestEditMarketplace_ResourceToDirectoryDropsTheRenamedClone(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	dir := makeDirectoryMarketplace(t, "beta", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestRemoveMarketplace_SweepsAStrandedCloneUnderADirectorySource(t *testing.
 	mktRepo, name := makeInstallableMarketplace(t)
 	dir := makeDirectoryMarketplace(t, "local", "gadget")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	clone := strandCloneAfterDirectoryResource(t, m, name, dir)
 
 	if err := m.RemoveMarketplace(context.Background(), name); err != nil {
@@ -812,7 +812,7 @@ func TestEditMarketplace_RenameSweepsAStrandedCloneUnderADirectorySource(t *test
 	mktRepo, name := makeInstallableMarketplace(t)
 	dir := makeDirectoryMarketplace(t, "local", "gadget")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	clone := strandCloneAfterDirectoryResource(t, m, name, dir)
 
 	ref, err := m.EditMarketplace(context.Background(), name, "beta", nil)
@@ -1707,7 +1707,7 @@ func TestEditMarketplace_FetchFailureChangesNothing(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1738,7 +1738,7 @@ func TestEditMarketplace_RestoresCloneWhenRegistrySaveFails(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1785,7 +1785,7 @@ func TestEditMarketplace_FailedUndoNamesWhatItCouldNotRestore(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1884,7 +1884,7 @@ func TestEditMarketplace_RegistrySaveFailureRestoresTheOldClone(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1932,7 +1932,7 @@ func TestEditMarketplace_MarketplacesSaveFailureRestoresTheOldClone(t *testing.T
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1986,7 +1986,7 @@ func TestEditMarketplace_MarketplacesSaveFailureRestoresTheStore(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -2047,7 +2047,7 @@ func TestEditMarketplace_PreservesALeftoverPluginCache(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -2117,7 +2117,7 @@ func TestEditMarketplace_RenameChecksLeftoversUnderTheNewName(t *testing.T) {
 			dir := makeDirectoryMarketplace(t, "acme", "widget")
 			m := NewManager(t.TempDir())
 			ctx := context.Background()
-			mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+			mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 			plant(t, m)
 			regBefore := readStoreFileIfAny(m.registryPath())
 			mkBefore := readStoreFileIfAny(m.marketplacesFile())
@@ -2161,7 +2161,7 @@ func TestEditMarketplace_RenameChecksLeftoversUnderTheNewName(t *testing.T) {
 func TestEditMarketplace_RenameRefusesADanglingCloneLinkUnderTheNewName(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	if err := os.MkdirAll(m.marketplacesDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2188,7 +2188,7 @@ func TestEditMarketplace_RenameRefusesADanglingCloneLinkUnderTheNewName(t *testi
 func TestEditMarketplace_RenameOntoALeftoverIsRefusedBeforeTheFetch(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	if err := os.MkdirAll(m.marketplaceDir("beta"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2247,7 +2247,7 @@ func TestEditMarketplace_TreatsOnlyAMissingPathAsAbsent(t *testing.T) {
 		t.Helper()
 		mktRepo, name := makeInstallableMarketplace(t)
 		m := NewManager(t.TempDir())
-		mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+		mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 		if _, err := m.Install(ctx, "widget", name); err != nil {
 			t.Fatalf("Install: %v", err)
 		}
@@ -2336,7 +2336,7 @@ func TestEditMarketplace_TreatsOnlyAMissingPathAsAbsent(t *testing.T) {
 	t.Run("leftover under the new name", func(t *testing.T) {
 		dir := makeDirectoryMarketplace(t, "acme", "widget")
 		m := NewManager(t.TempDir())
-		mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+		mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 		if err := os.MkdirAll(filepath.Dir(m.marketplaceDir("beta")), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -2402,7 +2402,7 @@ func TestEditMarketplace_RefusesADirectorySourceInsideItsOwnClone(t *testing.T) 
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newManagerCtx(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -2697,7 +2697,7 @@ func TestEditMarketplace_RefusesADirectorySourceInsideTheStore(t *testing.T) {
 		t.Run(tc.what, func(t *testing.T) {
 			m := NewManager(t.TempDir())
 			ctx := context.Background()
-			mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
+			mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
 			before := readStoreFile(t, m.marketplacesFile())
 			source := plantCatalog(t, tc.path(m))
 
@@ -2721,7 +2721,7 @@ func TestEditMarketplace_RefusesADirectorySourceInsideTheStore(t *testing.T) {
 	t.Run("an empty path is refused", func(t *testing.T) {
 		m := NewManager(t.TempDir())
 		ctx := context.Background()
-		mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
+		mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
 
 		if _, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceDirectory}); !errors.Is(err, ErrMarketplaceSourceInStore) {
 			t.Fatalf("an empty source path = %v, want ErrMarketplaceSourceInStore", err)
@@ -2731,7 +2731,7 @@ func TestEditMarketplace_RefusesADirectorySourceInsideTheStore(t *testing.T) {
 	t.Run("a directory outside the store is accepted", func(t *testing.T) {
 		m := NewManager(t.TempDir())
 		ctx := context.Background()
-		mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
+		mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: makeDirectoryMarketplace(t, "acme", "widget")})
 		moved := makeDirectoryMarketplace(t, "acme", "widget")
 
 		ref, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceDirectory, Path: moved})
@@ -2781,7 +2781,7 @@ func TestEditMarketplace_RenameRefusesTheScratchNamesAndAt(t *testing.T) {
 			dir := makeDirectoryMarketplace(t, "acme", "widget")
 			m := NewManager(t.TempDir())
 			ctx := context.Background()
-			mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+			mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 			regBefore := readStoreFileIfAny(m.registryPath())
 			mkBefore := readStoreFileIfAny(m.marketplacesFile())
 
@@ -2983,7 +2983,7 @@ func TestRefreshMarketplace_ANoOpRefreshReportsNoChange(t *testing.T) {
 	skipWithoutGit(t)
 	src := makeMarketplaceRepo(t, "acme")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: src})
 	reports := recordStoreChanges(m)
 	later := time.Now().Add(time.Hour).UTC()
 	m.Now = func() time.Time { return later }
@@ -3082,7 +3082,7 @@ func TestRefreshMarketplace_AnUnpinnedDetachedCloneIsRepaired(t *testing.T) {
 func TestRefreshMarketplace_AHealingRecloneReportsAChange(t *testing.T) {
 	skipWithoutGit(t)
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: makeMarketplaceRepo(t, "acme")})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: makeMarketplaceRepo(t, "acme")})
 	realPull := marketplaceGitPull
 	t.Cleanup(func() { marketplaceGitPull = realPull })
 	marketplaceGitPull = func(context.Context, string) error { return errors.New("wedged") }
@@ -3140,7 +3140,7 @@ func TestRefreshMarketplace_AnUpperCaseShaPinIsIntact(t *testing.T) {
 	repo := makeMarketplaceRepo(t, "pinned")
 	pin := strings.ToUpper(gitIn(t, repo, "rev-parse", "HEAD"))
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: repo, Sha: pin})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: repo, Sha: pin})
 	reports := recordStoreChanges(m)
 	if err := m.RefreshMarketplace(context.Background(), "pinned"); err != nil {
 		t.Fatalf("RefreshMarketplace: %v", err)

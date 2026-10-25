@@ -574,7 +574,7 @@ func TestDoctor_MarketplaceStaleWarns(t *testing.T) {
 	skipWithoutGit(t)
 	src := makeMarketplaceRepo(t, "acme")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: src})
 
 	mk, err := m.loadMarketplaces()
 	if err != nil {
@@ -907,7 +907,7 @@ func TestDoctor_ASingleNameNoFilesystemCanHoldIsAPendingRename(t *testing.T) {
 func TestDoctor_RelSourceInADirectoryMarketplaceIsUsedInPlace(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "local", "widget")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	if _, err := m.Install(context.Background(), "widget", "local"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -937,7 +937,7 @@ func TestDoctor_RelSourceInADirectoryMarketplaceIsUsedInPlace(t *testing.T) {
 func TestUpgrade_RelSourceInADirectoryMarketplaceIsANoOp(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "local", "widget")
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	if _, err := m.Install(context.Background(), "widget", "local"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}

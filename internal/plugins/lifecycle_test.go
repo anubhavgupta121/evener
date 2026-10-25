@@ -58,7 +58,7 @@ func TestRemove_DirectorySourceKeepsContents(t *testing.T) {
 	writePlugin(t, filepath.Join(dir, "plugins", "widget"), "widget", nil)
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	entry, err := m.Install(context.Background(), "widget", "local")
 	if err != nil {
 		t.Fatalf("Install: %v", err)

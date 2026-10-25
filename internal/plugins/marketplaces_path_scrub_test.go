@@ -226,7 +226,7 @@ func TestRemoveMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
-	mustAddMarketplace(t, m, ctx, "market-a", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(ctx, t, m, "market-a", Source{Kind: SourceURL, URL: src})
 
 	path := m.marketplacesFile()
 	stubMarketplaceWritePathError(t, path)
@@ -250,7 +250,7 @@ func TestRemoveMarketplaceCloneRemovalFailureNamesNoPath(t *testing.T) {
 	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
-	mustAddMarketplace(t, m, ctx, "market-a", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(ctx, t, m, "market-a", Source{Kind: SourceURL, URL: src})
 
 	clonePath := m.marketplaceDir("market-a")
 	stubMarketplaceRemovePathError(t, clonePath)
@@ -288,7 +288,7 @@ func TestRemoveMarketplaceRetryAfterCloneRemovalFailureReportsNotFound(t *testin
 	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
-	mustAddMarketplace(t, m, ctx, "market-a", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(ctx, t, m, "market-a", Source{Kind: SourceURL, URL: src})
 
 	clonePath := m.marketplaceDir("market-a")
 	stubMarketplaceRemovePathError(t, clonePath)
@@ -316,7 +316,7 @@ func TestRemoveMarketplace_LookupMissTouchesNothingOnDisk(t *testing.T) {
 	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
-	mustAddMarketplace(t, m, ctx, "market-a", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(ctx, t, m, "market-a", Source{Kind: SourceURL, URL: src})
 
 	var removed []string
 	origRemove := marketplaceRemoveAll
@@ -345,7 +345,7 @@ func TestRemoveMarketplace_LookupMissTouchesNothingOnDisk(t *testing.T) {
 // touches no disk beyond LastUpdated), is a plain metadata-save failure.
 func TestRefreshMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "market-a", Source{Kind: SourceDirectory, Path: makeMarketplaceRepoDirNoGit(t, "market-a")})
+	mustAddMarketplace(ctx, t, m, "market-a", Source{Kind: SourceDirectory, Path: makeMarketplaceRepoDirNoGit(t, "market-a")})
 
 	path := m.marketplacesFile()
 	stubMarketplaceWritePathError(t, path)
@@ -369,7 +369,7 @@ func TestEditMarketplaceSaveFailureRollbackSucceedsNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 
 	path := m.marketplacesFile()
 	stubMarketplaceWritePathError(t, path)
@@ -398,7 +398,7 @@ func TestEditMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 
 	swappedIn := m.marketplaceDir("acme")
 	stubMarketplaceWriteError(t, errors.New("boom"))
@@ -424,7 +424,7 @@ func TestEditMarketplaceUnreadableMarketplacesFileNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if err := os.WriteFile(m.marketplacesFile(), []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestEditMarketplaceUnreadableRegistryFileNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if err := os.WriteFile(m.registryPath(), []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestEditMarketplaceUnsupportedSourceKindKeepsItsReason(t *testing.T) {
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
 	ctx := context.Background()
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: "bogus", URL: "https://example.invalid/repo.git"})
 	if err == nil {
@@ -653,7 +653,7 @@ func TestEditMarketplaceFetchFailureNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 
 	staging := m.marketplaceDir(stagingCloneName)
 	orig := marketplaceGitClone
@@ -683,7 +683,7 @@ func TestEditMarketplaceAsideMoveFailureNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 
 	dest := m.marketplaceDir("acme")
 	aside := m.marketplaceDir(asideCloneName)
@@ -707,7 +707,7 @@ func TestEditMarketplaceCloneRenameFailureNamesNoPath(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -738,7 +738,7 @@ func TestEditMarketplaceInstallFailureNamesNoPath(t *testing.T) {
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	repo := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceDirectory, Path: dir})
 
 	dest := m.marketplaceDir("acme")
 	stubMarketplaceRenamePathError(t, dest, func(_, to string) bool { return to == dest })
@@ -767,7 +767,7 @@ func TestEditMarketplaceSwapRollbackFailureNamesNoPath(t *testing.T) {
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 
 	dest := m.marketplaceDir("acme")
 	aside := m.marketplaceDir(asideCloneName)
@@ -810,7 +810,7 @@ func TestEditMarketplaceRenameRegistrySaveFailureNamesRegistryFile(t *testing.T)
 	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -842,7 +842,7 @@ func TestEditMarketplaceRenameBetweenNamesErrorSurvivesIdentity(t *testing.T) {
 	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -879,7 +879,7 @@ func TestEditMarketplaceRenameBetweenNamesRollbackFailureSurvivesIdentity(t *tes
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: repoA})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: repoA})
 	if _, err := m.Install(ctx, "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -936,7 +936,7 @@ func TestBrowseCorruptCatalogNamesNoPath(t *testing.T) {
 	skipWithoutGit(t)
 	src := makeMarketplaceRepo(t, "acme")
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: src})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: src})
 	clone := m.marketplaceDir("acme")
 	if err := os.WriteFile(filepath.Join(clone, ".claude-plugin", "marketplace.json"), []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
@@ -991,7 +991,7 @@ func TestUpgradeCorruptCatalogNamesNoPath(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newQuietManager(t)
-	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(ctx, t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(ctx, "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
