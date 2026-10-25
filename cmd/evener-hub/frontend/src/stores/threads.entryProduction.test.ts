@@ -2540,6 +2540,149 @@ it("a foreground opening whose storage read fails transiently still converges th
   }
 });
 
+it("a foreground opening whose storage reads never resolve hands to the source and settles its recovery", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  const client = connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // Every storage read from here on never resolves: the cache is wedged, not
+  // slow. The chain must not pace against it forever — after its one retry it
+  // hands to the source exactly once and settles, so a consumer awaiting the
+  // pane's convergence (loadOlderTurns awaits the same registration) is never
+  // left waiting on a recovery that cannot end.
+  let withholdAll = false;
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withholdAll) return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  withholdAll = true;
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    const readsBefore = client.calls.filter((call) => call.method === "thread/read").length;
+    const settledWithinBound = await Promise.race([
+      settleEntryTranscriptForTests(ref).then(() => true),
+      new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), 3000);
+      }),
+    ]);
+    expect(settledWithinBound).toBe(true);
+    expect(client.calls.filter((call) => call.method === "thread/read")).toHaveLength(readsBefore + 1);
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
+it("a settle begun while a refused recovery's re-open is still running awaits its convergence", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // Reads 1-2 miss their deadlines and arm the chain; read 3 fails fast (the
+  // transient-error refusal) so the chain hands to the source; the read
+  // after the hand-off's wire read — the re-open that promotes the recorded
+  // window — is held until the test has begun waiting, pinning that the
+  // chain's completion registration survives the hand-off's own tracked
+  // read, which registers and settles a completion of its own.
+  let withheldWindowReads = 0;
+  let failingWindowReads = 0;
+  let holdReopenRead = false;
+  const reopenEntered = deferred<void>();
+  const reopenReleased = deferred<void>();
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (failingWindowReads > 0) {
+      failingWindowReads -= 1;
+      return Promise.reject(new Error("storage transiently failed")) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (holdReopenRead) {
+      holdReopenRead = false;
+      reopenEntered.resolve();
+      return reopenReleased.promise.then(() =>
+        realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)),
+      ) as ReturnType<typeof realGetLatestWindow>;
+    }
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  withheldWindowReads = 2;
+  failingWindowReads = 1;
+  holdReopenRead = true;
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    await reopenEntered.promise;
+    const settle = settleEntryTranscriptForTests(ref);
+    let settledWhileReopenHeld = false;
+    void settle.then(() => {
+      settledWhileReopenHeld = true;
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 150);
+    });
+    // The hand-off's tracked read settles its own completion before the
+    // re-open begins; without the chain's restored registration this settle
+    // would find nothing to await and return with the display unconverged.
+    expect(settledWhileReopenHeld).toBe(false);
+    reopenReleased.resolve();
+    await settle;
+    expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+    expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";

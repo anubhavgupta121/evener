@@ -1195,9 +1195,10 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
 // completion decides the next one — an event-completion chain, not a timer
 // loop — so it stops at the
 // first successful open, when the foreground holder releases, or when the
-// route retires; a fast recovery-needed refusal never re-arms the storage
-// chain, and one that leaves the display suppressed hands to source recovery
-// once. One tracked chain covers every attempt, deduplicated per live
+// route retires, or once the storage chain has had its paced retry: a fast
+// recovery-needed refusal, or a second missed stalled window, hands to
+// source recovery once instead of re-arming against storage that may never
+// answer. One tracked chain covers every attempt, deduplicated per live
 // route, and is registered in trackedHydrationCompletions so a caller
 // awaiting the acquisition's completion (including
 // settleEntryTranscriptForTests) also awaits the display's convergence.
@@ -1219,28 +1220,29 @@ function scheduleEntryOpeningRecovery(ref: string): void {
   if (holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) return;
   pendingOpeningRecoveries.set(ref, route);
   const recovery = (async () => {
-    let handedToSource = false;
+    let stalledAttempts = 0;
     for (;;) {
       const opened = await openEntryTranscript(ref, true);
       if (opened) return;
       if (entryTranscriptRoute(ref) !== route) return; // a retired route's recovery must not outlive it
       if ((refCounts.get(ref) ?? 0) <= 0) return; // holder released: nothing left to recover for
       if (holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) return; // another path healed the display mid-chain
-      if (route.localOpenDeadlineMissed === true) {
+      if (route.localOpenDeadlineMissed === true && stalledAttempts < 1) {
         // The attempt missed the deadline again under sustained slowness; the
-        // pane is still stranded and held, so try once more.
+        // pane is still stranded and held, so give the storage chain one
+        // more paced attempt before turning to the source.
+        stalledAttempts += 1;
         continue;
       }
-      // The attempt refused fast instead of missing the deadline: storage
-      // answered a recovery-needed outright — a transient repository error
+      // The attempt refused fast instead of missing the deadline — storage
+      // answered a recovery-needed outright, and a transient repository error
       // takes openLocal's catch, which resolves without arming another
-      // attempt — or the repository genuinely holds no usable record. A
-      // refusal that leaves the display still body-suppressed must not strand
-      // the pane behind a marker no later open will set: hand to source
-      // recovery once, the same sequence a stalled restore hands to (#4954),
-      // and let the ordinary owner-scoped paths own the rest.
-      if (handedToSource) return;
-      handedToSource = true;
+      // attempt — or it missed its second stalled window and the cache is not
+      // answering at all. A pane that is still suppressed must not strand
+      // behind a marker no later open will set, or behind storage that may
+      // never answer: hand to source recovery once, the same sequence a
+      // stalled restore hands to (#4954), and let the ordinary owner-scoped
+      // paths own the rest.
       route.repository?.beginFreshBaseline();
       publishEntryTranscriptModel(ref);
       try {
@@ -1249,21 +1251,32 @@ function scheduleEntryOpeningRecovery(ref: string): void {
         if (entryTranscriptRoute(ref) !== route) return;
         if ((refCounts.get(ref) ?? 0) <= 0) return;
         await refreshTrackedThread(client, epoch, ref, false, false, undefined, undefined, "foreground");
-        // Mirror the raced recovery's full sequence: the read that replaced
-        // the view is followed by the local re-open that promotes its
-        // restored bodies into the display.
-        if (entryTranscriptRoute(ref) !== route) return;
-        if ((refCounts.get(ref) ?? 0) <= 0) return;
-        await openEntryTranscript(ref, true);
       } catch {
         // A failed source read keeps the ordinary owner-scoped retry.
       }
-      // The hand-off's own open decides what is left: a deadline miss (slow
-      // storage again) re-enters the chain's paced retries; another fast
-      // refusal leaves recovery to the ordinary owner-scoped paths. Read the
-      // marker through the fresh accessor — the hand-off's open re-set it,
-      // and a retired route has no chain to re-enter.
-      if (entryTranscriptRoute(ref)?.localOpenDeadlineMissed === true) continue;
+      if (entryTranscriptRoute(ref) !== route) return;
+      if ((refCounts.get(ref) ?? 0) <= 0) return;
+      // The tracked read registers and then settles its own completion
+      // promise, which would leave a consumer that begins waiting during the
+      // re-open — settleEntryTranscriptForTests, loadOlderTurns — holding
+      // nothing instead of this chain's convergence: register the re-open
+      // itself — the chain's remaining convergence work — before it runs,
+      // and clear that registration once it finishes.
+      const reOpen = (async () => {
+        // Mirror the raced recovery's full sequence: the read that replaced
+        // the view is followed by the local re-open that promotes its
+        // restored bodies into the display. A source response that already
+        // healed the display needs no further cache read to converge.
+        if (!holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) {
+          await openEntryTranscript(ref, true);
+        }
+      })().then(
+        () => undefined,
+        () => undefined,
+      );
+      trackedHydrationCompletions.set(ref, reOpen);
+      await reOpen;
+      if (trackedHydrationCompletions.get(ref) === reOpen) trackedHydrationCompletions.delete(ref);
       return;
     }
   })().then(
