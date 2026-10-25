@@ -38,11 +38,7 @@ func TestCachedToolDefs_MatchUncached(t *testing.T) {
 	}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	defs := sess.allToolDefinitions(0)
 	if len(defs) == 0 {
@@ -87,11 +83,7 @@ func TestCachedToolDefs_AlwaysIncludesCommunicate(t *testing.T) {
 	f := &fakeAdapter{name: "openai"}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	resultName := sess.resultToolName()
 	defs := sess.allToolDefinitions(0)
@@ -115,11 +107,7 @@ func TestCachedToolDefs_IncludesMCPTools(t *testing.T) {
 	f := &fakeAdapter{name: "openai"}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	// Simulate MCP tools by adding to mcpTools and registering.
 	mcpTool := llm.ToolDefinition{
@@ -159,11 +147,7 @@ func TestCachedToolDefs_IncludesRegistryOnlyTools(t *testing.T) {
 	f := &fakeAdapter{name: "openai"}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	// Register a custom tool directly.
 	customTool := tool.RegisteredTool{
@@ -475,11 +459,7 @@ func TestCachedSystemPromptComponents_SkillList(t *testing.T) {
 	f := &fakeAdapter{name: "openai"}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{MemoryStateRoot: t.TempDir(), MemoryProjectID: "fixture-project"})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{MemoryStateRoot: t.TempDir(), MemoryProjectID: "fixture-project"}))
 
 	data, _ := sess.buildPromptData(sess.currentEnv())
 	if len(sess.skills.Entries) == 0 {
@@ -498,11 +478,7 @@ func TestCachedSystemPromptComponents_DoesNotDuplicateMCPToolDescriptions(t *tes
 	f := &fakeAdapter{name: "openai"}
 	c.Register(f)
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	// Add an MCP tool and rebuild to test that the rendered prompt includes it.
 	mcpTool := llm.ToolDefinition{
@@ -683,10 +659,7 @@ func TestSession_CachedProjectDocsUsedInSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
 	defer cancel()
@@ -739,10 +712,7 @@ func TestSession_PersonalDocUsedInSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
 	defer cancel()
@@ -961,10 +931,7 @@ func TestSession_MaybeAutoSave_WritesMetaNotSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
 	defer cancel()

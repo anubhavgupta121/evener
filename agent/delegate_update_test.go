@@ -184,8 +184,7 @@ func TestDelegateUpdateWakesAnIdleRoot(t *testing.T) {
 	}
 
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInputKind(ctx, "", nil, EntryNotification); err != nil {
 		t.Fatalf("root notification turn: %v", err)
 	}
@@ -298,8 +297,7 @@ func TestDelegateUpdateReachesARunningRootAtItsNextModelBoundary(t *testing.T) {
 		}
 	})
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -370,8 +368,7 @@ func TestDelegateSendWaitCarriesAnUpdateAheadOfTheReport(t *testing.T) {
 		}
 	})
 	// TRIPWIRE: half the send's wait; a send that sits out its wait fails here.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -428,8 +425,7 @@ func TestDelegateUpdateWaitsForTheAnswerToAPendingQuestion(t *testing.T) {
 	)
 	root := newMessagingRoot(t, adapter, nil)
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "pick a database", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -503,8 +499,7 @@ func TestDelegateUpdatesArriveInOrderBeforeTheReportInOneTurn(t *testing.T) {
 	}
 	before := len(fixture.adapter.Requests())
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInputKind(ctx, "", nil, EntryNotification); err != nil {
 		t.Fatalf("root notification turn: %v", err)
 	}
@@ -562,8 +557,7 @@ func TestDelegateUpdateWakesAnIdleParentDelegate(t *testing.T) {
 	root := newMessagingRoot(t, adapter, nil)
 	serveSupervisionRootWakes(t, root)
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -643,8 +637,7 @@ func TestDelegateUpdateFromADrainTurnReachesTheRootBeforeTheReport(t *testing.T)
 	root := newMessagingRoot(t, adapter, nil)
 	serveSupervisionRootWakes(t, root)
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -880,8 +873,7 @@ func TestDelegateUpdateArrivingMidTurnIsNotRerunWhenTheMarkerCannotBeWritten(t *
 	root := newMessagingRoot(t, adapter, nil)
 	serveSupervisionRootWakes(t, root)
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -963,8 +955,7 @@ func TestDelegateUpdateReachesARunningParentDelegate(t *testing.T) {
 	})
 	serveSupervisionRootWakes(t, root)
 	// TRIPWIRE: every answer is scripted in process; only a hang reaches it.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := root.ProcessInput(ctx, "start", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}

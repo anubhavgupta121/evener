@@ -737,10 +737,7 @@ func TestLive_Session_PluginAgentsInSystemPrompt(t *testing.T) {
 	}
 
 	// Drain events
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // TRIPWIRE: real LLM session turn; only fires on a genuine hang.
 	defer cancel()
@@ -867,10 +864,7 @@ func TestLive_Session_RealSuperpowersPlugin(t *testing.T) {
 	}
 
 	// Drain events
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	// Verify skills were loaded
 	tddKey := "superpowers:test-driven-development"

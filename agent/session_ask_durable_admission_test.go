@@ -153,11 +153,7 @@ func TestAskUser_DurableAdmissionClosedTranscriptMatchesRestore(t *testing.T) {
 	meta := sess.Meta()
 	dir := sess.stateDir
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 1 {
 		t.Fatalf("restored ask pending count after closed transcript = %d, want 1", got)
 	}
@@ -255,11 +251,7 @@ func TestAskUser_RecoveredStartAdmissionClearsPendingAskLikeRestore(t *testing.T
 	meta := sess.Meta()
 	dir := sess.stateDir
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 0 {
 		t.Fatalf("restored askPendingCount after recovered user record = %d, want 0", got)
 	}
@@ -300,11 +292,7 @@ func TestAskUser_PartialRecoveredStartAfterUserMatchesRestore(t *testing.T) {
 	meta := sess.Meta()
 	dir := sess.stateDir
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 0 {
 		t.Fatalf("restored askPendingCount after partial recovery = %d, want 0", got)
 	}

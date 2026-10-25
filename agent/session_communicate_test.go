@@ -207,11 +207,7 @@ func TestCommunicateRejectsLegacyAwaitReply(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	rawArgs, _ := json.Marshal(map[string]any{
 		"message":     "legacy",
@@ -457,8 +453,7 @@ func TestCommunicate_StatusBatchedWithDelegateDoesNotEndTurn(t *testing.T) {
 	// answered in-process with no I/O; the parent turn normally completes in
 	// well under a second. 30s only fires on a genuine hang, not scheduler
 	// contention under a loaded suite.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "start the observer flow", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -627,11 +622,7 @@ func TestCommunicate_InboxDrainsSteering(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	// Queue a steering message, then call communicate directly through the registry.
 	sess.Steer("change direction: do Y instead")
@@ -909,11 +900,7 @@ func TestCommunicate_DrainedImageSteeringRequeuesForPostToolInjection(t *testing
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	sess.SteerWithImages("look at this", []ImageAttachment{{
 		MediaType: "image/png",
@@ -951,11 +938,7 @@ func TestCommunicate_SchemaRejectsMalformedOutput(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	rawArgs, _ := json.Marshal(map[string]any{
 		"message":  "missing data field",
@@ -984,11 +967,7 @@ func TestCommunicate_SchemaRejectsIntentInsideOutput(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	rawArgs, _ := json.Marshal(map[string]any{
 		"message":  "RESULT_LIST_DIR visible-item.txt",
@@ -1020,11 +999,7 @@ func TestCommunicate_SchemaRejectsTopLevelIntent(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	rawArgs, _ := json.Marshal(map[string]any{
 		"message":  "RESULT_LIST_DIR visible-item.txt",
@@ -1056,11 +1031,7 @@ func TestCommunicate_ModelFacingSchemaOmitsIntent(t *testing.T) {
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai"})
 
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{}))
 
 	var communicate *llm.ToolDefinition
 	var readFile *llm.ToolDefinition

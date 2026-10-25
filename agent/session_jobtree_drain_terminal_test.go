@@ -147,8 +147,7 @@ func TestPostTerminalNotificationTurnEmptyResponseFinishesIdle(t *testing.T) {
 
 	// TRIPWIRE: scripted in-process adapter, no real I/O; 30s only fires on a
 	// genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "do the task", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -313,8 +312,7 @@ func TestOneShotDrainDeliversCompletionThatLandsDuringTheFinalAnswer(t *testing.
 
 	// TRIPWIRE: scripted adapter and a controlled in-process shell; 30s only
 	// fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	res, err := sess.ProcessInput(ctx, "build it and report", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -379,8 +377,7 @@ func TestOneShotDrainKeepsDrainingWhenTheDeliveredCompletionStartsMoreWork(t *te
 
 	// TRIPWIRE: scripted adapter, a controlled shell and one real printf; 30s
 	// only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	res, err := sess.ProcessInput(ctx, "build it and report", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -444,8 +441,7 @@ func TestOneShotDrainReturnsAfterAFinalAnswerThatSawEveryCompletion(t *testing.T
 
 	// TRIPWIRE: scripted adapter and a controlled in-process shell; 30s only
 	// fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	res, err := sess.ProcessInputKind(ctx, "", nil, EntryNotification)
 	if err != nil {
 		t.Fatalf("notification turn: %v", err)
@@ -515,8 +511,7 @@ func TestOneShotDrainDiscardsWatchFramesQueuedBeforeTheFinalAnswer(t *testing.T)
 
 	// TRIPWIRE: scripted adapter and a controlled in-process shell; 30s only
 	// fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	res, err := sess.ProcessInput(ctx, "build it and report", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
