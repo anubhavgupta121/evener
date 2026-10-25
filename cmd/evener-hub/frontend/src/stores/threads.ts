@@ -737,6 +737,12 @@ interface EntryTranscriptRoute extends EntryTranscriptFixtureOptionsForTests {
   // route. Read-only test evidence for why a pane open did or did not need a
   // source read; never consulted by product logic.
   lastLocalOpenStatus?: string;
+  // True when the most recent open's bounded lookup expired before the local
+  // read answered (openEntryTranscript's deadline branch): the recorded window
+  // was never served nor refused, so a held pane's display can still be
+  // body-suppressed with no demand cursor. Distinguishes that strand from the
+  // fast recovery-needed answers a repository without a usable record returns.
+  localOpenDeadlineMissed?: boolean;
 }
 
 let entryTranscriptFixtureForTests: EntryTranscriptRoute | undefined;
@@ -904,6 +910,7 @@ async function openEntryTranscript(ref: string): Promise<boolean> {
   if (!fixture || fixture.ref !== ref || !fixture.repository) return true;
   const repository = fixture.repository;
   const openingToken = beginEntryTranscriptLocalOpening(ref);
+  fixture.localOpenDeadlineMissed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     fixture.reader ??= fixture.repository.attachReader();
@@ -926,6 +933,7 @@ async function openEntryTranscript(ref: string): Promise<boolean> {
     ]);
     if (!result) {
       fixture.lastLocalOpenStatus = "recovery-needed";
+      fixture.localOpenDeadlineMissed = true;
       return false;
     }
     fixture.lastLocalOpenStatus = result.status;
@@ -1089,6 +1097,43 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
   });
   route.cachedOpening = opening;
   await opening;
+}
+
+// A foreground acquisition whose bounded local opening missed its lookup
+// deadline returns with the repository's recorded display standing in for the
+// pane: body-suppressed and without a local demand cursor, because only a
+// successful open promotes recorded bodies into the display — a fresh server
+// read republishes the recorded projection and cannot restore them. One miss
+// self-heals inside ensureThread (the authoritative read publishes, and the
+// success arm's second open promotes the recorded window). Two misses in a
+// row — the sustained-slow-cache case the 250ms lookup deadline makes
+// possible — used to leave the pane that way permanently: nothing re-opened
+// the record, so the thread store's documented bounded source recovery (S02:
+// "the accepted baseline restores display, older paging and live updates")
+// never ran. One tracked re-open closes the gap: bounded by the same lookup
+// deadline, deduplicated per live route, and registered in trackedHydrationCompletions
+// so a caller awaiting the acquisition's completion (including
+// settleEntryTranscriptForTests) also awaits the display's convergence.
+// The route a pending recovery belongs to, keyed by ref: a recovery opened for
+// a retired route must never suppress a fresh acquisition's recovery, and a
+// released-then-reacquired pane (same ref, new route) still gets its own.
+const pendingOpeningRecoveries = new Map<string, EntryTranscriptRoute>();
+
+function scheduleEntryOpeningRecovery(ref: string): void {
+  const route = entryTranscriptRoute(ref);
+  if (!route || route.ref !== ref) return;
+  if (pendingOpeningRecoveries.get(ref) === route) return;
+  if ((refCounts.get(ref) ?? 0) <= 0) return; // no live foreground holder to recover for
+  pendingOpeningRecoveries.set(ref, route);
+  const recovery = openEntryTranscript(ref).then(
+    () => undefined,
+    () => undefined,
+  );
+  trackedHydrationCompletions.set(ref, recovery);
+  void recovery.then(() => {
+    if (pendingOpeningRecoveries.get(ref) === route) pendingOpeningRecoveries.delete(ref);
+    if (trackedHydrationCompletions.get(ref) === recovery) trackedHydrationCompletions.delete(ref);
+  });
 }
 
 function releaseEntryTranscriptReader(ref: string, releaseDisplay = false): void {
@@ -7111,7 +7156,9 @@ export const threadsStore = createStore<ThreadsStoreState>(() => ({
         try {
           const model = await inflight;
           if (model) {
-            await openEntryTranscript(ref);
+            if (!(await openEntryTranscript(ref)) && entryTranscriptRoute(ref)?.localOpenDeadlineMissed === true) {
+              scheduleEntryOpeningRecovery(ref);
+            }
             return;
           }
         } catch (err) {

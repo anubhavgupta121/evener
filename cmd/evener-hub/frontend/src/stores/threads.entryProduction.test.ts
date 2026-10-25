@@ -1852,6 +1852,67 @@ it("ordinary older paging restores the bodies omitted by a 200-row local opening
   await lease.release();
 });
 
+// The 200-row local opening's bounded lookup (SESSION_CACHE_LOOKUP_DEADLINE_MS)
+// can miss under load. One miss self-heals: the authoritative read publishes and
+// the second open promotes the recorded window. Two misses in a row used to
+// strand the pane: ensureThread returned with the display body-suppressed, the
+// local demand cursor gone, and nothing scheduled to converge -- the exact
+// whole-suite flake signature (bodies [] after an awaited ensureThread). This
+// test withholds the repository's window reads so BOTH opens miss their
+// deadline deterministically (the read never resolves; only the store's own
+// bounded deadline resolves the race), then pins the documented load-seam
+// contract: the thread store's bounded source recovery converges the display.
+it("a foreground opening that misses its bounded lookup twice still converges the recorded display", async () => {
+  const storage = cache();
+  // Withhold the first two window reads once armed, so BOTH of the
+  // foreground acquisition's bounded local openings miss their 250ms lookup
+  // deadline deterministically (the withheld promise never resolves; only the
+  // store's own deadline resolves the race). Later reads run normally, so a
+  // scheduled recovery can restore the display without any timing luck.
+  let armedWindowReads = 0;
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    armedWindowReads += 1;
+    return armedWindowReads <= 0
+      ? (new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>)
+      : (realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+          typeof realGetLatestWindow
+        >);
+  };
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  armedWindowReads = -2; // the next two reads (the two opens) miss; then reads recover
+  await threadsStore.getState().ensureThread(ref);
+  // The foreground acquisition returns with the display still body-suppressed;
+  // its bounded recovery must then converge the recorded window, exposing
+  // local demand exactly as an ordinary 200-row local opening does.
+  await settleEntryTranscriptForTests(ref);
+  expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+  expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  threadsStore.getState().releaseThread(ref);
+  await lease.release();
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";
