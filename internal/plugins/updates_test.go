@@ -226,7 +226,7 @@ func TestCheckUpdates_UnreachableRemoteWarnsAndFlagsNothing(t *testing.T) {
 func TestCheckUpdates_RelativeSourcePluginUpgradesFromItsRefreshedMarketplace(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestCheckUpdates_RelativeSourcePluginUpgradesFromItsRefreshedMarketplace(t 
 func TestCheckUpdates_RelativePluginWhoseFolderIsUnchangedIsNotFlagged(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestCheckUpdates_RelativePluginWhoseFolderIsUnchangedIsNotFlagged(t *testin
 func TestCheckUpdates_RelativePluginInstalledWithNoCommitIsFlaggedOnce(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestCheckUpdates_AGitSubdirMarketplaceIsRefreshed(t *testing.T) {
 	makeGitRepo(t, repo, "README.md", "root")
 	m := NewManager(t.TempDir())
 	m.Stderr = &bytes.Buffer{}
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceGitSubdir, URL: repo, Path: "mkt"})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceGitSubdir, URL: repo, Path: "mkt"})
 	if _, err := m.Install(context.Background(), "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}

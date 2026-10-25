@@ -86,7 +86,7 @@ func TestBrowse_SkipsUnsupportedSourceAndReturnsTheRest(t *testing.T) {
 	writePlugin(t, filepath.Join(dir, "plugins", "widget"), "widget", nil)
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceDirectory, Path: dir})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceDirectory, Path: dir})
 	cat, err := m.Browse(context.Background(), "acme")
 	if err != nil {
 		t.Fatalf("Browse: %v, want the npm plugin skipped rather than Browse failing", err)

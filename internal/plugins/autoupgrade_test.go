@@ -68,7 +68,7 @@ func TestUpdateAutoUpgrade_OnlyTouchesAutoUpgradeEnabled(t *testing.T) {
 	mktRepo, pluginRepo := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	first, err := m.Install(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -132,7 +132,7 @@ func TestUpdateAutoUpgrade_NoOpNotReportedAsUpdated(t *testing.T) {
 	mktRepo, _ := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestUpdateAutoUpgrade_UpgradesARelativeSourceWhoseFolderChanged(t *testing.
 	mktRepo, name := makeInstallableMarketplace(t) // "widget" is a "./plugins/widget" relative source
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestUpdateAutoUpgrade_AggregatesFailuresButKeepsGoing(t *testing.T) {
 	mktRepo, brokenRepo, healthyRepo := makeGitBackedMarketplaceTwoPlugins(t, "broken", "healthy")
 
 	m := NewManager(t.TempDir())
-	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
+	mustAddMarketplace(context.Background(), t, m, "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "broken", "acme"); err != nil {
 		t.Fatalf("Install broken: %v", err)
 	}
