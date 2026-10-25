@@ -17,6 +17,7 @@ import { useStore } from "zustand";
 import { useTranscriptViewRegistration } from "../panes/session/transcript/flow/useTranscriptScroll";
 import { installTranscriptGeometry } from "../panes/session/transcript/transcriptReadingGeometryTestUtils";
 import { deleteSession } from "../shell/rail/actions";
+import { emitHistoryUpdated as emitHistoryUpdatedFor } from "../threadTestUtils";
 import { VirtualList, type VirtualListHandle } from "../widgets";
 import { installBackgroundTranscriptOptionsForTests } from "./backgroundTranscriptOptions";
 import { connectionStore } from "./connection";
@@ -434,16 +435,7 @@ function emitHistoryUpdated(
   client: FakeClient,
   rest: Partial<HistoryUpdatedParams> & Pick<HistoryUpdatedParams, "snapshot">,
 ): void {
-  client.emitNotification({
-    method: "history/updated",
-    params: {
-      ref: "local:a",
-      threadId: "thread-a",
-      bootGeneration: "1",
-      epoch: 1,
-      ...rest,
-    },
-  });
+  emitHistoryUpdatedFor(client, "local:a", "thread-a", rest);
 }
 
 it("ordinary disk-only opening displays the window and both cached pages before source success, withholds paging, then uses the settled cursor", async () => {
@@ -2343,30 +2335,33 @@ it("ordinary older paging restores the bodies omitted by a 200-row local opening
 
 // The 200-row local opening's bounded lookup (SESSION_CACHE_LOOKUP_DEADLINE_MS)
 // can miss under load. One miss self-heals: the authoritative read publishes and
-// the second open promotes the recorded window. Two misses in a row used to
-// strand the pane: ensureThread returned with the display body-suppressed, the
+// the second open promotes the recorded window. Sustained slowness strands the
+// pane instead: ensureThread returns with the display body-suppressed, the
 // local demand cursor gone, and nothing scheduled to converge -- the exact
-// whole-suite flake signature (bodies [] after an awaited ensureThread). This
-// test withholds the repository's window reads so BOTH opens miss their
-// deadline deterministically (the read never resolves; only the store's own
-// bounded deadline resolves the race), then pins the documented load-seam
-// contract: the thread store's bounded source recovery converges the display.
-it("a foreground opening that misses its bounded lookup twice still converges the recorded display", async () => {
+// whole-suite flake signature (bodies [] after an awaited ensureThread). The
+// runner below withholds the repository's window reads so every one of the
+// acquisition's bounded local openings misses its deadline deterministically
+// (the withheld promise never resolves; only the store's own bounded deadline
+// resolves each race), then pins the documented load-seam contract: the thread
+// store's bounded source recovery converges the display, re-arming for as
+// many misses as the sustained slowness produced.
+async function convergesAfterMissedLookups(misses: number): Promise<void> {
   const storage = cache();
-  // Withhold the first two window reads once armed, so BOTH of the
-  // foreground acquisition's bounded local openings miss their 250ms lookup
-  // deadline deterministically (the withheld promise never resolves; only the
-  // store's own deadline resolves the race). Later reads run normally, so a
-  // scheduled recovery can restore the display without any timing luck.
-  let armedWindowReads = 0;
+  // Withhold the first `misses` window reads once armed, so every one of the
+  // foreground acquisition's bounded local openings (and, past two, the
+  // recovery's own bounded re-open) misses its 250ms lookup deadline
+  // deterministically. Later reads run normally, so a scheduled recovery can
+  // restore the display without any timing luck.
+  let withheldWindowReads = 0;
   const realGetLatestWindow = storage.getLatestWindow.bind(storage);
   (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
-    armedWindowReads += 1;
-    return armedWindowReads <= 0
-      ? (new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>)
-      : (realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
-          typeof realGetLatestWindow
-        >);
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
   };
   setProductionEntryCacheForTests(storage);
   const ref = "local:a";
@@ -2390,70 +2385,24 @@ it("a foreground opening that misses its bounded lookup twice still converges th
       .filter(Boolean);
   expect(bodies()).toEqual([]);
 
-  armedWindowReads = -2; // the next two reads (the two opens) miss; then reads recover
+  withheldWindowReads = misses;
   await threadsStore.getState().ensureThread(ref);
   // The foreground acquisition returns with the display still body-suppressed;
-  // its bounded recovery must then converge the recorded window, exposing
+  // its bounded recovery must then converge the recorded window, no matter
+  // how many times the deadline missed while the pane stayed held, exposing
   // local demand exactly as an ordinary 200-row local opening does.
   await settleEntryTranscriptForTests(ref);
   expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
   expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
   threadsStore.getState().releaseThread(ref);
   await lease.release();
-});
+}
 
-it("a foreground opening that misses its bounded lookup three times still converges the recorded display", async () => {
-  const storage = cache();
-  // Sustained slowness does not stop at two: the recovery's own bounded open
-  // reads the same cache and can miss the same 250ms deadline a third time.
-  // Withhold the first THREE window reads once armed, so both of the
-  // foreground acquisition's opens AND the first recovery attempt miss
-  // deterministically (the withheld promise never resolves; only the store's
-  // own deadline resolves each race). Later reads run normally, so a recovery
-  // that re-arms while the pane is still stranded restores the display
-  // without any timing luck.
-  let armedWindowReads = 0;
-  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
-  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
-    armedWindowReads += 1;
-    return armedWindowReads <= 0
-      ? (new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>)
-      : (realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
-          typeof realGetLatestWindow
-        >);
-  };
-  setProductionEntryCacheForTests(storage);
-  const ref = "local:a";
-  const read = response(
-    ref,
-    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
-  );
-  read.snapshot = { incarnation: "inc-a", length: 225 };
-  connect(read);
-  const lease = acquireBackgroundThread(ref);
-  await lease.ready;
-  await settleEntryTranscriptForTests(ref);
-  const key = entryHistoryKey({ ...identity, clientId: location.origin });
-  expect(await storage.getLatest(key, 300)).toHaveLength(225);
-  const bodies = () =>
-    threadsStore
-      .getState()
-      .threads.get(ref)
-      ?.turns.flatMap((turn) => turn.items)
-      .map((item) => item.text)
-      .filter(Boolean);
-  expect(bodies()).toEqual([]);
+it("a foreground opening that misses its bounded lookup twice still converges the recorded display", () =>
+  convergesAfterMissedLookups(2));
 
-  armedWindowReads = -3; // the next three reads (two opens plus the first recovery) miss; then reads recover
-  await threadsStore.getState().ensureThread(ref);
-  // Convergence must not depend on how many times the deadline missed while
-  // the pane stayed held: the recovery keeps re-arming until an open succeeds.
-  await settleEntryTranscriptForTests(ref);
-  expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
-  expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
-  threadsStore.getState().releaseThread(ref);
-  await lease.release();
-});
+it("a foreground opening that misses its bounded lookup three times still converges the recorded display", () =>
+  convergesAfterMissedLookups(3));
 
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();

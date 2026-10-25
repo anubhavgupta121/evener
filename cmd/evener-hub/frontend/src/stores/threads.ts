@@ -1255,13 +1255,14 @@ const pendingOpeningRecoveries = new Map<string, EntryTranscriptRoute>();
 function scheduleEntryOpeningRecovery(ref: string): void {
   const route = entryTranscriptRoute(ref);
   if (!route || route.ref !== ref) return;
+  if (pendingOpeningRecoveries.get(ref) === route) return;
+  if ((refCounts.get(ref) ?? 0) <= 0) return; // no live foreground holder to recover for
+  if (route.localOpenDeadlineMissed !== true) return; // the open refused fast or handed to another path: not this chain's strand
   // The chain exists to promote recorded bodies into a display that is still
   // body-suppressed; a display another path (main's source recovery, a newer
   // open) already healed needs no re-open churn against storage that may
   // never answer.
   if (holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) return;
-  if (pendingOpeningRecoveries.get(ref) === route) return;
-  if ((refCounts.get(ref) ?? 0) <= 0) return; // no live foreground holder to recover for
   pendingOpeningRecoveries.set(ref, route);
   const recovery = (async () => {
     for (;;) {
@@ -7413,9 +7414,7 @@ export const threadsStore = createStore<ThreadsStoreState>(() => ({
         try {
           const model = await inflight;
           if (model) {
-            if (!(await openEntryTranscript(ref)) && entryTranscriptRoute(ref)?.localOpenDeadlineMissed === true) {
-              scheduleEntryOpeningRecovery(ref);
-            }
+            if (!(await openEntryTranscript(ref))) scheduleEntryOpeningRecovery(ref);
             return;
           }
         } catch (err) {

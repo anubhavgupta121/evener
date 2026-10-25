@@ -22,9 +22,9 @@ import (
 // discarded, plus the background context its caller drives calls with.
 func newQuietManager(t *testing.T) (*Manager, context.Context) {
 	t.Helper()
-	m := NewManager(t.TempDir())
+	m, ctx := newManagerCtx(t)
 	m.Stderr = io.Discard
-	return m, context.Background()
+	return m, ctx
 }
 
 // stubMarketplaceWriteError fails every store atomic write with err and
@@ -89,14 +89,7 @@ func stubMarketplaceRemovePathError(t *testing.T, path string) {
 // real *fs.PathError naming path, letting every other rename through.
 func stubMarketplaceRenamePathError(t *testing.T, path string, matches func(from, to string) bool) {
 	t.Helper()
-	orig := marketplaceRename
-	t.Cleanup(func() { marketplaceRename = orig })
-	marketplaceRename = func(from, to string) error {
-		if matches(from, to) {
-			return &fs.PathError{Op: "rename", Path: path, Err: errors.New("permission denied")}
-		}
-		return orig(from, to)
-	}
+	stubMarketplaceRenameError(t, &fs.PathError{Op: "rename", Path: path, Err: errors.New("permission denied")}, matches)
 }
 
 // stubMarketplaceRenameError fails the rename matches names with err, letting

@@ -281,13 +281,12 @@ func adapterInstance(name string) registry.Provider {
 // --- turn driving ---
 
 // tripwireCtx returns the standard turn context for scripted-adapter tests.
-// TRIPWIRE: scripted in-process adapter, no real I/O; the 30-second ceiling
-// only fires on a genuine hang. Cancel is registered with t.Cleanup, so the
-// context lives for the whole test exactly as a deferred cancel would have.
 func tripwireCtx(t *testing.T) context.Context {
 	t.Helper()
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a
-	// genuine hang, not on scheduler contention under a loaded suite.
+	// TRIPWIRE: scripted in-process adapter, no real I/O; the 30-second
+	// ceiling only fires on a genuine hang, not on scheduler contention
+	// under a loaded suite. Cancel is registered with t.Cleanup, so the
+	// context lives for the whole test exactly as a deferred cancel would.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	return ctx

@@ -1,4 +1,9 @@
-import { ALL_CAPABILITIES as CAPABILITIES, type TestThreadOverrides, testThread } from "../threadTestUtils";
+import {
+  ALL_CAPABILITIES as CAPABILITIES,
+  emitHistoryUpdated as emitHistoryUpdatedFor,
+  type TestThreadOverrides,
+  testThread,
+} from "../threadTestUtils";
 import "fake-indexeddb/auto";
 import type {
   AnyNotification,
@@ -163,16 +168,7 @@ function emitHistoryUpdated(
   client: FakeClient,
   rest: Partial<HistoryUpdatedParams> & Pick<HistoryUpdatedParams, "snapshot">,
 ): void {
-  client.emitNotification({
-    method: "history/updated",
-    params: {
-      threadId: "thr_ref_a",
-      ref: "ref_a",
-      bootGeneration: "1",
-      epoch: 1,
-      ...rest,
-    },
-  });
+  emitHistoryUpdatedFor(client, "ref_a", "thr_ref_a", rest);
 }
 
 describe("useThreadsStore.ensureThread", () => {

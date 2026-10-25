@@ -1,3 +1,4 @@
+import { appliedReceipt } from "../mutationReceiptTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES, type TestThreadOverrides, testThread } from "../threadTestUtils";
 import { acquireSessionActivity } from "./sessionActivity";
 import { activitySummary } from "./sessionActivityTestUtils";
@@ -194,12 +195,7 @@ async function flushIndexedDBUntil(done: () => boolean, maxTurns = 30): Promise<
 }
 
 function mutationReceipt(clientMutationId: string, disposition = "applied") {
-  return {
-    clientMutationId,
-    disposition,
-    threadId: "thr_ref_a",
-    projectionState: "reflected",
-  };
+  return appliedReceipt(clientMutationId, "thr_ref_a", { disposition });
 }
 
 // The hydration retry scheduler is injected so every retry in this suite is

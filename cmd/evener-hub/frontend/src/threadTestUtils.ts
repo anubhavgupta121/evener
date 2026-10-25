@@ -1,4 +1,6 @@
-import type { QueueState, Thread, ThreadCapabilities } from "@evener/appwire-client";
+import type { HistoryUpdatedParams, QueueState, Thread, ThreadCapabilities } from "@evener/appwire-client";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import { wireThread } from "@evener/appwire-client/testing/notifications";
 
 /**
  * ALL_CAPABILITIES is the every-permission ThreadCapabilities set the thread
@@ -29,32 +31,42 @@ export type TestThreadOverrides = Omit<Partial<Thread>, "evener"> & {
 
 /**
  * testThread builds a Thread fixture with stable ids derived from `ref`, the
- * all-permission capability set, and per-field overrides. `evener.queue`
- * overrides merge onto `{ revision: 0 }`; every other field replaces wholesale.
+ * all-permission capability set, and per-field overrides, delegating the
+ * wire's base Thread shape to the SDK testing package's wireThread.
+ * `evener.queue` overrides merge onto `{ revision: 0 }`; every other field
+ * replaces wholesale.
  */
 export function testThread(ref: string, overrides: TestThreadOverrides = {}): Thread {
   const { evener, ...threadOverrides } = overrides;
   const threadID = threadOverrides.id ?? `thr_${ref}`;
+  const wire = wireThread(ref);
   return {
-    id: threadID,
-    sessionId: `sess_${ref}`,
-    preview: "test",
-    ephemeral: false,
-    modelProvider: "anthropic/claude-sonnet-4-5",
-    createdAt: 1000,
-    updatedAt: 1000,
-    status: { type: "idle" },
-    cwd: "/tmp/project",
-    cliVersion: "1.0.0",
-    source: "evener",
+    ...wire,
+    ...threadOverrides,
     evener: {
-      ref,
+      ...wire.evener,
       instanceId: threadID,
       mutationStateAuthoritative: true,
-      capabilities: ALL_CAPABILITIES,
       ...evener,
-      queue: { revision: 0, ...evener?.queue },
+      queue: { ...wire.evener.queue, ...evener?.queue },
     },
-    ...threadOverrides,
   };
+}
+
+/**
+ * emitHistoryUpdated emits the wire's history/updated notification for the
+ * caller's fixture identity, with the standard boot generation and epoch and
+ * whatever params the test layers on top. Store tests keep a one-line wrapper
+ * holding their identity defaults.
+ */
+export function emitHistoryUpdated(
+  client: FakeClient,
+  ref: string,
+  threadId: string,
+  rest: Partial<HistoryUpdatedParams> & Pick<HistoryUpdatedParams, "snapshot">,
+): void {
+  client.emitNotification({
+    method: "history/updated",
+    params: { ref, threadId, bootGeneration: "1", epoch: 1, ...rest },
+  });
 }

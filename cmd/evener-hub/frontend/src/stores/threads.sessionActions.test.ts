@@ -1315,12 +1315,7 @@ describe("useThreadsStore session actions (setModel/setReasoningEffort/setGoal/r
   });
 });
 function mutationReceipt(clientMutationId: string, disposition = "applied") {
-  return {
-    clientMutationId,
-    disposition,
-    threadId: "thr_ref_a",
-    projectionState: "reflected",
-  };
+  return appliedReceipt(clientMutationId, "thr_ref_a", { disposition });
 }
 
 describe("useThreadsStore.send", () => {
