@@ -5,6 +5,7 @@
 import type {
 	AnyNotification,
 	EvenerThread,
+	HistoryUpdatedParams,
 	InputItem,
 	MutationReceipt,
 	OverlayItem,
@@ -12,8 +13,11 @@ import type {
 	ThreadCapabilities,
 	ThreadItem,
 	ThreadItemPosition,
+	ThreadQueueChangedParams,
+	ThreadStatusChangedParams,
 	ThreadTurnsListResponse,
 	Turn,
+	WarningParams,
 } from "@evener/appwire-client";
 import {
 	hydrateThread,
@@ -111,12 +115,104 @@ const ALL_TRUE_CAPS: ThreadCapabilities = {
 	pageBefore: true,
 };
 
+// The read a test scripts before opening the store: one conversation over an
+// empty activity view, with the projection's optional fields as overrides.
+function readResult(
+	conversation: MobileConversation,
+	over: Partial<ConversationReadProjection> = {},
+): ConversationReadProjection {
+	return {
+		olderCursor: null,
+		conversation,
+		activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
+		...over,
+	};
+}
+
+// The eviction family's standard projected open: a versioned thread-1 read
+// whose row payload the caller scripts, opened through the standard sink.
+async function openVersionedRows(olderCursor: string, over: Partial<MobileConversation> = {}) {
+	const service = new FakeConversationService();
+	const sink = createFakeSink();
+	const store = createConversationStore();
+	service.readProjectionResult = readResult(
+		makeConversation({
+			threadId: "thread-1",
+			instanceId: "instance-1",
+			usage: null,
+			olderCursor,
+			...over,
+		}),
+		{ olderCursor },
+	);
+	await store.getState().openProjected(service, sink, "ref-1");
+	return { service, sink, store };
+}
+
 // The hub refusing a mutation whose capability moved on without a status frame
 // this client saw (F11: a real WireError, matched by identity).
 const refusal = () =>
 	new WireError("action unavailable", -32000, {
 		evenerErrorInfo: "actionUnavailable",
 	}) as Error;
+
+// One-line feeds for the notification frames these tests push through
+// applyNotification: each builder writes one wire-true shape once, with the
+// fixture identity (thread-1/ref-1, boot generation "1", epoch 1,
+// inc-1/length 1) every converted call site already used. Site-specific
+// fields ride in the trailing overrides object and win over the defaults,
+// so a site's input stays its own.
+function historyUpdated(
+	store: ReturnType<typeof createConversationStore>,
+	over: Partial<HistoryUpdatedParams> = {},
+): void {
+	store.getState().applyNotification({
+		method: "history/updated",
+		params: {
+			threadId: "thread-1",
+			ref: "ref-1",
+			bootGeneration: "1",
+			epoch: 1,
+			snapshot: { incarnation: "inc-1", length: 1 },
+			...over,
+		},
+	} as AnyNotification);
+}
+
+function resync(store: ReturnType<typeof createConversationStore>, threadId = "thread-1", ref = "ref-1"): void {
+	store.getState().applyNotification({
+		method: "evener/thread/resync",
+		params: { threadId, ref },
+	} as AnyNotification);
+}
+
+function warning(store: ReturnType<typeof createConversationStore>, over: Partial<WarningParams> = {}): void {
+	store.getState().applyNotification({
+		method: "warning",
+		params: { threadId: "thread-1", ref: "ref-1", ...over },
+	} as AnyNotification);
+}
+
+function statusChanged(
+	store: ReturnType<typeof createConversationStore>,
+	status: ThreadStatusChangedParams["status"],
+	over: Partial<ThreadStatusChangedParams> = {},
+): void {
+	store.getState().applyNotification({
+		method: "thread/status/changed",
+		params: { threadId: "thread-1", ref: "ref-1", status, ...over },
+	} as AnyNotification);
+}
+
+function queueChanged(
+	store: ReturnType<typeof createConversationStore>,
+	queue: ThreadQueueChangedParams["queue"],
+): void {
+	store.getState().applyNotification({
+		method: "thread/queueChanged",
+		params: { threadId: "thread-1", ref: "ref-1", queue },
+	} as AnyNotification);
+}
 
 // The one signal makeConversation's fixture conversion catches: a row kind
 // the wire seam genuinely refuses because no wire shape this helper builds
@@ -477,6 +573,17 @@ function wirePageFromRows(rows: MobileConversation["items"]): ThreadTurnsListRes
 	return { data, nextCursor: undefined };
 }
 
+// Scripts loadOlder's answer through the wire-page seam: one turns page whose
+// cursor is also the cursor the next request sees.
+function scriptOlderTurns(service: FakeConversationService, turns: Turn[], cursor?: string): void {
+	service.olderItems = { turnsPage: turnsPage(turns, cursor), nextCursor: cursor };
+}
+
+// Scripts loadOlder's answer through the row seam: one page of rows.
+function scriptOlderRows(service: FakeConversationService, items: MobileConversation["items"], cursor?: string): void {
+	service.olderItems = { items, nextCursor: cursor };
+}
+
 // A fake ConversationService that returns scripted values without any network.
 class FakeConversationService implements LiveConversationService {
 	ref: string | null = null;
@@ -556,6 +663,7 @@ class FakeConversationService implements LiveConversationService {
 				},
 			};
 		}
+
 		return {
 			conversation: {
 				...this.hydratedUnder(ref, this.openConv),
@@ -777,10 +885,7 @@ describe("ConversationStore", () => {
 	describe("loadOlder", () => {
 		it("sets loadingOlder and prepends items", async () => {
 			const service = new FakeConversationService();
-			service.olderItems = {
-				items: [{ kind: "user", id: "older-result", text: "older" }],
-				nextCursor: "next",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "older-result", text: "older" }], "next");
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
 			// Set a cursor so loadOlder has a page to request.
@@ -815,8 +920,7 @@ describe("ConversationStore", () => {
 		// (projectOlderTurns and its fake Thread are gone), so the page's own
 		// wire turns are the whole input.
 		it("renders an older page's rows from the merged model", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "completed", items: [] })],
 				}),
@@ -825,23 +929,21 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "m1",
-								turnId: "t0",
-								type: "userMessage",
-								text: "page text",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "m1",
+							turnId: "t0",
+							type: "userMessage",
+							text: "page text",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			if (result.status !== "loaded") return;
@@ -862,8 +964,7 @@ describe("ConversationStore", () => {
 			// rule (newer field ?? older field) folds the page's images in — the
 			// web's rule (decision 2), now that rows project from the model and
 			// no row filter or model-side strip runs ahead of the merge.
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -886,25 +987,19 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "user",
-								transcriptKey: "user",
-								turnId: "t0",
-								type: "userMessage",
-								text: "look",
-								status: "completed",
-								images: [{ type: "image", mediaType: "image/png", data: "AQID" }],
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "user",
+						transcriptKey: "user",
+						turnId: "t0",
+						type: "userMessage",
+						text: "look",
+						status: "completed",
+						images: [{ type: "image", mediaType: "image/png", data: "AQID" }],
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).find((row) => row.kind === "attachments")).toMatchObject({
 				id: "user:attachments",
@@ -921,8 +1016,7 @@ describe("ConversationStore", () => {
 			// service-side projection filter died with projectOlderTurns.
 			const askArgs =
 				'{"questions":[{"header":"Choose","question":"Pick one","options":[{"label":"A","detail":"da"},{"label":"B","detail":"db"}],"multi_select":false}]}';
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					evener: {
 						ref: "ref-1",
@@ -943,13 +1037,9 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[wireTurnFragment("t0", [askUserItem("ask-old", askArgs), userMessageItem("reply", "the answer")])],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [askUserItem("ask-old", askArgs), userMessageItem("reply", "the answer")]),
+			]);
 			await store.getState().loadOlder(service);
 			// The page's settled ask is history: a tool row, never a question row.
 			expect(rows(store).some((row) => row.kind === "question" && row.id === "ask-old")).toBe(false);
@@ -1604,14 +1694,7 @@ describe("ConversationStore", () => {
 			expect(store.getState().pendingMutations).toHaveLength(1);
 
 			// The model now reflects the id through a live frame — no durable read.
-			store.getState().applyNotification({
-				method: "thread/queueChanged",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					queue: { revision: 2, clientMutationIds: ["cmid-1"] },
-				},
-			} as AnyNotification);
+			queueChanged(store, { revision: 2, clientMutationIds: ["cmid-1"] });
 			expect(store.getState().pendingMutations).toEqual([]);
 		});
 
@@ -1924,17 +2007,10 @@ describe("ConversationStore", () => {
 			await yieldMicrotask();
 			expect(store.getState().pendingMutations?.map((row) => row.id)).toEqual(["cmid-3"]);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 2 },
-					items: [{ type: "user", id: "item-1", turnId: "turn-1", clientMutationId: "cmid-3" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				snapshot: { incarnation: "inc-1", length: 2 },
+				items: [{ type: "user", id: "item-1", turnId: "turn-1", clientMutationId: "cmid-3" }],
+			});
 
 			await yieldMicrotask();
 			expect(settled).toEqual([["cmid-3"]]);
@@ -1951,17 +2027,12 @@ describe("ConversationStore", () => {
 			});
 			await yieldMicrotask();
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-other",
-					ref: "ref-other",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 2 },
-					items: [{ type: "user", id: "item-1", turnId: "turn-1", clientMutationId: "cmid-3" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				threadId: "thread-other",
+				ref: "ref-other",
+				snapshot: { incarnation: "inc-1", length: 2 },
+				items: [{ type: "user", id: "item-1", turnId: "turn-1", clientMutationId: "cmid-3" }],
+			});
 
 			await yieldMicrotask();
 			expect(settled).toEqual([]);
@@ -2061,14 +2132,7 @@ describe("ConversationStore", () => {
 					sawStale = true;
 				}
 			});
-			store.getState().applyNotification({
-				method: "thread/queueChanged",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					queue: { revision: 2, clientMutationIds: ["cmid-1"] },
-				},
-			} as AnyNotification);
+			queueChanged(store, { revision: 2, clientMutationIds: ["cmid-1"] });
 			unsubscribe();
 
 			expect(sawStale).toBe(false);
@@ -2268,14 +2332,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "thread/status/changed",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					status: { type: "running" },
-				},
-			} as AnyNotification);
+			statusChanged(store, { type: "running" });
 			expect(store.getState().conversation?.status.type).toBe("running");
 		});
 
@@ -2326,17 +2383,9 @@ describe("ConversationStore", () => {
 			service.openConv = makeConversation({ status: { type: "idle" } }, true);
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "default", status: "inProgress" }],
+			});
 			// The status is thread/status/changed's, never turn/started's (the
 			// status frame rides right behind it); the turn id is this frame's.
 			expect(store.getState().conversation?.status.type).toBe("idle");
@@ -2348,37 +2397,21 @@ describe("ConversationStore", () => {
 			service.openConv = makeConversation({ status: { type: "active" } });
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "default", status: "running" }],
+			});
 			expect(store.getState().conversation?.status.type).toBe("active");
 			// Now complete
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "default",
-							status: "completed",
-							usage: { totalTokens: 100 },
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "default",
+						status: "completed",
+						usage: { totalTokens: 100 },
+					},
+				],
+			});
 			// A completed turn is followed by its status frame (idle at session end,
 			// active at an inline boundary); this frame leaves the status alone.
 			expect(store.getState().conversation?.status.type).toBe("active");
@@ -2443,17 +2476,9 @@ describe("ConversationStore", () => {
 			service.openConv = makeConversation({ status: { type: "active" }, activeTurnId: "t1" }, true);
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "rate limited" } }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "rate limited" } }],
+			});
 			// The failed completion ends the turn; its status frame has not arrived.
 			expect(store.getState().conversation?.status.type).toBe("active");
 			expect(store.getState().conversation?.activeTurnId).toBeUndefined();
@@ -2492,17 +2517,9 @@ describe("ConversationStore", () => {
 			await store.getState().open(service, "ref-1");
 
 			// t1 fails; its queued message has not started yet.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "rate limited" } }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "rate limited" } }],
+			});
 			const failed = store.getState().conversation;
 			if (failed === null) throw new Error("conversation gone");
 			expect(failed.status.type).toBe("active");
@@ -2540,17 +2557,9 @@ describe("ConversationStore", () => {
 			expect(drained?.queue?.depth).toBe(0);
 			expect(drained?.activeTurnId).toBeUndefined();
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			const resumed = store.getState().conversation;
 			expect(resumed?.status.type).toBe("active");
 			expect(resumed?.activeTurnId).toBe("t2");
@@ -2566,17 +2575,9 @@ describe("ConversationStore", () => {
 			service.openConv = makeConversation({ status: { type: "active" }, activeTurnId: undefined });
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t-x", itemsView: "", status: "failed", error: { message: "boom" } }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t-x", itemsView: "", status: "failed", error: { message: "boom" } }],
+			});
 			expect(store.getState().conversation?.status.type).toBe("active");
 			store.getState().applyNotification({
 				method: "thread/status/changed",
@@ -2588,17 +2589,9 @@ describe("ConversationStore", () => {
 			other.openConv = makeConversation({ status: { type: "active" }, activeTurnId: "t2" });
 			const store2 = createConversationStore();
 			await store2.getState().open(other, "ref-1");
-			store2.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "late" } }],
-				},
-			} as AnyNotification);
+			historyUpdated(store2, {
+				turns: [{ id: "t1", itemsView: "", status: "failed", error: { message: "late" } }],
+			});
 			expect(store2.getState().conversation?.status.type).toBe("active");
 			expect(store2.getState().conversation?.activeTurnId).toBe("t2");
 		});
@@ -2641,42 +2634,26 @@ describe("ConversationStore", () => {
 			// Two turns complete, each carrying its own (much smaller) per-turn
 			// usage. The cumulative conversation usage set by the projection must
 			// survive both — it is not the sum or replacement of per-turn totals.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "default",
-							status: "completed",
-							usage: { totalTokens: 40, inputTokens: 10 },
-						},
-					],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t2",
-							itemsView: "default",
-							status: "completed",
-							usage: { totalTokens: 55, inputTokens: 15 },
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "default",
+						status: "completed",
+						usage: { totalTokens: 40, inputTokens: 10 },
+					},
+				],
+			});
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t2",
+						itemsView: "default",
+						status: "completed",
+						usage: { totalTokens: 55, inputTokens: 15 },
+					},
+				],
+			});
 			expect(store.getState().conversation?.usage?.totalTokens).toBe(500);
 			expect(store.getState().conversation?.usage?.inputTokens).toBe(300);
 		});
@@ -2725,14 +2702,7 @@ describe("ConversationStore", () => {
 			expect(store.getState().conversation?.threadId).toBe("thread-2");
 			// A stale notification for ref-1 should be dropped: ref-2 keeps the
 			// status it opened with rather than taking ref-1's idle.
-			store.getState().applyNotification({
-				method: "thread/status/changed",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					status: { type: "idle" },
-				},
-			} as AnyNotification);
+			statusChanged(store, { type: "idle" });
 			expect(store.getState().conversation?.threadId).toBe("thread-2");
 			expect(store.getState().conversation?.status.type).toBe("active");
 		});
@@ -2743,8 +2713,7 @@ describe("ConversationStore", () => {
 		// as a reread: a frame delivered before its response is already folded
 		// into the snapshot, so it is neither replayed nor a reason to reread.
 		it("does not reread for a frame that precedes the initial read's response", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ status: { type: "idle" } }));
+			const service = serviceForThread(makeThread({ status: { type: "idle" } }));
 			const store = createConversationStore();
 			const ctrl = makeControlledRead(service);
 			const opening = store.getState().openProjected(service, createFakeSink(), "ref-1");
@@ -2772,11 +2741,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-proj" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-proj" }), {
 				activity: activityView,
 				olderCursor: "cursor-initial",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(store.getState().conversation?.threadId).toBe("thread-proj");
 			expect(store.getState().olderCursor).toBe("cursor-initial");
@@ -2797,16 +2765,7 @@ describe("ConversationStore", () => {
 		it("preserves olderCursor across openProjected", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation(),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "page-1",
-			};
+			service.readProjectionResult = readResult(makeConversation(), { olderCursor: "page-1" });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().olderCursor).toBe("page-1");
 		});
@@ -2817,16 +2776,7 @@ describe("ConversationStore", () => {
 			// Set draft from a prior thread
 			store.getState().setDraft("old thread draft");
 			// Open a new projected conversation
-			service.readProjectionResult = {
-				conversation: makeConversation(),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation(), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Draft should be reset — not carried from the prior thread.
 			expect(store.getState().draft).toBe("");
@@ -2842,11 +2792,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			// Emit a notification that both stores should handle
 			const n: AnyNotification = {
@@ -3072,20 +3021,8 @@ describe("ConversationStore", () => {
 				instanceId: "instance-1",
 				items: [{ kind: "user", id: "new", text: "new", position: { entry: 2, item: 0 } }],
 			});
-			service.readProjectionResult = {
-				conversation: latest,
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "cursor-1",
-			};
-			service.olderItems = {
-				items: [{ kind: "user", id: "old", text: "old", position: { entry: 1, item: 0 } }],
-				nextCursor: "cursor-2",
-			};
+			service.readProjectionResult = readResult(latest, { olderCursor: "cursor-1" });
+			scriptOlderRows(service, [{ kind: "user", id: "old", text: "old", position: { entry: 1, item: 0 } }], "cursor-2");
 			await store.getState().openProjected(service, sink, "ref-1");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.items.map((item) => item.id)).toEqual(["old", "new"]);
@@ -3120,16 +3057,7 @@ describe("ConversationStore", () => {
 				items: [{ kind: "user", id: "replacement", text: "replacement" }],
 			});
 			service.readProjectionBlock = null;
-			service.readProjectionResult = {
-				conversation: replacement,
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "fresh-cursor",
-			};
+			service.readProjectionResult = readResult(replacement, { olderCursor: "fresh-cursor" });
 			await store.getState().rehydrate(service, sink);
 			expect(store.getState().conversation?.items.map((item) => item.id)).toEqual(["replacement"]);
 			expect(store.getState().olderCursor).toBe("fresh-cursor");
@@ -3632,53 +3560,37 @@ describe("ConversationStore", () => {
 	describe("item/started inserts/replaces authoritative item", () => {
 		it("inserts a new assistant item from item/started", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "agentMessage",
-								id: "item-a",
-								text: "Hello",
-								status: "inProgress",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "agentMessage",
+							id: "item-a",
+							text: "Hello",
+							status: "inProgress",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "item-a")).toMatchObject({ kind: "assistant", markdown: "Hello" });
 		});
 
 		it("replaces an existing item when item/started carries the same id", async () => {
 			const { store } = await openRunningTurn([agentMessageItem("item-a", "old", "inProgress")], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "agentMessage",
-								id: "item-a",
-								text: "new text",
-								status: "inProgress",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "agentMessage",
+							id: "item-a",
+							text: "new text",
+							status: "inProgress",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "item-a")).toMatchObject({ kind: "assistant", markdown: "new text" });
 		});
 
@@ -3733,27 +3645,19 @@ describe("ConversationStore", () => {
 				true,
 			);
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "wire-new",
-								transcriptKey: "stable-message",
-								text: "new",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "wire-new",
+							transcriptKey: "stable-message",
+							text: "new",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const items = rows(store);
 			expect(items.filter((item) => item.transcriptKey === "stable-message")).toHaveLength(1);
 			expect(items.find((item) => item.transcriptKey === "stable-message")?.id).toBe("wire-new");
@@ -3792,29 +3696,21 @@ describe("ConversationStore", () => {
 
 		it("updates a first clustered member without losing later members or attachments", async () => {
 			const { store } = await openRunningTurn(clusterPair(), {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "call-first",
-								toolName: "shell",
-								status: "completed",
-								output: "updated",
-								outputImages: [{ source: "new", url: "https://hub.test/new" }],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "call-first",
+							toolName: "shell",
+							status: "completed",
+							output: "updated",
+							outputImages: [{ source: "new", url: "https://hub.test/new" }],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const items = rows(store);
 			const cluster = items.find((item) => item.kind === "activity" && item.id === "call-first");
 			expect(cluster?.kind).toBe("activity");
@@ -3852,29 +3748,21 @@ describe("ConversationStore", () => {
 				{},
 				true,
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "new-wire-later",
-								transcriptKey: "later",
-								toolName: "shell",
-								status: "inProgress",
-								outputImages: [{ source: "new", url: "https://hub.test/new" }],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "new-wire-later",
+							transcriptKey: "later",
+							toolName: "shell",
+							status: "inProgress",
+							outputImages: [{ source: "new", url: "https://hub.test/new" }],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const items = rows(store);
 			const activities = items.filter((item) => item.kind === "activity");
 			expect(activities).toHaveLength(1);
@@ -3902,29 +3790,21 @@ describe("ConversationStore", () => {
 		// snapshot. A snapshot without the cluster is a thread without it.
 		it("takes the reread's snapshot over a cluster the live frames built", async () => {
 			const { store, service, release, rehydratePromise } = await beginHeldClusterRehydrate();
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "new-wire-later",
-								transcriptKey: "later",
-								toolName: "shell",
-								status: "completed",
-								output: "updated",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "new-wire-later",
+							transcriptKey: "later",
+							toolName: "shell",
+							status: "completed",
+							output: "updated",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			// Task 17 (v6 read path): a plain V6_HISTORY_BASELINE release (length 0,
 			// same incarnation as the notification just above, which already
 			// reported length 1) would be DISCARDED outright — mergeHistory never
@@ -3960,30 +3840,22 @@ describe("ConversationStore", () => {
 					store.setState({ olderCursor: "older-cursor" });
 					await store.getState().loadOlder(service);
 				}
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [
-							{
-								...{
-									type: "commandExecution",
-									id: "new-wire-later",
-									transcriptKey: "later",
-									toolName: "shell",
-									status: "failed",
-									output: "failed",
-									error: "boom",
-								},
-								turnId: "t1",
+				historyUpdated(store, {
+					items: [
+						{
+							...{
+								type: "commandExecution",
+								id: "new-wire-later",
+								transcriptKey: "later",
+								toolName: "shell",
+								status: "failed",
+								output: "failed",
+								error: "boom",
 							},
-						],
-					},
-				} as AnyNotification);
+							turnId: "t1",
+						},
+					],
+				});
 				// The snapshot carries both members: the first settled clean, the second
 				// failed — a failed member is never clustered with a clean one.
 				release(
@@ -4030,8 +3902,7 @@ describe("ConversationStore", () => {
 		// members are still history nobody else holds, and the projection keeps
 		// them clustered in the rebuilt row.
 		it("keeps the paged cluster's other members when the snapshot holds one of them", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(runningTurnThread());
+			const service = serviceForThread(runningTurnThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -4044,20 +3915,17 @@ describe("ConversationStore", () => {
 				state: "completed" as const,
 				detail: { output: `${id} output` },
 			});
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "m1",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "m1 output" },
-						members: [member("m1"), member("m2"), member("m3")],
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "m1",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "m1 output" },
+					members: [member("m1"), member("m2"), member("m3")],
+				},
+			]);
 			store.setState({ olderCursor: "older-cursor" });
 			await store.getState().loadOlder(service);
 			expect(rows(store)[0]).toMatchObject({ kind: "activity", id: "m1" });
@@ -4098,8 +3966,7 @@ describe("ConversationStore", () => {
 		// and the next publish as history nobody else holds, never reading as a
 		// duplicate of the keyed member beside it.
 		it("keeps a paged cluster's keyless member when the snapshot catches the keyed one", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(runningTurnThread());
+			const service = serviceForThread(runningTurnThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -4112,21 +3979,18 @@ describe("ConversationStore", () => {
 				detail: { output: `${id} output` },
 				...over,
 			});
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "keyed-first",
-						transcriptKey: "key-first",
-						label: "shell keyed-first",
-						family: "tool",
-						state: "completed",
-						detail: { output: "keyed-first output" },
-						members: [member("keyed-first", { transcriptKey: "key-first" }), member("unkeyed-second")],
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "keyed-first",
+					transcriptKey: "key-first",
+					label: "shell keyed-first",
+					family: "tool",
+					state: "completed",
+					detail: { output: "keyed-first output" },
+					members: [member("keyed-first", { transcriptKey: "key-first" }), member("unkeyed-second")],
+				},
+			]);
 			store.setState({ olderCursor: "older-cursor" });
 			await store.getState().loadOlder(service);
 
@@ -4154,17 +4018,9 @@ describe("ConversationStore", () => {
 
 			// And the keyless member survives the next publish rather than reading
 			// as a duplicate.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...{ type: "userMessage", id: "u-later", turnId: "t1", text: "later" }, turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...{ type: "userMessage", id: "u-later", turnId: "t1", text: "later" }, turnId: "t1" }],
+			});
 			expect(
 				rows(store).some(
 					(row) => row.kind === "activity" && row.members?.some((member) => member.id === "unkeyed-second"),
@@ -4193,29 +4049,21 @@ describe("ConversationStore", () => {
 				release = resolve;
 			});
 			const rehydratePromise = store.getState().rehydrate(service, sink);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "new-wire-later",
-								transcriptKey: "later",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "new-wire-later",
+							transcriptKey: "later",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			// Task 17 (v6 read path): mergeReplacedItem (reducer.ts) follows the
 			// wire's own nil/non-nil-empty/non-empty convention — an OMITTED list
 			// field means "this entry said nothing new," an explicit EMPTY one
@@ -4262,30 +4110,22 @@ describe("ConversationStore", () => {
 				{},
 				true,
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "new-wire-later",
-								transcriptKey: "later",
-								toolName: "shell",
-								status: "completed",
-								output: "updated",
-								outputImages: [{ source: "new", url: "new" }],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "new-wire-later",
+							transcriptKey: "later",
+							toolName: "shell",
+							status: "completed",
+							output: "updated",
+							outputImages: [{ source: "new", url: "new" }],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const items = rows(store);
 			const activity = items.find((item) => item.kind === "activity");
 			expect(
@@ -4310,28 +4150,20 @@ describe("ConversationStore", () => {
 				{},
 				true,
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "call-later",
-								toolName: "shell",
-								status: "completed",
-								error: "boom",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "call-later",
+							toolName: "shell",
+							status: "completed",
+							error: "boom",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const activities = rows(store).filter((item) => item.kind === "activity");
 			expect(activities).toHaveLength(2);
 			expect(
@@ -4352,17 +4184,9 @@ describe("ConversationStore", () => {
 		it("stops streaming when the assistant item settles inside a running turn", async () => {
 			const { store } = await openRunningTurn([agentMessageItem("item-a", "partial", "inProgress")], {}, true);
 			expect(rowById(store, "item-a")).toMatchObject({ streaming: true });
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...agentMessageItem("item-a", "all of it", "completed"), turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...agentMessageItem("item-a", "all of it", "completed"), turnId: "t1" }],
+			});
 			expect(store.getState().conversation?.activeTurnId).toBe("t1");
 			expect(rowById(store, "item-a")).toMatchObject({
 				kind: "assistant",
@@ -4374,40 +4198,24 @@ describe("ConversationStore", () => {
 		it("marks an assistant item as not streaming on item/completed", async () => {
 			const { store } = await openRunningTurn([agentMessageItem("item-a", "streaming text", "inProgress")], {}, true);
 			expect(rowById(store, "item-a")).toMatchObject({ streaming: true });
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "agentMessage",
-								id: "item-a",
-								text: "streaming text",
-								status: "completed",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "agentMessage",
+							id: "item-a",
+							text: "streaming text",
+							status: "completed",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			// The turn is still running, so the row settles when the turn does —
 			// the projector reads streaming from the turn, as the web does.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "completed" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "completed" }],
+			});
 			expect(rowById(store, "item-a")).toMatchObject({
 				kind: "assistant",
 				streaming: false,
@@ -4427,30 +4235,22 @@ describe("ConversationStore", () => {
 				{},
 				true,
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "tool-1",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-								...(exitCode === undefined ? {} : { exitCode }),
-								...(error === undefined ? {} : { error }),
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "tool-1",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
+							...(exitCode === undefined ? {} : { exitCode }),
+							...(error === undefined ? {} : { error }),
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "tool-1")).toMatchObject({
 				kind: "activity",
 				state: expected,
@@ -4460,28 +4260,20 @@ describe("ConversationStore", () => {
 		it("C6: upserts completed item even when start was missed", async () => {
 			// The turn is open but empty — the item/started was missed.
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "tool-missed",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "tool-missed",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			// The completed item is inserted (UPSERT), not lost.
 			expect(rowById(store, "tool-missed")).toMatchObject({ kind: "activity" });
 		});
@@ -4492,30 +4284,22 @@ describe("ConversationStore", () => {
 		// "reasoning".
 		it("a commandExecution named 'Reasoning' is family 'tool' with exact callId", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "tool-reasoning-1",
-								toolName: "Reasoning",
-								callId: "call-reasoning-1",
-								status: "completed",
-								output: "thoughts",
-								argumentsJson: '{"summary":"thinking"}',
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "tool-reasoning-1",
+							toolName: "Reasoning",
+							callId: "call-reasoning-1",
+							status: "completed",
+							output: "thoughts",
+							argumentsJson: '{"summary":"thinking"}',
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "tool-reasoning-1")).toMatchObject({
 				kind: "activity",
 				// Family follows the wire type (commandExecution), not the toolName;
@@ -4529,27 +4313,19 @@ describe("ConversationStore", () => {
 
 		it("a reasoning item is family 'reasoning'", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "reasoning",
-								id: "reason-notify-1",
-								status: "inProgress",
-								text: "analyzing",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "reasoning",
+							id: "reason-notify-1",
+							status: "inProgress",
+							text: "analyzing",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "reason-notify-1")).toMatchObject({
 				kind: "activity",
 				family: "reasoning",
@@ -4576,48 +4352,32 @@ describe("ConversationStore", () => {
 			"shows the completion's text over the seeded summary when the completion carries %s",
 			async (_label, text, expected) => {
 				const { store } = await openRunningTurn([], {}, true);
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [
-							{
-								...{
-									type: "reasoning",
-									id: "reason-authoritative-1",
-									status: "inProgress",
-									text: "old reasoning",
-								},
-								turnId: "t1",
+				historyUpdated(store, {
+					items: [
+						{
+							...{
+								type: "reasoning",
+								id: "reason-authoritative-1",
+								status: "inProgress",
+								text: "old reasoning",
 							},
-						],
-					},
-				} as AnyNotification);
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [
-							{
-								...{
-									type: "reasoning",
-									id: "reason-authoritative-1",
-									status: "completed",
-									...(text === undefined ? {} : { text }),
-								},
-								turnId: "t1",
+							turnId: "t1",
+						},
+					],
+				});
+				historyUpdated(store, {
+					items: [
+						{
+							...{
+								type: "reasoning",
+								id: "reason-authoritative-1",
+								status: "completed",
+								...(text === undefined ? {} : { text }),
 							},
-						],
-					},
-				} as AnyNotification);
+							turnId: "t1",
+						},
+					],
+				});
 				expect(rowById(store, "reason-authoritative-1")).toMatchObject({
 					kind: "activity",
 					detail: { output: expected },
@@ -4629,27 +4389,19 @@ describe("ConversationStore", () => {
 		// settled it with.
 		it("shows the settled text of a reasoning item that streamed nothing", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "reasoning",
-								id: "reason-settled-1",
-								status: "completed",
-								text: "final reasoning",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "reasoning",
+							id: "reason-settled-1",
+							status: "completed",
+							text: "final reasoning",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "reason-settled-1")).toMatchObject({
 				kind: "activity",
 				detail: { output: "final reasoning" },
@@ -4685,30 +4437,22 @@ describe("ConversationStore", () => {
 			});
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "msg-1",
-								text: "hello",
-								status: "completed",
-								// No images field: an absent input-image list means "unchanged",
-								// not "removed" (the same rule the package reducer's
-								// mergeItemImages already applies).
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "msg-1",
+							text: "hello",
+							status: "completed",
+							// No images field: an absent input-image list means "unchanged",
+							// not "removed" (the same rule the package reducer's
+							// mergeItemImages already applies).
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const items = store.getState().conversation?.items ?? [];
 			expect(
 				items.find(
@@ -4847,8 +4591,7 @@ describe("ConversationStore", () => {
 					},
 				],
 			});
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				runningTurnThread([askUserItem("ask-1", bigAsk)], {
 					evener: evenerWith({ activeTurnId: "t1", askPending: true }),
 				}),
@@ -5026,6 +4769,9 @@ describe("ConversationStore", () => {
 			await store.getState().open(service, "ref-1");
 			const largeName = "n".repeat(MAX_ITEM_BYTES + 100);
 			const src = "https://hub.test/live.png";
+			// Kept as a literal cast: this fixture's images predate the
+			// wire's image `type` field, and the builder's typed overrides
+			// would refuse it. The whole-object cast preserves the input.
 			store.getState().applyNotification({
 				method: "history/updated",
 				params: {
@@ -5065,16 +4811,9 @@ describe("ConversationStore", () => {
 		it("coalesces evener/thread/resync into one rehydrate call", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-after-resync",
-			};
+			});
 			// F2: openProjected binds the coalescer internally.
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
@@ -5084,18 +4823,9 @@ describe("ConversationStore", () => {
 
 			// Emit multiple resync notifications — they should coalesce to one
 			// rehydrate (one additional readProjection call).
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
+			resync(store);
+			resync(store);
 
 			// The internal coalescer schedules rehydrate via microtask.
 			// Wait for microtasks to flush.
@@ -5109,16 +4839,9 @@ describe("ConversationStore", () => {
 		it("unsupported item transition triggers coalesced rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }, true),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }, true), {
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
 			const initialReads = service.readProjectionCalls.length;
@@ -5152,27 +4875,19 @@ describe("ConversationStore", () => {
 			await store.getState().open(service, "ref-2");
 			// A stale completion for thread-1/ref-1 should be dropped
 			const before = store.getState().conversation;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "agentMessage",
-								id: "item-a",
-								text: "done",
-								status: "completed",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "agentMessage",
+							id: "item-a",
+							text: "done",
+							status: "completed",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(store.getState().conversation).toBe(before);
 		});
 	});
@@ -5181,16 +4896,9 @@ describe("ConversationStore", () => {
 		it("preserves draft text across rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.getState().setDraft("my unsent draft");
 			// Rehydrate: should preserve the draft
@@ -5203,16 +4911,9 @@ describe("ConversationStore", () => {
 			// state lives in live-ui-store. Rehydrate only preserves draft.
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Rehydrate should preserve draft but not carry presentation state.
 			store.getState().setDraft("my draft");
@@ -5225,29 +4926,15 @@ describe("ConversationStore", () => {
 		it("preserves olderCursor from openProjected through rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "initial-cursor",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().olderCursor).toBe("initial-cursor");
 			// Update the projection result for rehydrate
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "updated-cursor",
-			};
+			});
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().olderCursor).toBe("updated-cursor");
 		});
@@ -5375,16 +5062,9 @@ describe("ConversationStore", () => {
 		it("coalesces multiple signals to one readProjection", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			// F2: openProjected binds the coalescer internally.
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
@@ -5394,18 +5074,9 @@ describe("ConversationStore", () => {
 
 			// Emit multiple resync notifications.
 			service.readProjectionCalls = []; // reset count
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
+			resync(store);
+			resync(store);
 
 			// M1: deterministic barrier — await started, yield so orig resolves and
 			// the release gate is pushed, then set up completed and release.
@@ -5430,11 +5101,10 @@ describe("ConversationStore", () => {
 				usage: {},
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: "cursor-1",
-			};
+			});
 
 			// Track what the sink receives.
 			const setLiveViewCalls: {
@@ -5494,28 +5164,20 @@ describe("ConversationStore", () => {
 		it("projects a started ask_user as its question row, without a reread", async () => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "ask-1",
-								toolName: "ask_user",
-								status: "inProgress",
-								argumentsJson: VALID_ASK_ARGS,
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "ask-1",
+							toolName: "ask_user",
+							status: "inProgress",
+							argumentsJson: VALID_ASK_ARGS,
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -5528,28 +5190,20 @@ describe("ConversationStore", () => {
 		it("projects a completed ask_user as a question row once the status frame carries the pending flag, without a reread", async () => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "ask-1",
-								toolName: "ask_user",
-								status: "completed",
-								argumentsJson: VALID_ASK_ARGS,
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "ask-1",
+							toolName: "ask_user",
+							status: "completed",
+							argumentsJson: VALID_ASK_ARGS,
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			// The item alone is not the whole signal (#1731 round 4): the status
 			// frame that lands on the same boundary carries askPending, and that
 			// is what liveAskQuestions gates the question row on.
@@ -5576,40 +5230,32 @@ describe("ConversationStore", () => {
 		it("bounds a live question row's option label but leaves liveAskQuestions' canonical copy whole", async () => {
 			const { store } = await openRunningTurn([], {}, true);
 			const oversizedLabel = "x".repeat(MAX_ITEM_BYTES + 100);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "ask-oversized",
-								toolName: "ask_user",
-								status: "completed",
-								argumentsJson: JSON.stringify({
-									questions: [
-										{
-											header: "Choose",
-											question: "Pick one",
-											options: [
-												{ label: oversizedLabel, detail: "da" },
-												{ label: "B", detail: "db" },
-											],
-											multi_select: false,
-										},
-									],
-								}),
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "ask-oversized",
+							toolName: "ask_user",
+							status: "completed",
+							argumentsJson: JSON.stringify({
+								questions: [
+									{
+										header: "Choose",
+										question: "Pick one",
+										options: [
+											{ label: oversizedLabel, detail: "da" },
+											{ label: "B", detail: "db" },
+										],
+										multi_select: false,
+									},
+								],
+							}),
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			store.getState().applyNotification({
 				method: "thread/status/changed",
 				params: { threadId: "thread-1", ref: "ref-1", status: { type: "active" }, askPending: true },
@@ -5696,10 +5342,7 @@ describe("ConversationStore", () => {
 				},
 			],
 		] as const)("rereads when %s names an active turn this window does not hold", async (_label, frame) => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ evener: evenerWith({ activeTurnId: "t-outside-window" }) }),
-			);
+			const service = serviceForThread(makeThread({ evener: evenerWith({ activeTurnId: "t-outside-window" }) }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.activeTurnId).toBe("t-outside-window");
@@ -5723,8 +5366,7 @@ describe("ConversationStore", () => {
 		// warning-item conversion), so the canonical read cannot carry it either
 		// and asking for one buys nothing.
 		it("does not reread for a warning the wire drops because no turn is active", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.activeTurnId).toBeUndefined();
@@ -5748,8 +5390,7 @@ describe("ConversationStore", () => {
 		// the canonical read is the one honest way to drop them: settling a turn
 		// that still holds warning items must request that read.
 		it("rereads when a bare turn/completed settles a turn still holding warning items, and the read drops them", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5770,17 +5411,9 @@ describe("ConversationStore", () => {
 			service.readProjectionResult = makeReadProjectionResult(
 				makeThread({ turns: [makeTurn({ id: "t1", status: "completed", items: [] })] }),
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "completed" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "completed" }],
+			});
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -5798,8 +5431,7 @@ describe("ConversationStore", () => {
 		// the model and the transient warning returned. The rehydrate must keep
 		// live-only warnings out of the retained turn history it merges.
 		it("the settle reread's warning cleanup sticks across later frames once page turns are loaded", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5827,17 +5459,9 @@ describe("ConversationStore", () => {
 					turns: [makeTurn({ id: "t1", status: "completed", items: [] })],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "completed" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "completed" }],
+			});
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -5845,23 +5469,14 @@ describe("ConversationStore", () => {
 			// A later row-changing frame reprojects from the committed model:
 			// the transient warning must stay gone, not come back through the
 			// turn history the rehydrate retained.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(store.getState().conversation?.items.filter((row) => row.kind === "failure")).toHaveLength(0);
 		});
 
 		it("a settle reread whose fresh window re-issues the turn's content under a new id still drops the transient warning", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5880,27 +5495,19 @@ describe("ConversationStore", () => {
 			// The warned turn also carries real content the transcript persists:
 			// the turn stays inside the keep-window through it, so compaction
 			// alone cannot be what clears the warning (RoboRev round 3).
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "real-1",
-								text: "the real message",
-								transcriptEntryIndex: 3,
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "real-1",
+							text: "the real message",
+							transcriptEntryIndex: 3,
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			store.getState().applyNotification({
 				method: "warning",
 				params: { threadId: "thread-1", ref: "ref-1", message: "careful" },
@@ -5921,17 +5528,9 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "", status: "completed" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "", status: "completed" }],
+			});
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -5946,17 +5545,9 @@ describe("ConversationStore", () => {
 
 			// And a later row-changing frame reprojects from that model: the
 			// real message stays, the transient warning never returns.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(store.getState().conversation?.items.filter((row) => row.kind === "failure")).toHaveLength(0);
 		});
 
@@ -5995,8 +5586,8 @@ describe("ConversationStore", () => {
 			}> {
 				const thread = runningTurnThread();
 				const service = new FakeConversationService();
-				service.readProjectionResult = {
-					conversation: projectConversation(
+				service.readProjectionResult = readResult(
+					projectConversation(
 						hydrateThread(
 							{
 								thread,
@@ -6008,9 +5599,8 @@ describe("ConversationStore", () => {
 							0,
 						),
 					),
-					activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-					olderCursor: null,
-				};
+					{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+				);
 				const store = createConversationStore();
 				await store.getState().openProjected(service, createFakeSink(), "ref-1");
 				return { store, service };
@@ -6123,27 +5713,19 @@ describe("ConversationStore", () => {
 				.filter((item) => item.kind === "failure")
 				.map((item) => item.id);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "user-1",
-								text: "updated input",
-								transcriptEntryIndex: 4,
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "user-1",
+							text: "updated input",
+							transcriptEntryIndex: 4,
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			const warningIdsAfter = rows(store)
 				.filter((item) => item.kind === "failure")
@@ -6178,25 +5760,14 @@ describe("ConversationStore", () => {
 			]);
 			// A later row-changing frame rebuilds the timeline from the
 			// projection — the notice is not a model row, yet survives.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", itemsView: "default", status: "running" }],
+			});
 			expect(rows(store).some((row) => row.kind === "failure" && row.title === "Provider")).toBe(true);
 			// A resync reread publishes a snapshot that does not carry the
 			// warning (warnings are never persisted) — the notice survives that
 			// rebuild too, from the transient surface, not the transcript.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -6204,8 +5775,7 @@ describe("ConversationStore", () => {
 			// The conversation transition clears it: reopened, the conversation
 			// does not resurrect a notice from before it.
 			store.getState().reset();
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(rows(store).filter((row) => row.kind === "failure")).toEqual([]);
 		});
@@ -6233,39 +5803,15 @@ describe("ConversationStore", () => {
 				params: { threadId: "thread-1", ref: "ref-1", title: "Provider", message: "careful" },
 			} as AnyNotification);
 			// Newer messages arrive after the notice did.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...agentMessageItem("a2", "newer reply"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...agentMessageItem("a2", "newer reply"), turnId: "t2" }],
+			});
 			// The notice sits where it arrived: after a1, above u2 and a2.
 			expect(rows(store).map((row) => row.kind)).toEqual(["user", "assistant", "failure", "user", "assistant"]);
 			expect(rows(store).map((row) => row.id)[2]).toMatch(/^warning:/);
@@ -6273,17 +5819,9 @@ describe("ConversationStore", () => {
 			// newest 500 rows, and the arrival position — with the notice —
 			// leaves it.
 			for (let i = 3; i <= 502; i++) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
+				});
 			}
 			const after = rows(store);
 			expect(after.filter((row) => row.kind === "failure")).toEqual([]);
@@ -6305,66 +5843,32 @@ describe("ConversationStore", () => {
 			);
 			expect(rows(store).map((row) => row.id)).toEqual(["u1", "a1"]);
 			// Two notices land back-to-back, with no model row between them.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "first warning",
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "second warning",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "first warning",
+			});
+			warning(store, {
+				title: "Provider",
+				message: "second warning",
+			});
 			// Both notices hold the arrival position — after a1, in the order
 			// they arrived.
 			expect(rows(store).map((row) => row.id)).toEqual(["u1", "a1", "warning:1", "warning:2"]);
 			// A rebuild reseats both at that position, above newer messages.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
+			});
 			expect(rows(store).map((row) => row.id)).toEqual(["u1", "a1", "warning:1", "warning:2", "u2"]);
 			// Grow the transcript past the retained cap: the window keeps the
 			// newest 500 rows, and the arrival position — with both notices —
 			// leaves it together.
 			for (let i = 3; i <= 502; i++) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
+				});
 			}
 			const after = rows(store);
 			expect(after.filter((row) => row.kind === "failure")).toEqual([]);
@@ -6382,8 +5886,7 @@ describe("ConversationStore", () => {
 		// belongs on the transient surface like any warning the reducer could
 		// not place.
 		it("shows a warning whose active turn lies outside the loaded window, and keeps it through the gap reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6398,15 +5901,10 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.activeTurnId).toBe("t-outside");
 			const readsBefore = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			// Displayed at once, though the reducer could not place it: the
 			// notice seats after the last model row, from the transient surface.
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
@@ -6446,8 +5944,7 @@ describe("ConversationStore", () => {
 		// deleted the notice outright. Anchors must resolve through the
 		// identities a row OWNS, members included.
 		it("reseats a warning through a cluster that absorbed its anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6462,15 +5959,10 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([["activity", "a-tool"]]);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
 				["activity", "a-tool"],
 				["failure", "warning:1"],
@@ -6501,28 +5993,12 @@ describe("ConversationStore", () => {
 			// A row-changing frame reprojects from the model: the cluster keeps
 			// its members, and the notice keeps its position beside the row
 			// that carries its anchor.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
+			});
 			const after = rows(store);
 			expect(after.map((row) => [row.kind, row.id])).toEqual([
 				["activity", "p-tool"],
@@ -6544,8 +6020,7 @@ describe("ConversationStore", () => {
 		// cluster splits at the anchored member instead, so the notice keeps
 		// the position it arrived at, above the rows that arrived later.
 		it("seats a warning above later members when a cluster grows past its anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6560,15 +6035,10 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([["activity", "a-tool"]]);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
 				["activity", "a-tool"],
 				["failure", "warning:1"],
@@ -6577,28 +6047,12 @@ describe("ConversationStore", () => {
 			// projection clusters the two consecutive shell rows, so the run
 			// that absorbed the anchored row now also carries a member that
 			// arrived after the notice did.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...commandExecItem("b-tool", "shell", "completed"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...commandExecItem("b-tool", "shell", "completed"), turnId: "t2" }],
+			});
 			const after = rows(store);
 			expect(after.map((row) => [row.kind, row.id])).toEqual([
 				["activity", "a-tool"],
@@ -6651,39 +6105,26 @@ describe("ConversationStore", () => {
 				summaryOnly: true,
 				detail: { description: "first audit" },
 			});
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			// A newer same-family activity arrives AFTER the notice, on a new
 			// turn: the run splits at the anchored member, and BOTH sub-runs
 			// re-project.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-					items: [
-						{
-							type: "commandExecution",
-							id: "c-tool",
-							toolName: "shell",
-							status: "completed",
-							description: "third audit",
-							turnId: "t2",
-						} as ThreadItem,
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+				items: [
+					{
+						type: "commandExecution",
+						id: "c-tool",
+						toolName: "shell",
+						status: "completed",
+						description: "third audit",
+						turnId: "t2",
+					} as ThreadItem,
+				],
+			});
 			// The split keeps the members displayed at arrival above the notice
 			// (the [a, b] run) and seats the member that arrived later below it.
 			const split = rows(store).filter((row) => row.kind === "activity");
@@ -6727,38 +6168,25 @@ describe("ConversationStore", () => {
 				"a-tool",
 				"b-tool",
 			]);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			// A newer same-family activity arrives AFTER the notice, on a new turn:
 			// the run splits at the anchored member (b-tool), leaving the tail as a
 			// sub-run of the single new member.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-					items: [
-						{
-							type: "commandExecution",
-							id: "c-tool",
-							toolName: "shell",
-							status: "completed",
-							turnId: "t2",
-						} as ThreadItem,
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+				items: [
+					{
+						type: "commandExecution",
+						id: "c-tool",
+						toolName: "shell",
+						status: "completed",
+						turnId: "t2",
+					} as ThreadItem,
+				],
+			});
 			const split = rows(store).filter((row) => row.kind === "activity");
 			expect(split.map((row) => row.id)).toEqual(["a-tool", "c-tool"]);
 			const tail = split[1];
@@ -6776,8 +6204,7 @@ describe("ConversationStore", () => {
 		// whole run stays above it and only members that join LATER split
 		// below it.
 		it("seats a warning after the whole cluster that was displayed when it arrived", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6796,43 +6223,22 @@ describe("ConversationStore", () => {
 				"a-tool",
 				"b-tool",
 			]);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
 				["activity", "a-tool"],
 				["failure", "warning:1"],
 			]);
 			// A third same-family activity arrives AFTER the notice: the run
 			// grows past the members that were displayed at arrival.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...commandExecItem("c-tool", "shell", "completed"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...commandExecItem("c-tool", "shell", "completed"), turnId: "t2" }],
+			});
 			const after = rows(store);
 			expect(after.map((row) => [row.kind, row.id])).toEqual([
 				["activity", "a-tool"],
@@ -6879,41 +6285,28 @@ describe("ConversationStore", () => {
 			]);
 			// An idle warning lands while the attachments row is the nearest
 			// model row: the notice is displayed at once.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store).some((row) => row.kind === "failure" && row.title === "Provider")).toBe(true);
 			// The source is reissued under a new wire id with the same transcript
 			// key and says nothing about images: the reducer folds it by identity,
 			// the projection re-keys both the user row and the attachments row,
 			// and the notice must stay seated.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "wire-new",
-								transcriptKey: "stable-message",
-								text: "reissued",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "wire-new",
+							transcriptKey: "stable-message",
+							text: "reissued",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			const reissued = rows(store);
 			expect(reissued.filter((row) => row.kind === "attachments").map((row) => row.id)).toEqual([
 				"wire-new:attachments",
@@ -6928,28 +6321,12 @@ describe("ConversationStore", () => {
 				["failure", "warning:1"],
 			]);
 			// A later row-changing rebuild keeps the notice seated.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("u2", "newer"), turnId: "t2" }],
+			});
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
 				["user", "wire-new"],
 				["attachments", "wire-new:attachments"],
@@ -6989,42 +6366,21 @@ describe("ConversationStore", () => {
 			expect(rows(store).map((row) => row.kind)).toEqual(["user", "attachments"]);
 			// An idle warning lands while the attachments row is the nearest
 			// model row.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store)).toHaveLength(3);
 			// Grow the transcript past the retained cap so the cut lands right
 			// after the source row: [user, notice, attachments, a1..a498] is
 			// 501 rows and the cap keeps the newest 500.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
 			for (let i = 1; i <= 498; i++) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
+				});
 			}
 			const after = rows(store);
 			// The source fell off the cut; its attachment left with it, and the
@@ -7080,15 +6436,10 @@ describe("ConversationStore", () => {
 			// An idle warning lands while B's attachments row is the nearest
 			// model row: it anchors through B's stable source identity and
 			// seats after the whole run, at the position it arrived at.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store).map((row) => [row.kind, row.id])).toEqual([
 				["activity", "call-a"],
 				["attachments", "call-a:attachments"],
@@ -7098,29 +6449,13 @@ describe("ConversationStore", () => {
 			// Grow the transcript past the retained cap so the cut lands right
 			// after the cluster: [cluster, A:att, B:att, notice, a1..a497] is
 			// 501 rows and the cap keeps the newest 500.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "running" }],
+			});
 			for (let i = 1; i <= 497; i++) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...agentMessageItem(`a${i}`, `message ${i}`), turnId: "t2" }],
+				});
 			}
 			const after = rows(store);
 			// The cluster fell off the cut; the orphan scan reached its
@@ -7133,28 +6468,20 @@ describe("ConversationStore", () => {
 
 		it("preserves a command description through live item projection", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "command-1",
-								toolName: "shell",
-								description: "Inspect the source tree",
-								status: "completed",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "command-1",
+							toolName: "shell",
+							description: "Inspect the source tree",
+							status: "completed",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "command-1")).toMatchObject({
 				kind: "activity",
 				detail: { description: "Inspect the source tree" },
@@ -7163,27 +6490,19 @@ describe("ConversationStore", () => {
 
 		it("preserves a user transcript entry index through live item projection", async () => {
 			const { store } = await openRunningTurn([], {}, true);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "userMessage",
-								id: "fork-source",
-								text: "fork from this input",
-								transcriptEntryIndex: 8,
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "userMessage",
+							id: "fork-source",
+							text: "fork from this input",
+							transcriptEntryIndex: 8,
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "fork-source")).toMatchObject({
 				kind: "user",
 				transcriptEntryIndex: 8,
@@ -7205,16 +6524,9 @@ describe("ConversationStore", () => {
 		it("stale rehydrate catch does not set error on newer generation", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
 			// Start a rehydrate that will fail.
@@ -7229,16 +6541,9 @@ describe("ConversationStore", () => {
 
 			// While rehydrate is in-flight, open a new conversation (new generation).
 			service.readProjection = origReadProjection;
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-2" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-2" }), {
 				olderCursor: "cursor-2",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-2");
 
 			// Now the stale rehydrate fails.
@@ -7293,13 +6598,14 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// loadOlder returns items that include a duplicate of item-1.
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "item-0", text: "older" },
 					{ kind: "user", id: "item-1", text: "duplicate" }, // duplicate id
 				],
-				nextCursor: "next-cursor",
-			};
+				"next-cursor",
+			);
 			await store.getState().loadOlder(service);
 
 			const conv = store.getState().conversation;
@@ -7361,34 +6667,32 @@ describe("ConversationStore", () => {
 			// attachment row keeps the LIVE wire id — a replay under "wire-B"
 			// never produces a second row. A control attachment for a genuinely
 			// unrelated source is included too, and is admitted.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t-page", [
-							{
-								id: "wire-B",
-								transcriptKey: "key-A",
-								turnId: "t-page",
-								type: "commandExecution",
-								toolName: "shell",
-								status: "completed",
-								outputImages: [{ source: "dup", url: "https://example.com/dup.png" }],
-							},
-							{
-								id: "wire-C",
-								transcriptKey: "unrelated-key",
-								turnId: "t-page",
-								type: "commandExecution",
-								toolName: "shell",
-								status: "completed",
-								outputImages: [{ source: "new", url: "https://example.com/new.png" }],
-							},
-						]),
-					],
-					"next-cursor",
-				),
-				nextCursor: "next-cursor",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t-page", [
+						{
+							id: "wire-B",
+							transcriptKey: "key-A",
+							turnId: "t-page",
+							type: "commandExecution",
+							toolName: "shell",
+							status: "completed",
+							outputImages: [{ source: "dup", url: "https://example.com/dup.png" }],
+						},
+						{
+							id: "wire-C",
+							transcriptKey: "unrelated-key",
+							turnId: "t-page",
+							type: "commandExecution",
+							toolName: "shell",
+							status: "completed",
+							outputImages: [{ source: "new", url: "https://example.com/new.png" }],
+						},
+					]),
+				],
+				"next-cursor",
+			);
 			await store.getState().loadOlder(service);
 
 			const conv = store.getState().conversation;
@@ -7505,8 +6809,7 @@ describe("ConversationStore", () => {
 			// and the next page names that row.
 			const filler: ThreadItem[] = [];
 			for (let i = 0; i < 499; i++) filler.push(userMessageItem(`filler-${i}`, ""));
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -7542,8 +6845,9 @@ describe("ConversationStore", () => {
 			// cap's own verdict on the page's row, not from the cursor running
 			// out.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "activity",
 						id: "src-1",
@@ -7553,8 +6857,8 @@ describe("ConversationStore", () => {
 						detail: { output: "done" },
 					},
 				],
-				nextCursor: "more",
-			};
+				"more",
+			);
 			await store.getState().loadOlder(service);
 
 			// No duplicate was admitted beside the held copy, and no orphaned
@@ -7809,8 +7113,8 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			// 492 fresh rows + an 8-row page = exactly the 500-row cap, so the
 			// page loads without eviction and its turn keeps full payloads.
-			service.readProjectionResult = {
-				conversation: makeConversation(
+			service.readProjectionResult = readResult(
+				makeConversation(
 					{
 						threadId: "thread-1",
 						instanceId: "instance-1",
@@ -7841,32 +7145,29 @@ describe("ConversationStore", () => {
 					},
 					true,
 				),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							Array.from({ length: 8 }, (_, j) => ({
-								id: `w-${j}`,
-								transcriptKey: `w-${j}`,
-								turnId: "pt",
-								type: "agentMessage",
-								text: `page item ${j}`,
-								position: { entry: 100 - j, item: 0 },
-								status: "completed",
-							})),
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						Array.from({ length: 8 }, (_, j) => ({
+							id: `w-${j}`,
+							transcriptKey: `w-${j}`,
+							turnId: "pt",
+							type: "agentMessage",
+							text: `page item ${j}`,
+							position: { entry: 100 - j, item: 0 },
+							status: "completed",
+						})),
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const loaded = store.getState().conversation?.turns.find((t) => t.id === "pt");
 			expect(loaded?.items).toHaveLength(8);
@@ -7874,17 +7175,9 @@ describe("ConversationStore", () => {
 			// Live traffic alone (no rehydrate, no further page) appends 8 rows,
 			// and each append's cap evicts one page row from the oldest end.
 			for (let j = 0; j < 8; j++) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...{ type: "userMessage", id: `l-${j}`, text: `live ${j}` }, turnId: "ft" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...{ type: "userMessage", id: `l-${j}`, text: `live ${j}` }, turnId: "ft" }],
+				});
 			}
 
 			const conv = store.getState().conversation!;
@@ -7974,39 +7267,27 @@ describe("ConversationStore", () => {
 		// claim let the warning restore the stale pagination cursor and report
 		// "loaded" for a complete snapshot.
 		it("an unmatched warning-only turn does not claim cursor coverage", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [
-						fillerTurn(500),
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "rk",
-									transcriptKey: "PK",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "real text",
-									position: { entry: 98, item: 0 },
-									status: "completed",
-								},
-							],
-							usage: { inputTokens: 9, outputTokens: 9 },
-						},
-					],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [
+					fillerTurn(500),
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "rk",
+								transcriptKey: "PK",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "real text",
+								position: { entry: 98, item: 0 },
+								status: "completed",
+							},
+						],
+						usage: { inputTokens: 9, outputTokens: 9 },
+					},
+				],
+			});
 
 			// After pagination the store retains a warning alongside the ordinary
 			// message: a row-less page turn that compacts at its own load (its
@@ -8015,46 +7296,44 @@ describe("ConversationStore", () => {
 			// warning turn whose failure row the page owns, seated above the
 			// filler bulk so the cap never evicts it — the reread keeps the row
 			// and the warning turn keeps its window seat.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"ct",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "ct",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-						wireTurnFragment("wt", [
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"ct",
+						[
 							{
-								id: "w-0",
-								turnId: "wt",
-								type: "warning",
-								text: "careful",
-								position: { entry: 200, item: 0 },
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "ct",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 99, item: 0 },
 								status: "completed",
 							},
-						]),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+					wireTurnFragment("wt", [
+						{
+							id: "w-0",
+							turnId: "wt",
+							type: "warning",
+							text: "careful",
+							position: { entry: 200, item: 0 },
+							status: "completed",
+						},
+					]),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "ct")?.items).toEqual([]);
 
 			// A complete fresh read that repeats the unchanged real turn and its
 			// message but omits the warning entirely.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8078,9 +7357,8 @@ describe("ConversationStore", () => {
 						},
 					],
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// The warning's turn survived with its warning item (the retained
@@ -8154,45 +7432,31 @@ describe("ConversationStore", () => {
 		// The wire-text repair cannot rescue it either: a wire item that omitted
 		// text has nothing to adopt.
 		it("a sparse reread reissue of a compact identity settles to empty text, never undefined", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// Row-less page turn: compacts at its own load and remembers px.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "warning",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "warning",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
@@ -8200,8 +7464,8 @@ describe("ConversationStore", () => {
 			// under the same turn id, so the fold adopts the fresh item's own row
 			// and pt stays in-window. With nothing to adopt, the fold's settle must
 			// be the valid empty string the wire's own hydration would produce.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8229,9 +7493,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(folded).toHaveLength(1);
@@ -8254,53 +7517,39 @@ describe("ConversationStore", () => {
 		// item — the injection's fold would erase the retained copy's text and
 		// the wire-text repair would then re-adopt the OLDER page's text.
 		it("an id-only compaction restored with a key keeps the retained text through an overlapping page", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// Row-less page turn carrying an ID-ONLY item: compacts at its own
 			// load, remembering the bare id.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "a-0",
-									turnId: "pt",
-									type: "warning",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "a-0",
+								turnId: "pt",
+								type: "warning",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
 			// Restoration: the fresh read re-issues the item with a gained
 			// transcript key (same id); the item's own projection is the row that
 			// keeps it in the window.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8325,9 +7574,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			const restored = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(restored).toHaveLength(1);
@@ -8339,29 +7587,27 @@ describe("ConversationStore", () => {
 			// text. The retained copy is the newer merge input and must win: the
 			// remembered id-only skeleton must not be injected beside the real
 			// item, so nothing erases the retained text and re-adopts the page's.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "a-0",
-									transcriptKey: "kk",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "stale old",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "a-0",
+								transcriptKey: "kk",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "stale old",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(after).toHaveLength(1);
@@ -8403,47 +7649,33 @@ describe("ConversationStore", () => {
 		// that legitimate empty — not the reconcile of the two fragments within
 		// the page, and not the fold into the turn's remembered skeleton.
 		it("a later fragment's explicit empty text is not overwritten by an earlier fragment's text", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// The page brings px as a real row item: under D23d the model keeps
 			// the page turn's own row while it stays in the window.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "px", text: "payload" }),
@@ -8452,8 +7684,8 @@ describe("ConversationStore", () => {
 			// Window churn: the fresh read fills the window, the cap evicts pt's
 			// row — the oldest-positioned one — and the bound compacts the turn,
 			// remembering px through the item's real row shape.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8463,69 +7695,65 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
 			// The next read shows a smaller window (the snapshot is authoritative
 			// for the fresh window), so the overlapping page's folded row survives
 			// the cap and paging keeps flowing.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 
 			// Overlapping page carrying the SAME turn twice: the first fragment
 			// provides text, the second explicitly clears it. The later
 			// fragment's empty is the legitimate settle.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "r1",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "hello",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "r2",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "r1",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "hello",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "r2",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(folded).toHaveLength(1);
@@ -8580,67 +7808,53 @@ describe("ConversationStore", () => {
 		// as an empty turn that could claim coverage for a reason the pin is
 		// not about.
 		it("a noncolliding compact turn does not claim cursor coverage over a complete fresh read", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "rk",
-									transcriptKey: "PK",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "real text",
-									position: { entry: 98, item: 0 },
-									status: "completed",
-								},
-							],
-							usage: { inputTokens: 9, outputTokens: 9 },
-						},
-						fillerTurn(499),
-					],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "rk",
+								transcriptKey: "PK",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "real text",
+								position: { entry: 98, item: 0 },
+								status: "completed",
+							},
+						],
+						usage: { inputTokens: 9, outputTokens: 9 },
+					},
+					fillerTurn(499),
+				],
+			});
 
 			// The page's position says older history — below the snapshot's own
 			// oldest row — so its row is the oldest in the merged projection and
 			// the full window's cap discards it at the turn's own load: ct
 			// compacts immediately and remembers px.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"ct",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "ct",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"ct",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "ct",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "ct")?.items).toEqual([]);
 
@@ -8648,8 +7862,8 @@ describe("ConversationStore", () => {
 			// nothing the compact turn remembers — no collision, no injection —
 			// and re-serves the window bulk it still holds. The fresh read's own
 			// cursor is null: nothing older exists.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8673,9 +7887,8 @@ describe("ConversationStore", () => {
 						fillerTurn(499),
 					],
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// The complete read's null cursor stands: the compact turn survives
@@ -8798,58 +8011,44 @@ describe("ConversationStore", () => {
 		// the full folded payload in the window. The bound's absorbed-identity
 		// read stays as defense for shapes a future projector could still mint.
 		it("a folded call keeps its payload when only the result row is retained", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A page turn carrying a call and its result: the pair folds into a
 			// single host item, so the host's own row is the only row either
 			// side ever projects.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_1",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-1",
-									argumentsJson: '{"command":"make"}',
-									status: "inProgress",
-									position: { entry: 40, item: 0 },
-								},
-								{
-									id: "item_tool_result_1",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-1",
-									output: "ok",
-									exitCode: 0,
-									status: "completed",
-									position: { entry: 41, item: 0 },
-								},
-							],
-							{ inputTokens: 700, outputTokens: 70 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_1",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-1",
+								argumentsJson: '{"command":"make"}',
+								status: "inProgress",
+								position: { entry: 40, item: 0 },
+							},
+							{
+								id: "item_tool_result_1",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-1",
+								output: "ok",
+								exitCode: 0,
+								status: "completed",
+								position: { entry: 41, item: 0 },
+							},
+						],
+						{ inputTokens: 700, outputTokens: 70 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			// The folded host's own row is the retained row, and it carries the
@@ -8893,52 +8092,38 @@ describe("ConversationStore", () => {
 		// transcript key left its keyless backing item outside the window and
 		// the bound shed the payload behind a row still on screen.
 		it("a keyed retained row keeps its keyless backing item's turn in the window", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A page whose display row is keyed while its backing fragment item
 			// arrives keyless — the exact pair itemIdentityMatches still matches
 			// by bare id.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "ra",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "alpha",
-									position: { entry: 90, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "ra",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "alpha",
+								position: { entry: 90, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const conv = store.getState().conversation!;
 			// The keyed row backs the keyless item by bare id, so the turn keeps
@@ -8975,52 +8160,38 @@ describe("ConversationStore", () => {
 		// order: content from the newer side of the merge wins independently
 		// of where the aliases sort.
 		it("a page's untouched stale alias does not overwrite the retained fold", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holds the item's fresh payload under
 			// {id pa, transcriptKey pk}, in window.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "pa",
-									transcriptKey: "pk",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "fresh",
-									position: { entry: 30, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 50, outputTokens: 5 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "pa",
+								transcriptKey: "pk",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "fresh",
+								position: { entry: 30, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 50, outputTokens: 5 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "pk", text: "fresh" }),
@@ -9031,37 +8202,35 @@ describe("ConversationStore", () => {
 			// STALE text. The merge folds the retained item into the keyless
 			// alias — the first identity match — and the untouched stale sibling
 			// must not then fold over the fresh result.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "pa",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "older keyless",
-									position: { entry: 30, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "sb",
-									transcriptKey: "pk",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale",
-									position: { entry: 31, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "pa",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "older keyless",
+								position: { entry: 30, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "sb",
+								transcriptKey: "pk",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale",
+								position: { entry: 31, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9096,54 +8265,40 @@ describe("ConversationStore", () => {
 		// are the items to exclude — the ones carrying no field a fold keeps —
 		// never real items merely because their text is omitted.
 		it("a retained tool item with omitted text keeps its fields through the fold", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained tool item whose wire omitted the text field — hydrated
 			// with the omitted-text marker — carrying its CURRENT output.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-9",
-									argumentsJson: '{"command":"make"}',
-									output: "current output",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-9",
+								argumentsJson: '{"command":"make"}',
+								output: "current output",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "kt", output: "current output" }),
@@ -9154,40 +8309,38 @@ describe("ConversationStore", () => {
 			// item's STALE output. The retained item folds into the keyless alias
 			// (the first identity match) — and its fields, not the stale
 			// sibling's, must come out of the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-9",
-									argumentsJson: '{"command":"make"}',
-									status: "inProgress",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-8",
-									argumentsJson: '{"command":"make"}',
-									output: "stale output",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-9",
+								argumentsJson: '{"command":"make"}',
+								status: "inProgress",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-8",
+								argumentsJson: '{"command":"make"}',
+								output: "stale output",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9205,51 +8358,37 @@ describe("ConversationStore", () => {
 		// duplicate reconciliation by source precedence over the keyed sibling
 		// holding the restored fields.
 		it("a sparse wire fragment folds without claiming freshness over a restored sibling", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding the SPARSE fragment the wire reissued:
 			// identity and ordering fields only — no text, no arguments, no
 			// output, no status. The projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "item_tool_7", transcriptKey: "kt" }),
@@ -9261,39 +8400,37 @@ describe("ConversationStore", () => {
 			// (the first identity match); the fold supplies no payload, so the
 			// merged item must not claim freshness, and the reconciliation must
 			// let the later keyed sibling's restored fields stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									callId: "call-8",
-									output: "restored output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								callId: "call-8",
+								output: "restored output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9309,53 +8446,39 @@ describe("ConversationStore", () => {
 		// output must resolve in list order, not ride the item's status-borne
 		// freshness.
 		it("a status-only fresh fragment does not promote inherited stale output", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding a STATUS-ONLY fragment: identity and
 			// ordering fields plus a completed status — no text, no arguments,
 			// no output. The status is real payload, so the fragment is not
 			// identity-only; the projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "item_tool_7", transcriptKey: "kt", status: "completed" }),
@@ -9367,39 +8490,37 @@ describe("ConversationStore", () => {
 			// merged item is fresh through the status, but the output it carries
 			// came from the older alias, so the restored sibling's output must
 			// still win the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									callId: "call-8",
-									output: "restored output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								callId: "call-8",
+								output: "restored output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9415,51 +8536,37 @@ describe("ConversationStore", () => {
 		// the alias's inherited stale TEXT over a later sibling's restored
 		// text: text counts as supplied only when a fresh leaf provided it.
 		it("a status-only fresh fragment does not promote inherited stale text", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding a STATUS-ONLY agentMessage fragment:
 			// identity and ordering fields plus a completed status — no text of
 			// its own. The projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "msg_7",
-									type: "agentMessage",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 60, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "msg_7",
+								type: "agentMessage",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 60, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "msg_7", transcriptKey: "kt", status: "completed" }),
@@ -9471,34 +8578,32 @@ describe("ConversationStore", () => {
 			// merged item is fresh through the status, but the text it carries
 			// came from the older alias, so the restored sibling's text must
 			// still win the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "msg_7",
-									type: "agentMessage",
-									text: "stale text",
-									position: { entry: 60, item: 0 },
-								},
-								{
-									id: "msg_8",
-									type: "agentMessage",
-									text: "restored text",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 61, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "msg_7",
+								type: "agentMessage",
+								text: "stale text",
+								position: { entry: 60, item: 0 },
+							},
+							{
+								id: "msg_8",
+								type: "agentMessage",
+								text: "restored text",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 61, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9515,82 +8620,68 @@ describe("ConversationStore", () => {
 		// fresh input supplied survives, the status the other side supplied
 		// survives, and everything else falls to the later-wins tiebreak.
 		it("two fresh-folded duplicates keep each side's fresh-supplied fields", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "pa",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "fresh",
-									transcriptKey: "kk",
-									position: { entry: 70, item: 0 },
-									status: "completed",
-								},
-								// The second retained alias carries ONLY a status — its
-								// text is the omitted marker, so it supplies no text.
-								markItemTextOmitted({
-									id: "pb",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "completed",
-									position: { entry: 71, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "pa",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "fresh",
+								transcriptKey: "kk",
+								position: { entry: 70, item: 0 },
+								status: "completed",
+							},
+							// The second retained alias carries ONLY a status — its
+							// text is the omitted marker, so it supplies no text.
+							markItemTextOmitted({
+								id: "pb",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "completed",
+								position: { entry: 71, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues both retained aliases keyless — each holding
 			// its own STALE text — and the second one already keyed: both
 			// folds land, leaving two duplicates of the kk identity, the
 			// fresh-text one ordered first.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "pa",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "old A",
-									position: { entry: 70, item: 0 },
-								},
-								{
-									id: "pb",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "old B",
-									transcriptKey: "kk",
-									position: { entry: 71, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "pa",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "old A",
+								position: { entry: 70, item: 0 },
+							},
+							{
+								id: "pb",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "old B",
+								transcriptKey: "kk",
+								position: { entry: 71, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9607,80 +8698,66 @@ describe("ConversationStore", () => {
 		// merge's own presence rules: null is absent for the nullish-fallback
 		// fields.
 		it("a fresh null raw field does not promote inherited stale metadata", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-bearing retained fragment whose raw is NULL —
-								// it supplies a status but no raw of its own.
-								markItemTextOmitted({
-									id: "s1",
-									turnId: "rt",
-									type: "commandExecution",
-									callId: "c9",
-									text: "",
-									status: "completed",
-									raw: null,
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-bearing retained fragment whose raw is NULL —
+							// it supplies a status but no raw of its own.
+							markItemTextOmitted({
+								id: "s1",
+								turnId: "rt",
+								type: "commandExecution",
+								callId: "c9",
+								text: "",
+								status: "completed",
+								raw: null,
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying STALE
 			// raw metadata the null-raw fragment cannot displace — followed by
 			// a keyed sibling carrying the RESTORED metadata. The alias fold
 			// inherits the stale raw; the reconciliation must let the later
 			// sibling's own raw stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "s1",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									raw: { stale: "yes" },
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "t2",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c8",
-									raw: { restored: "yes" },
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "s1",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								raw: { stale: "yes" },
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "t2",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c8",
+								raw: { restored: "yes" },
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9697,82 +8774,68 @@ describe("ConversationStore", () => {
 		// as a second item of one identity. The reconciliation must keep
 		// folding the merged result until no accumulated candidate matches.
 		it("a three-item alias bridge reconciles to one item", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "k", text: "k row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "b",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "retained b",
-									position: { entry: 20, item: 0 },
-									status: "completed",
-								},
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "k", text: "k row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "b",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "retained b",
+								position: { entry: 20, item: 0 },
+								status: "completed",
+							},
+						],
+					},
+				],
+			});
 
 			// The page carries the bridge: a bare {id b} alias, a keyed {id a,
 			// tk k} item, and the {id b, tk k} reissue. The reissue folds into
 			// the bare alias (the first id match) and the fold GAINS the key —
 			// which the keyed item ahead of it also carries.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "b",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale b",
-									position: { entry: 40, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "a",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "alpha a",
-									transcriptKey: "k",
-									position: { entry: 41, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "b",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale b2",
-									transcriptKey: "k",
-									position: { entry: 42, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "b",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale b",
+								position: { entry: 40, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "a",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "alpha a",
+								transcriptKey: "k",
+								position: { entry: 41, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "b",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale b2",
+								transcriptKey: "k",
+								position: { entry: 42, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9789,90 +8852,76 @@ describe("ConversationStore", () => {
 		// The provenance must record in list order: a side's leaves read, in
 		// the fold's walk, in the same precedence the resolution used.
 		it("a corrected call output survives the result fold after reconciliation", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-only retained CALL fragment: it supplies a
-								// status but no output of its own.
-								markItemTextOmitted({
-									id: "item_tool_9",
-									turnId: "rt",
-									type: "commandExecution",
-									callId: "c9",
-									text: "",
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-only retained CALL fragment: it supplies a
+							// status but no output of its own.
+							markItemTextOmitted({
+								id: "item_tool_9",
+								turnId: "rt",
+								type: "commandExecution",
+								callId: "c9",
+								text: "",
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying the
 			// STALE output — followed by a keyed sibling carrying the
 			// corrected one, and a result fragment for the call that OMITS
 			// output. The reconciliation keeps the corrected output; the
 			// result fold must not read the stale alias first and restore it.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_9",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									output: "corrected output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-								{
-									id: "item_tool_result_1",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									status: "completed",
-									position: { entry: 52, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_9",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								output: "corrected output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+							{
+								id: "item_tool_result_1",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								status: "completed",
+								position: { entry: 52, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9888,80 +8937,66 @@ describe("ConversationStore", () => {
 		// clear at reconciliation: the later stale duplicate's index came
 		// back. Presence, not value, decides the spread-merged fields.
 		it("a fresh fragment's explicit clear survives alias reconciliation", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-bearing retained fragment whose EXPLICIT
-								// undefined transcript entry index clears the field.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "completed",
-									transcriptKey: "kk",
-									transcriptEntryIndex: undefined,
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-bearing retained fragment whose EXPLICIT
+							// undefined transcript entry index clears the field.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "completed",
+								transcriptKey: "kk",
+								transcriptEntryIndex: undefined,
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
 			// entry index the explicit clear must displace — followed by a
 			// keyed sibling carrying the restored text and ANOTHER index. The
 			// alias fold keeps the clear; the reconciliation must keep it too,
 			// not let the sibling's index back in.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									transcriptEntryIndex: 5,
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									transcriptEntryIndex: 7,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								transcriptEntryIndex: 5,
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								transcriptEntryIndex: 7,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			const merged = after.turns.find((turn) => turn.id === "rt")?.items ?? [];
@@ -9980,78 +9015,64 @@ describe("ConversationStore", () => {
 		// restored the later duplicate's stale index. (The round-22 test
 		// misses this: its fragment carries a status.)
 		it("a clear-only fragment is not identity-only", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A retained fragment carrying ONLY an explicit clear —
-								// its text omitted, no status, no payload field.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									transcriptKey: "kk",
-									transcriptEntryIndex: undefined,
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A retained fragment carrying ONLY an explicit clear —
+							// its text omitted, no status, no payload field.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								transcriptKey: "kk",
+								transcriptEntryIndex: undefined,
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
 			// entry index — followed by a keyed sibling carrying the restored
 			// text and ANOTHER index. The alias fold keeps the clear; the
 			// reconciliation must keep it too.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									transcriptEntryIndex: 5,
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									transcriptEntryIndex: 7,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								transcriptEntryIndex: 5,
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								transcriptEntryIndex: 7,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			const merged = after.turns.find((turn) => turn.id === "rt")?.items ?? [];
@@ -10111,29 +9132,27 @@ describe("ConversationStore", () => {
 			// A row-less page reissues the alias under fa's bare id; the fold
 			// leaves the turn backed by the fa row through the recorded
 			// ancestry — the item's own identity names no row.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "fa",
-									transcriptKey: "kk",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "page fa",
-									position: { entry: 70, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 700, outputTokens: 70 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "fa",
+								transcriptKey: "kk",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "page fa",
+								position: { entry: 70, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 700, outputTokens: 70 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "rt")?.items ?? [];
 			expect(folded).toEqual([expect.objectContaining({ id: "fb", transcriptKey: "kk", text: "alias restored" })]);
@@ -10157,78 +9176,64 @@ describe("ConversationStore", () => {
 		// completed status. Status counts as supplied only when a fresh
 		// leaf's own status is what the merge kept.
 		it("an inProgress fragment does not promote an inherited failed status", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// An in-progress retained fragment: its rank cannot beat
-								// the failed alias it folds into, so the merge keeps the
-								// alias's failure.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "inProgress",
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// An in-progress retained fragment: its rank cannot beat
+							// the failed alias it folds into, so the merge keeps the
+							// alias's failure.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "inProgress",
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying the
 			// FAILED status the in-progress fragment cannot displace —
 			// followed by a keyed sibling carrying the restored text and a
 			// COMPLETED status. The alias fold keeps the failure; the
 			// reconciliation must let the sibling's completed status stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const afterRound24 = store.getState().conversation!;
 			expect(afterRound24.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -10254,8 +9259,8 @@ describe("ConversationStore", () => {
 			// cap runs. Under the cutover the rows reproject from the model on
 			// the completion, so the payload is backed only while its row is
 			// retained; the bound must trim what the cap evicted.
-			service.readProjectionResult = {
-				conversation: makeConversation(
+			service.readProjectionResult = readResult(
+				makeConversation(
 					{
 						threadId: "thread-1",
 						instanceId: "instance-1",
@@ -10298,36 +9303,33 @@ describe("ConversationStore", () => {
 					},
 					true,
 				),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// An unrelated page load bounds the turns: no row backs rt's item,
 			// so rt compacts to identity + usage.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"un",
-							[
-								{
-									id: "un-0",
-									transcriptKey: "un",
-									turnId: "un",
-									type: "agentMessage",
-									text: "unrelated",
-									position: { entry: 91, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 9, outputTokens: 9 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"un",
+						[
+							{
+								id: "un-0",
+								transcriptKey: "un",
+								turnId: "un",
+								type: "agentMessage",
+								text: "unrelated",
+								position: { entry: 91, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 9, outputTokens: 9 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([]);
 
@@ -10335,46 +9337,30 @@ describe("ConversationStore", () => {
 			// repopulates rt's entire payload. The store has no row applier for
 			// turn/completed — the model-only publish is the only path — and it
 			// must bound what it publishes.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "rt", itemsView: "default", status: "running" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "rt",
-							itemsView: "full",
-							status: "completed",
-							usage: { inputTokens: 42, outputTokens: 4 },
-						},
-					],
-					items: [
-						{
-							id: "rb",
-							turnId: "rt",
-							type: "agentMessage",
-							text: "the full payload",
-							transcriptKey: "kr",
-							position: { entry: 90, item: 0 },
-							status: "completed",
-						},
-					].map((it) => ({ ...it, turnId: it.turnId ?? "rt" })),
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "rt", itemsView: "default", status: "running" }],
+			});
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "rt",
+						itemsView: "full",
+						status: "completed",
+						usage: { inputTokens: 42, outputTokens: 4 },
+					},
+				],
+				items: [
+					{
+						id: "rb",
+						turnId: "rt",
+						type: "agentMessage",
+						text: "the full payload",
+						transcriptKey: "kr",
+						position: { entry: 90, item: 0 },
+						status: "completed",
+					},
+				].map((it) => ({ ...it, turnId: it.turnId ?? "rt" })),
+			});
 			const after = store.getState().conversation!;
 			const settled = after.turns.find((turn) => turn.id === "rt");
 			expect(settled?.items).toEqual([]);
@@ -10445,11 +9431,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// 200 more rows below the window: the cap discards every one of them,
@@ -10474,11 +9459,10 @@ describe("ConversationStore", () => {
 			// rows all fell off the cut and its payloads bounded away with them,
 			// so no retained transcript evidence claims coverage — the reread's
 			// own window cursor is the wire truth.
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			expect(conv.olderCursor).toBe("cursor-1");
@@ -10496,11 +9480,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t1", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 5 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			// No loadOlder ever ran - pageOwnedIds/pageOwnedTurnIds stay empty, so
 			// there is no page history to preserve.
@@ -10512,11 +9495,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 8 } }],
 				olderCursor: undefined,
 			});
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// t1 is gone - there was no page history to preserve it, so the fresh
@@ -10565,11 +9547,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page's turn is genuinely new, but every one of its rows sits
@@ -10577,36 +9558,34 @@ describe("ConversationStore", () => {
 			// display row, so the retained-turn bound sheds its payloads the
 			// moment the page lands — pageItemIds gets nothing of it, and only
 			// pageOwnedTurnIds keeps the turn itself alive.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"t1",
-							[
-								{
-									id: "t1-evicted-0",
-									turnId: "t1",
-									type: "userMessage",
-									text: "page payload 0",
-									position: { entry: 1, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "t1-evicted-1",
-									turnId: "t1",
-									type: "userMessage",
-									text: "page payload 1",
-									position: { entry: 2, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"t1",
+						[
+							{
+								id: "t1-evicted-0",
+								turnId: "t1",
+								type: "userMessage",
+								text: "page payload 0",
+								position: { entry: 1, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "t1-evicted-1",
+								turnId: "t1",
+								type: "userMessage",
+								text: "page payload 1",
+								position: { entry: 2, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.map((t) => t.id)).toEqual(["t1", "t2"]);
 			const landed = store.getState().conversation?.turns.find((turn) => turn.id === "t1")!;
@@ -10615,11 +9594,10 @@ describe("ConversationStore", () => {
 			// The reread's own window re-serves the retained rows; the evicted
 			// page turn must survive it with its usage.
 			const fresh = opened;
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// Order is not asserted (see the "rehydrate preserves..." test above).
@@ -10694,11 +9672,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			service.olderItems = {
@@ -10720,11 +9697,10 @@ describe("ConversationStore", () => {
 				],
 				olderCursor: undefined,
 			});
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			expect(conv.turns.map((t) => t.id).sort()).toEqual(["t1", "t2"]);
@@ -10744,11 +9720,10 @@ describe("ConversationStore", () => {
 			turns: [{ id: "turn-initial", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 1 } }],
 			olderCursor: "cursor-initial",
 		});
-		service.readProjectionResult = {
-			conversation: opened,
+		service.readProjectionResult = readResult(opened, {
 			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 			olderCursor: "cursor-initial",
-		};
+		});
 		await store.getState().openProjected(service, sink, "ref-1");
 
 		// The page reaches the beginning of the old window. Its undefined
@@ -10760,17 +9735,16 @@ describe("ConversationStore", () => {
 		await store.getState().loadOlder(service);
 		expect(store.getState().conversation?.olderCursor).toBeUndefined();
 
-		service.readProjectionResult = {
-			conversation: makeConversation({
+		service.readProjectionResult = readResult(
+			makeConversation({
 				threadId: "thread-1",
 				instanceId: "instance-1",
 				usage: null,
 				turns: [{ id: "turn-fresh", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 2 } }],
 				olderCursor: "fresh-cursor",
 			}),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: "fresh-cursor",
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "fresh-cursor" },
+		);
 		await store.getState().rehydrate(service, sink);
 
 		const conv = store.getState().conversation!;
@@ -10790,11 +9764,10 @@ describe("ConversationStore", () => {
 			turns: [{ id: "turn-a", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 1 } }],
 			olderCursor: "cursor-a",
 		});
-		service.readProjectionResult = {
-			conversation: initial,
+		service.readProjectionResult = readResult(initial, {
 			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 			olderCursor: "cursor-a",
-		};
+		});
 		await store.getState().openProjected(service, sink, "ref-1");
 		service.olderItems = {
 			turnsPage: turnsPage([wireTurn("turn-page-a", 500, 20)], "cursor-page-a"),
@@ -10802,17 +9775,16 @@ describe("ConversationStore", () => {
 		};
 		await store.getState().loadOlder(service);
 
-		service.readProjectionResult = {
-			conversation: makeConversation({
+		service.readProjectionResult = readResult(
+			makeConversation({
 				threadId: "thread-1",
 				instanceId: "instance-b",
 				usage: null,
 				turns: [{ id: "turn-b", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 2 } }],
 				olderCursor: "cursor-b",
 			}),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: "cursor-b",
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "cursor-b" },
+		);
 		await store.getState().rehydrate(service, sink);
 		expect(store.getState().conversation?.turns.map((turn) => turn.id)).toEqual(["turn-b"]);
 
@@ -10823,8 +9795,8 @@ describe("ConversationStore", () => {
 		// nothing new in, leaving turn-b standing; applyReadModel's
 		// disposition (from a real bootGeneration differing from the prior
 		// rehydrate's own seeded "") reads this as a genuine replace instead.
-		service.readProjectionResult = {
-			conversation: makeConversation(
+		service.readProjectionResult = readResult(
+			makeConversation(
 				{
 					threadId: "thread-1",
 					instanceId: "instance-b",
@@ -10834,9 +9806,8 @@ describe("ConversationStore", () => {
 				},
 				true,
 			),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: null,
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+		);
 		await store.getState().rehydrate(service, sink);
 
 		const conv = store.getState().conversation!;
@@ -10871,11 +9842,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -10937,11 +9907,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -11013,11 +9982,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page's rows all fall below the full window: the cap discards
@@ -11058,15 +10026,11 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-9",
 			};
-			service.readProjectionResult = {
-				conversation: disjoint,
+			service.readProjectionResult = readResult(disjoint, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-9",
-			};
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			});
+			resync(store);
 			const awaitRehydrateRead = async (count: number): Promise<void> => {
 				for (let i = 0; i < 40 && service.readProjectionCalls.length < count; i++) {
 					await Promise.resolve();
@@ -11090,20 +10054,14 @@ describe("ConversationStore", () => {
 			expect(store.getState().olderCursor).toBe("more");
 
 			// The UI can page again from the fresh window's own cursor.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t-mid", [
-							{
-								...userMessageItem("mid-1", "mid"),
-								position: { entry: 500, item: 0 },
-							},
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t-mid", [
+					{
+						...userMessageItem("mid-1", "mid"),
+						position: { entry: 500, item: 0 },
+					},
+				]),
+			]);
 			const reloaded = await store.getState().loadOlder(service);
 			expect(reloaded).not.toMatchObject({ status: "ignored" });
 			expect(rows(store).some((row) => row.id === "mid-1")).toBe(true);
@@ -11121,11 +10079,10 @@ describe("ConversationStore", () => {
 				turns: [],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -11175,8 +10132,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ turns }), ALL_TRUE_CAPS, true);
+			const service = serviceForThread(makeThread({ turns }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -11316,28 +10272,23 @@ describe("ConversationStore", () => {
 			for (let i = 0; i < 500; i++) {
 				windowItems.push({ ...userMessageItem(`item-${i}`, ""), position: { entry: 100 + i, item: 0 } });
 			}
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t-latest", items: windowItems })] }),
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t-latest", items: windowItems })] }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t-failed",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "boom" },
-							items: [],
-						},
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t-failed",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "boom" },
+						items: [],
+					},
+				],
+				"cursor-2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			// The cap discarded the page's only contribution (its failure row,
@@ -11356,8 +10307,7 @@ describe("ConversationStore", () => {
 	// omits (but the still-current held item carries) gets cleared.
 	describe("rehydrate does not act on a discarded (stale) read", () => {
 		it("a same-incarnation reread with a shorter length does not clear a held payload it omits", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -11386,8 +10336,8 @@ describe("ConversationStore", () => {
 			});
 			// A stale response: same incarnation, SHORTER length, and it omits
 			// the output the held item already carries.
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...makeReadProjectionResult(
 						makeThread({
 							turns: [
@@ -11403,9 +10353,8 @@ describe("ConversationStore", () => {
 						true,
 					).conversation,
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			expect(rowById(store, "call-1")).toMatchObject({ detail: { output: "held output" } });
 		});
@@ -11417,12 +10366,7 @@ describe("ConversationStore", () => {
 		// race (e.g. a resync bumped epoch/bootGeneration past what this read's
 		// own snapshot carries).
 		it("resumeProjected stays open and keeps the subscription when its read is discarded as stale", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -11452,12 +10396,7 @@ describe("ConversationStore", () => {
 		// PRE-suspend generation — every live frame after a discarded resume
 		// read is then silently ignored, freezing the activity/jobs/usage panel.
 		it("a discarded resume read still installs the new generation's identity, so later live frames are not ignored", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
@@ -11620,23 +10559,20 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: latest,
+			service.readProjectionResult = readResult(latest, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [{ ...userMessageItem("old", "old"), position: { entry: 1, item: 0 } }], {
-							inputTokens: 500,
-							outputTokens: 20,
-						}),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			});
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t1", [{ ...userMessageItem("old", "old"), position: { entry: 1, item: 0 } }], {
+						inputTokens: 500,
+						outputTokens: 20,
+					}),
+				],
+				"cursor-2",
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.map((t) => t.id)).toEqual(["t1", "t2"]);
@@ -11793,16 +10729,7 @@ describe("ConversationStore", () => {
 	describe("I1: projected binding epoch — stale work suppressed before effect", () => {
 		it("queued rehydrate for A is suppressed after switch to B (zero serviceA reads/sinkA writes)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 
@@ -11810,22 +10737,10 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
 			// Queue a rehydrate for A via resync — the scheduler captures the
 			// binding (serviceA+refA+epoch) but defers to a microtask.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			// Now set up serviceB and switch to B before the scheduler fires.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().openProjected(serviceB, sinkB, "ref-B");
 			const readsA = serviceA.readProjectionCalls.length;
@@ -11841,24 +10756,12 @@ describe("ConversationStore", () => {
 
 		it("queued rehydrate for A is suppressed after close (no serviceA reads)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
 			// Trigger a rehydrate then immediately close.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			store.getState().close();
 			const readsA = serviceA.readProjectionCalls.length;
 			await yieldMicrotask();
@@ -11868,23 +10771,11 @@ describe("ConversationStore", () => {
 
 		it("queued rehydrate for A is suppressed after reset (no serviceA reads)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			store.getState().reset();
 			const readsA = serviceA.readProjectionCalls.length;
 			await yieldMicrotask();
@@ -11893,24 +10784,12 @@ describe("ConversationStore", () => {
 
 		it("plain open clears projected bindings (no projected rehydrate after open)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
 			// Queue a rehydrate via resync.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			// Plain open clears projected bindings.
 			const serviceB = new FakeConversationService();
 			serviceB.openConv = makeConversation({ threadId: "thread-B" });
@@ -11926,36 +10805,15 @@ describe("ConversationStore", () => {
 
 		it("rehydrate can never call serviceA with refB", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sink = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sink, "ref-1");
 			// Queue a rehydrate for ref-1.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// Before the scheduler fires, openProjected with a different service+ref.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-2" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-2" }), { olderCursor: null });
 			await store.getState().openProjected(serviceB, sink, "ref-2");
 			const readsA = serviceA.readProjectionCalls.length;
 			await yieldMicrotask();
@@ -11975,10 +10833,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const readsBefore = service.readProjectionCalls.length;
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			service.sendShouldReject = refusal();
 			await store.getState().send(service, textInput("x"));
@@ -12030,11 +10885,10 @@ describe("ConversationStore", () => {
 				usage: {},
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			// Subscribe to store state changes to record when the conversation
 			// projection lands.
 			const order: string[] = [];
@@ -12060,32 +10914,14 @@ describe("ConversationStore", () => {
 		it("coalesces a synchronous pre-effect burst to one rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const ctrl = makeControlledRead(service);
 			const initialReads = service.readProjectionCalls.length;
 			// Synchronous burst — 3 resync notifications coalesce to one rehydrate.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
+			resync(store);
+			resync(store);
 			// M1: deterministic — await started, yield so orig resolves and the
 			// release gate is pushed, set up completed, release.
 			await ctrl.started();
@@ -12099,33 +10935,18 @@ describe("ConversationStore", () => {
 		it("retains a request during an in-flight rehydrate and drains it", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Hang every readProjection so we can control when each completes.
 			const ctrl = makeControlledRead(service);
 			const readsAfterOpen = service.readProjectionCalls.length;
 			// Trigger a rehydrate (hangs on first readProjection).
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// M1: deterministic — await started so we know the rehydrate is in-flight.
 			await ctrl.started();
 			await yieldMicrotask(); // let orig resolve and push to releaseQueue
 			// While in-flight, trigger another resync (trailing).
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// Release the first — the trailing must drain.
 			const started2P = ctrl.started(2);
 			const completed1P = ctrl.completed();
@@ -12143,32 +10964,17 @@ describe("ConversationStore", () => {
 		it("scheduler drains all trailing work recursively (no test-only flush)", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// M1: deterministic — await started so we know the rehydrate is in-flight.
 			await ctrl.started();
 			await yieldMicrotask(); // let orig resolve and push to releaseQueue
 			// The rehydrate is hanging. Queue a trailing request while in-flight.
 			// The trailing is retained and must drain after the first completes.
 			const readsBeforeTrailing = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// Release the first — the trailing must drain recursively.
 			const started2P = ctrl.started(2);
 			const completed1P = ctrl.completed();
@@ -12185,16 +10991,7 @@ describe("ConversationStore", () => {
 		it("catches rehydrate errors without unhandled rejections and remains usable", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Make readProjection throw on the first rehydrate call.
 			const origRead = service.readProjection.bind(service);
@@ -12206,10 +11003,7 @@ describe("ConversationStore", () => {
 				}
 				return origRead(ref);
 			};
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// M1: let the erroring effect run and bail. The error is caught by the
 			// scheduler — yield so the microtask fires and the effect errors out.
 			await yieldMicrotask();
@@ -12217,10 +11011,7 @@ describe("ConversationStore", () => {
 			await yieldMicrotask();
 			// The scheduler must remain usable — retrigger.
 			const readsBefore = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			// The second rehydrate's readProjection passes through (throwOnce=false).
 			// Use controlled read to deterministically await completion.
 			const ctrl = makeControlledRead(service);
@@ -12239,16 +11030,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			sink.setLiveViewResult = () => false;
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(store.getState().conversation).toBeNull();
@@ -12260,16 +11044,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const openSink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, openSink, "ref-1");
 			expect(store.getState().conversation).not.toBeNull();
 			const rejectSink = createFakeSink();
@@ -12283,16 +11060,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, sink, "ref-1");
 			const identity = sink.setLiveViewCalls[0]?.identity;
 			expect(identity?.threadId).toBe("thread-1");
@@ -12304,16 +11072,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, sink, "ref-1");
 			sink.notificationOutcome = () => "rehydrate";
 			const initialReads = service.readProjectionCalls.length;
@@ -12337,11 +11096,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
 			expect(activityStore.getState().view).toBe(activityView);
 			expect(activityStore.getState().status).toBe("open");
@@ -12351,16 +11109,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
 			const initialReads = service.readProjectionCalls.length;
 			service.notificationHandler?.({
@@ -12389,16 +11138,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			const realState = activityStore.getState();
 			const staleSink: LiveActivitySink = {
 				setLiveView(view, identity) {
@@ -12430,41 +11172,20 @@ describe("ConversationStore", () => {
 			// epoch increment suppresses the queued A effect — serviceA/sinkA
 			// are never called after the rebind.
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-1");
 
 			// Queue a rehydrate for A via resync — scheduler captures binding
 			// (serviceA+sinkA+epoch).
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 
 			// Call rehydrate with DIFFERENT service+sink objects (same ref+gen).
 			// This increments bindingEpoch before assignment, so the queued A
 			// effect is suppressed.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -12533,16 +11254,7 @@ describe("ConversationStore", () => {
 	describe("same-key reread coalescing through public notifications", () => {
 		it("multiple same-key reread requests during a blocker produce exactly one trailing read", async () => {
 			const service = new FakeConversationService();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const readCtrl = makeControlledRead(service);
@@ -12553,26 +11265,14 @@ describe("ConversationStore", () => {
 			// blocker is in flight. They must coalesce to exactly one trailing
 			// read — not N reads.
 			// First, start the initial rehydrate (held).
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await readCtrl.started(1); // 1st controlled read (openProjected was before)
 			await yieldMicrotask(); // let the wrapper reach the release gate
 
 			// While the first is held, emit 3 more same-key resync notifications.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
+			resync(store);
+			resync(store);
 
 			// Release the first — the trailing coalesced read drains.
 			readCtrl.release();
@@ -12837,11 +11537,21 @@ describe("ConversationStore", () => {
 		};
 	}
 
+	// A fake service whose read projection hydrates exactly this thread.
+	function serviceForThread(
+		thread: Thread,
+		capabilities: ThreadCapabilities = ALL_TRUE_CAPS,
+		versioned = false,
+	): FakeConversationService {
+		const service = new FakeConversationService();
+		service.readProjectionResult = makeReadProjectionResult(thread, capabilities, versioned);
+		return service;
+	}
+
 	// A store opened through openProjected onto a fresh fake service serving
 	// `thread` as its projection.
 	async function openProjectedThread(thread: Thread, versioned = false) {
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread, ALL_TRUE_CAPS, versioned);
+		const service = serviceForThread(thread, ALL_TRUE_CAPS, versioned);
 		const store = createConversationStore();
 		await store.getState().openProjected(service, createFakeSink(), "ref-1");
 		return store;
@@ -12871,8 +11581,7 @@ describe("ConversationStore", () => {
 		thread: Thread;
 	}> {
 		const thread = runningTurnThread(items, over);
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread, ALL_TRUE_CAPS, versioned);
+		const service = serviceForThread(thread, ALL_TRUE_CAPS, versioned);
 		const store = createConversationStore();
 		const sink = createFakeSink();
 		await store.getState().openProjected(service, sink, "ref-1");
@@ -12920,8 +11629,7 @@ describe("ConversationStore", () => {
 			],
 			evener: evenerWith({ activeTurnId: "t1" }),
 		});
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread);
+		const service = serviceForThread(thread);
 		const store = createConversationStore();
 		const sink = createFakeSink();
 		await store.getState().openProjected(service, sink, "ref-1");
@@ -12982,19 +11690,13 @@ describe("ConversationStore", () => {
 			// replace items.
 			service.readProjectionResult = makeReadProjectionResult(makeThread());
 			service.readProjectionResult.olderCursor = null;
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await yieldMicrotask();
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, a loadOlder (L) succeeds — prepends items,
 			// advances cursor.
-			service.olderItems = {
-				items: [{ kind: "user", id: "old-page-item", text: "older" }],
-				nextCursor: "cursor-2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "old-page-item", text: "older" }], "cursor-2");
 			await store.getState().loadOlder(service);
 			const itemsAfterL = store.getState().conversation?.items ?? [];
 			const cursorAfterL = store.getState().olderCursor;
@@ -13020,10 +11722,7 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 			// Start R (hanging).
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await yieldMicrotask();
 			await ctrl.started(1);
 			await yieldMicrotask();
@@ -13059,10 +11758,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start R (hanging).
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, a send fails — sets mutation error.
@@ -13153,10 +11849,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-B");
 			store.setState({ olderCursor: "cursor-B" });
 			// Start and complete a B page operation.
-			service.olderItems = {
-				items: [{ kind: "user", id: "B-item", text: "B page" }],
-				nextCursor: "cursor-B2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "B-item", text: "B page" }], "cursor-B2");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.threadId).toBe("thread-B");
 			// Clear tracked calls — from this point, only A's stale resolution
@@ -13341,17 +12034,9 @@ describe("ConversationStore", () => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			expect(store.getState().conversation?.askPending).toBe(false);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...askUserItem("ask-1", VALID_ASK_ARGS), turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...askUserItem("ask-1", VALID_ASK_ARGS), turnId: "t1" }],
+			});
 			// The item alone is not the whole signal: the round that posts an
 			// ask_user call ends its turn on the same boundary a status change
 			// announces (session_lifecycle.go's askedThisRound), so the two frames
@@ -13401,30 +12086,14 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
+			});
 			// And it stays false as later frames fold: the flag is re-derived every
 			// publish, never carried forward from the model the projection wrote.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
+			});
 			// The wire's own flag is untouched by any of it.
 			expect(store.getState().conversation?.askPending).toBe(false);
 		});
@@ -13443,26 +12112,16 @@ describe("ConversationStore", () => {
 				}),
 			);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t1" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "thread/status/changed",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					status: { type: "active" },
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t1" }],
+			});
+			statusChanged(
+				store,
+				{ type: "active" },
+				{
 					askPending: false,
 				},
-			} as AnyNotification);
+			);
 
 			expect(store.getState().conversation?.askPending).toBe(false);
 			expect(rows(store).some((row) => row.kind === "question")).toBe(false);
@@ -13476,17 +12135,9 @@ describe("ConversationStore", () => {
 		it("renders no question row for a live ask until a status frame carries askPending", async () => {
 			const { store } = await openRunningTurn([], {}, true);
 			expect(store.getState().conversation?.askPending).toBe(false);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...askUserItem("ask-live", VALID_ASK_ARGS), turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...askUserItem("ask-live", VALID_ASK_ARGS), turnId: "t1" }],
+			});
 			expect(rowById(store, "ask-live")).toMatchObject({ kind: "activity", family: "tool" });
 			expect(store.getState().conversation?.askPending).toBe(false);
 
@@ -13513,24 +12164,15 @@ describe("ConversationStore", () => {
 					makeTurn({ id: "t2", items: [], status: "inProgress" }),
 				],
 			});
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(askThread, ALL_TRUE_CAPS, true);
+			const service = serviceForThread(askThread, ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.askPending).toBe(true);
 			expect(rows(store).some((item) => item.kind === "question")).toBe(true);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...userMessageItem("answer-1", "I choose A"), turnId: "t2" }],
+			});
 			await yieldMicrotask();
 			// The answered call is no longer answerable, so its question row is
 			// gone and nothing is offered to answer.
@@ -13545,17 +12187,9 @@ describe("ConversationStore", () => {
 		] as const)("projects a %s ask_user as its tool row, never a question row", async (_label, item) => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...item(), turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...item(), turnId: "t1" }],
+			});
 			await yieldMicrotask();
 			expect(rows(store).some((row) => row.kind === "question")).toBe(false);
 			expect(rowById(store, item().id)).toMatchObject({ kind: "activity", family: "tool" });
@@ -13580,10 +12214,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, mutation1 fails — sets error "boom".
@@ -13627,10 +12258,7 @@ describe("ConversationStore", () => {
 			// Start a rehydrate (R) that hangs — it captured the initial mutation
 			// owner revision (no mutation pending → revision 0).
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start a send (sets pendingMutation, increments
@@ -13675,10 +12303,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs — the read will reject.
 			const ctrl = makeControlledErrorRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, a mutation fails — sets a mutation error.
@@ -13710,10 +12335,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			const readsBeforeMutation = service.readProjectionCalls.length;
@@ -13787,17 +12409,11 @@ describe("ConversationStore", () => {
 			service.readProjectionResult = makeReadProjectionResult(askThread);
 			// Trigger R via a resync — the authoritative refresh path — and hang it.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, L succeeds — prepends page items, advances cursor.
-			service.olderItems = {
-				items: [{ kind: "user", id: "old-page-item", text: "older" }],
-				nextCursor: "cursor-2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "old-page-item", text: "older" }], "cursor-2");
 			await store.getState().loadOlder(service);
 			const itemsAfterL = store.getState().conversation?.items ?? [];
 			const cursorAfterL = store.getState().olderCursor;
@@ -13837,15 +12453,13 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "user",
 						id: "wire-page",
@@ -13853,8 +12467,8 @@ describe("ConversationStore", () => {
 						text: "older page",
 					},
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			ctrl.release();
@@ -13887,13 +12501,11 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "user",
 						id: "wire-page",
@@ -13901,8 +12513,8 @@ describe("ConversationStore", () => {
 						text: "older",
 					},
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 			ctrl.release();
 			await ctrl.completed(1);
@@ -13922,25 +12534,17 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			service.readProjectionResult = makeReadProjectionResult(makeThread());
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								...userMessageItem("wire-live", "live"),
-								transcriptKey: "stable-live",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							...userMessageItem("wire-live", "live"),
+							transcriptKey: "stable-live",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 			const ctrl = makeControlledRead(service);
 			service.readProjectionResult = makeReadProjectionResult(
 				makeThread({
@@ -14011,25 +12615,17 @@ describe("ConversationStore", () => {
 			);
 			const reread = store.getState().rehydrate(service, createFakeSink());
 			await ctrl.started(1);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								...userMessageItem("wire-live-new", "newer-live"),
-								transcriptKey: "stable-live",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							...userMessageItem("wire-live-new", "newer-live"),
+							transcriptKey: "stable-live",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 			ctrl.release();
 			await reread;
 			// One row under that transcript key, and it is the snapshot's — the
@@ -14077,10 +12673,7 @@ describe("ConversationStore", () => {
 			service.readProjectionResult = makeReadProjectionResult(activityThread);
 			// Trigger R via resync — it hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, L fails — sets a page error.
@@ -14128,10 +12721,7 @@ describe("ConversationStore", () => {
 			service.readProjectionResult = makeReadProjectionResult(malformedThread);
 			const initialReads = service.readProjectionCalls.length;
 			// The snapshot is what settles an ask: drive one through a resync.
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			const ctrl = makeControlledRead(service);
 			await ctrl.started(1);
 			await yieldMicrotask();
@@ -14174,10 +12764,7 @@ describe("ConversationStore", () => {
 			});
 			service.readProjectionResult = makeReadProjectionResult(incompleteThread);
 			const initialReads = service.readProjectionCalls.length;
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			const ctrl = makeControlledRead(service);
 			await ctrl.started(1);
 			await yieldMicrotask();
@@ -14219,10 +12806,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
 			// Start a rehydrate (R) on serviceA that hangs.
 			const ctrl = makeControlledRead(serviceA);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start a send that succeeds — mutation owner
@@ -14261,16 +12845,12 @@ describe("ConversationStore", () => {
 	// drops the deferred request entirely.
 	describe("I1: trailing reread deferred until mutation settles", () => {
 		it("zero trailing reads while mutation pending, exactly one after settlement", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start a send that HANGS (mutation still pending).
@@ -14308,16 +12888,12 @@ describe("ConversationStore", () => {
 		});
 
 		it("zero trailing reads while mutation pending (failed terminal), exactly one after", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start a send that HANGS, then will fail.
@@ -14358,10 +12934,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(serviceA, createFakeSink(), "ref-A");
 			// Start a rehydrate (R) on serviceA that hangs.
 			const ctrlA = makeControlledRead(serviceA);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			await ctrlA.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start a send that hangs (mutation pending).
@@ -14410,16 +12983,12 @@ describe("ConversationStore", () => {
 		snapshot: Thread,
 		initial: Thread = makeThread(),
 	) {
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(initial);
+		const service = serviceForThread(initial);
 		const store = createConversationStore();
 		await store.getState().openProjected(service, createFakeSink(), "ref-1");
 		service.readProjectionResult = makeReadProjectionResult(snapshot);
 		const ctrl = makeControlledRead(service);
-		store.getState().applyNotification({
-			method: "evener/thread/resync",
-			params: { threadId: "thread-1", ref: "ref-1" },
-		} as AnyNotification);
+		resync(store);
 		await ctrl.started(1);
 		await yieldMicrotask();
 		liveWrite(store);
@@ -14585,8 +13154,7 @@ describe("ConversationStore", () => {
 		// The ordering the protocol does allow: a frame delivered after the
 		// response lands on top of the committed snapshot.
 		it("applies a frame that arrives after the response on top of the snapshot", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			service.readProjectionResult = makeReadProjectionResult(
@@ -14666,8 +13234,7 @@ describe("ConversationStore", () => {
 		// conversation and opening another must leave the next conversation's
 		// frames applied and the dead read's snapshot never committed.
 		it("never commits a dead read's snapshot after the conversation closes", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			service.readProjectionResult = makeReadProjectionResult(makeThread({ name: "old read's snapshot" }));
@@ -14714,17 +13281,9 @@ describe("ConversationStore", () => {
 				params: { ...target, attempt: 1, maxAttempts: 3, delayMs: 10, groupElapsedMs: 5, attemptCap: 3, turnId: "t1" },
 			} as AnyNotification);
 			expect(store.getState().conversation?.modelRetry).toMatchObject({ attempt: 1, maxAttempts: 3 });
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...agentMessageItem("a1", "done", "completed"), turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...agentMessageItem("a1", "done", "completed"), turnId: "t1" }],
+			});
 			expect(store.getState().conversation?.modelRetry).toBeUndefined();
 		});
 
@@ -14823,8 +13382,7 @@ describe("ConversationStore", () => {
 		// live-owned row must be recognized as that identity and dropped, leaving
 		// exactly one failure row.
 		it("merges a warning to one failure row across a reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(withActiveTurn([]));
+			const service = serviceForThread(withActiveTurn([]));
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -14842,11 +13400,10 @@ describe("ConversationStore", () => {
 			const liveIdentity = liveRows[0]!.transcriptKey ?? liveRows[0]!.id;
 
 			const reread = projectConversation(store.getState().conversation!);
-			service.readProjectionResult = {
-				conversation: reread,
+			service.readProjectionResult = readResult(reread, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 
 			const rows = (store.getState().conversation?.items ?? []).filter((row) => row.kind === "failure");
@@ -14906,8 +13463,7 @@ describe("ConversationStore", () => {
 		// key-first identity — treated the surviving page history as unowned
 		// and an omitting rehydrate dropped it.
 		it("migrates a page item's claim to the transcript key a completion reissues it under", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14918,54 +13474,40 @@ describe("ConversationStore", () => {
 			// The page fragment of the active turn carries a KEYLESS item: the
 			// ownership record claims its bare wire id.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [
-							{
-								id: "X",
-								turnId: "t1",
-								type: "agentMessage",
-								text: "page answer",
-								position: { entry: 10, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t1", [
+					{
+						id: "X",
+						turnId: "t1",
+						type: "agentMessage",
+						text: "page answer",
+						position: { entry: 10, item: 0 },
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toBeDefined();
 			// The turn's full completion reissues the same content WITH its key.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "full",
-							status: "completed",
-						},
-					],
-					items: [
-						{
-							id: "X",
-							turnId: "t1",
-							transcriptKey: "K",
-							type: "agentMessage",
-							text: "page answer settled",
-							status: "completed",
-						} as ThreadItem,
-					].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "full",
+						status: "completed",
+					},
+				],
+				items: [
+					{
+						id: "X",
+						turnId: "t1",
+						transcriptKey: "K",
+						type: "agentMessage",
+						text: "page answer settled",
+						status: "completed",
+					} as ThreadItem,
+				].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
+			});
 			expect(rowById(store, "X")).toBeDefined();
 			// The authoritative snapshot omits the item: the reissued copy is
 			// page history the model still holds, and the migrated claim — now
@@ -14999,8 +13541,7 @@ describe("ConversationStore", () => {
 		// live item to page history; an omitting rehydrate then kept live
 		// content the wire had withdrawn.
 		it("keeps a same-id different-key item from adopting the bare-id claim another item owns", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -15011,94 +13552,64 @@ describe("ConversationStore", () => {
 			// The page fragment of t1 carries a KEYED item: the claim records the
 			// key and the bare wire id.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [
-							{
-								id: "X",
-								turnId: "t1",
-								transcriptKey: "K1",
-								type: "agentMessage",
-								text: "page answer",
-								position: { entry: 10, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t1", [
+					{
+						id: "X",
+						turnId: "t1",
+						transcriptKey: "K1",
+						type: "agentMessage",
+						text: "page answer",
+						position: { entry: 10, item: 0 },
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toBeDefined();
 			// A live item takes the same bare id under a different key — a
 			// second identity the package's own rule distinguishes.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								id: "X",
-								turnId: "t2",
-								transcriptKey: "K2",
-								type: "agentMessage",
-								text: "live answer",
-								status: "completed",
-							} as ThreadItem),
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							id: "X",
 							turnId: "t2",
-						},
-					],
-				},
-			} as AnyNotification);
+							transcriptKey: "K2",
+							type: "agentMessage",
+							text: "live answer",
+							status: "completed",
+						} as ThreadItem),
+						turnId: "t2",
+					},
+				],
+			});
 			// t1's full completion preserves its own keyed item — the frame
 			// removes nothing, yet the settlement walk runs and must not
 			// promote the live copy: only the spelling an item's own identity
 			// carries decides whether it owns a claim.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "full",
-							status: "completed",
-						},
-					],
-					items: [
-						{
-							id: "X",
-							turnId: "t1",
-							transcriptKey: "K1",
-							type: "agentMessage",
-							text: "page answer",
-							status: "completed",
-						} as ThreadItem,
-					].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "full",
+						status: "completed",
+					},
+				],
+				items: [
+					{
+						id: "X",
+						turnId: "t1",
+						transcriptKey: "K1",
+						type: "agentMessage",
+						text: "page answer",
+						status: "completed",
+					} as ThreadItem,
+				].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
+			});
 			// The authoritative snapshot omits both X items: the page-owned
 			// copy stays as page history, and the live copy — unowned content
 			// the wire withdrew — must go.
@@ -15166,31 +13677,24 @@ describe("ConversationStore", () => {
 		// can actually serve — never a placeholder id (the old service-side
 		// projection hydrated a fake Thread under the thread id for this).
 		it("routes an older page's sha-only image through the merged model's session", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 			const sha = "a".repeat(64);
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "u-older",
-								turnId: "t0",
-								type: "userMessage",
-								text: "see attached",
-								images: [{ type: "image", name: "shot.png", metadata: { sha } }],
-								position: { entry: 1, item: 0 },
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "u-older",
+						turnId: "t0",
+						type: "userMessage",
+						text: "see attached",
+						images: [{ type: "image", name: "shot.png", metadata: { sha } }],
+						position: { entry: 1, item: 0 },
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).find((row) => row.id === "u-older:attachments")).toMatchObject({
 				kind: "attachments",
@@ -15199,8 +13703,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a paged running item settles with the snapshot's completed turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15225,28 +13728,20 @@ describe("ConversationStore", () => {
 				nextCursor: undefined,
 			};
 			await store.getState().loadOlder(service);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								id: "item-a",
-								turnId: "t1",
-								type: "agentMessage",
-								text: "Hello",
-								status: "inProgress",
-							} as ThreadItem),
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							id: "item-a",
 							turnId: "t1",
-						},
-					],
-				},
-			} as AnyNotification);
+							type: "agentMessage",
+							text: "Hello",
+							status: "inProgress",
+						} as ThreadItem),
+						turnId: "t1",
+					},
+				],
+			});
 
 			// The reread's turn completed; its item carries no status of its
 			// own: the snapshot settles it, and the page-owned copy must settle
@@ -15262,30 +13757,18 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect((rowById(store, "item-a") as { streaming?: boolean } | undefined)?.streaming).toBe(false);
 		});
 
 		it("a full turn completion withdraws a page-loaded item it omits", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -15304,70 +13787,45 @@ describe("ConversationStore", () => {
 			await store.getState().loadOlder(service);
 
 			// A live frame brings the paged item into the active turn.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								id: "pagey",
-								turnId: "t1",
-								type: "userMessage",
-								text: "paged content",
-							} as ThreadItem),
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							id: "pagey",
 							turnId: "t1",
-						},
-					],
-				},
-			} as AnyNotification);
+							type: "userMessage",
+							text: "paged content",
+						} as ThreadItem),
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "pagey")).toBeDefined();
 
 			// The turn's full completion omits the item: the reducer withdraws
 			// it, and the page-history layer must not resurrect the row (RoboRev
 			// round 18).
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "full",
-							status: "completed",
-						},
-					],
-					items: [userMessageItem("other", "kept")].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "full",
+						status: "completed",
+					},
+				],
+				items: [userMessageItem("other", "kept")].map((it) => ({ ...it, turnId: it.turnId ?? "t1" })),
+			});
 			expect(rowById(store, "pagey")).toBeUndefined();
 
 			// And no later frame restores it either.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(rowById(store, "pagey")).toBeUndefined();
 		});
 
 		it("a full turn completion with no items list withdraws them all", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -15384,68 +13842,43 @@ describe("ConversationStore", () => {
 				nextCursor: undefined,
 			};
 			await store.getState().loadOlder(service);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								id: "pagey",
-								turnId: "t1",
-								type: "userMessage",
-								text: "paged content",
-							} as ThreadItem),
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							id: "pagey",
 							turnId: "t1",
-						},
-					],
-				},
-			} as AnyNotification);
+							type: "userMessage",
+							text: "paged content",
+						} as ThreadItem),
+						turnId: "t1",
+					},
+				],
+			});
 			expect(rowById(store, "pagey")).toBeDefined();
 
 			// The stamp's item list is OMITTED, not empty-bracketed — Go's
 			// omitempty drops an empty list, and the reducer reads it as one:
 			// every item is withdrawn (RoboRev round 19).
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "full",
-							status: "completed",
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "full",
+						status: "completed",
+					},
+				],
+			});
 			expect(rowById(store, "pagey")).toBeUndefined();
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(rowById(store, "pagey")).toBeUndefined();
 		});
 
 		it("a missed completion's stale active flag does not keep the discarded items", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "tA", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "tA" }),
@@ -15464,17 +13897,9 @@ describe("ConversationStore", () => {
 				{ id: "p-1", turnId: "tA", type: "userMessage", text: "paged" } as ThreadItem,
 				{ id: "live-1", turnId: "tA", type: "agentMessage", text: "stale live", status: "inProgress" } as ThreadItem,
 			]) {
-				store.getState().applyNotification({
-					method: "history/updated",
-					params: {
-						threadId: "thread-1",
-						ref: "ref-1",
-						bootGeneration: "1",
-						epoch: 1,
-						snapshot: { incarnation: "inc-1", length: 1 },
-						items: [{ ...item, turnId: "tA" }],
-					},
-				} as AnyNotification);
+				historyUpdated(store, {
+					items: [{ ...item, turnId: "tA" }],
+				});
 			}
 			// The turn's completion is MISSED: the local model still names tA
 			// active.
@@ -15487,33 +13912,21 @@ describe("ConversationStore", () => {
 					turns: [makeTurn({ id: "t9", status: "completed", items: [userMessageItem("later", "fresh")] })],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
 			expect(rowById(store, "live-1")).toBeUndefined();
 
 			// And no later row-changing frame projects it back.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(rowById(store, "live-1")).toBeUndefined();
 		});
 
 		it("a reread that drops a turn's error does not resurrect the failure", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -15532,24 +13945,16 @@ describe("ConversationStore", () => {
 			await store.getState().loadOlder(service);
 
 			// The turn fails locally: its error projects a failure row.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "",
-							status: "failed",
-							error: { message: "boom" },
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "",
+						status: "failed",
+						error: { message: "boom" },
+					},
+				],
+			});
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			expect(failureRows()).not.toHaveLength(0);
 
@@ -15567,33 +13972,21 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
 			expect(failureRows()).toHaveLength(0);
 
 			// And no later row-changing frame resurrects it.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(failureRows()).toHaveLength(0);
 		});
 
 		it("a paged fragment of a turn does not shield its live-acquired failure from a clean reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -15614,24 +14007,16 @@ describe("ConversationStore", () => {
 			await store.getState().loadOlder(service);
 
 			// The turn fails live: its error projects a failure row.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [
-						{
-							id: "t1",
-							itemsView: "",
-							status: "failed",
-							error: { message: "boom" },
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [
+					{
+						id: "t1",
+						itemsView: "",
+						status: "failed",
+						error: { message: "boom" },
+					},
+				],
+			});
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			expect(failureRows()).not.toHaveLength(0);
 
@@ -15651,33 +14036,21 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
 			expect(failureRows()).toHaveLength(0);
 
 			// And no later row-changing frame resurrects it.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(failureRows()).toHaveLength(0);
 		});
 
 		it("a settled snapshot withdraws a matched item's retained failure status", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15712,29 +14085,21 @@ describe("ConversationStore", () => {
 
 			// The call fails locally: its item settles "failed" and the row
 			// shows it.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								id: "act",
-								turnId: "t1",
-								type: "commandExecution",
-								toolName: "shell",
-								callId: "c1",
-								status: "failed",
-							} as ThreadItem),
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							id: "act",
 							turnId: "t1",
-						},
-					],
-				},
-			} as AnyNotification);
+							type: "commandExecution",
+							toolName: "shell",
+							callId: "c1",
+							status: "failed",
+						} as ThreadItem),
+						turnId: "t1",
+					},
+				],
+			});
 			expect((rowById(store, "act") as { state?: string }).state).toBe("failed");
 
 			// The reread's turn completed; its copy of the item carries NO
@@ -15761,10 +14126,7 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await Promise.resolve();
 			await Promise.resolve();
 			await Promise.resolve();
@@ -15777,17 +14139,9 @@ describe("ConversationStore", () => {
 			).toBeUndefined();
 
 			// And the clean state survives an unrelated row-changing frame.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect((rowById(store, "act") as { state?: string }).state).toBe("completed");
 		});
 
@@ -15818,8 +14172,7 @@ describe("ConversationStore", () => {
 		// the fold at the pagination commit too (rounds 30-31 covered the
 		// rehydrate side), with the same one-row-per-identity reconciliation.
 		it("migrates a failed page turn's failure row when the pagination merge folds it into a retained turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15843,31 +14196,29 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t0",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "page boom" },
-							usage: { inputTokens: 500, outputTokens: 20 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "t0",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
-					],
-					"c9",
-				),
-				nextCursor: "c9",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t0",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "page boom" },
+						usage: { inputTokens: 500, outputTokens: 20 },
+						items: [
+							{
+								id: "k1",
+								transcriptKey: "k1",
+								turnId: "t0",
+								type: "agentMessage",
+								text: "page text",
+								status: "completed",
+							} as ThreadItem,
+						],
+					},
+				],
+				"c9",
+			);
 			await store.getState().loadOlder(service);
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			// The fold moved the failure onto the retained turn — the committed
@@ -15877,17 +14228,9 @@ describe("ConversationStore", () => {
 
 			// A row-changing frame projects the carrier's failure from the
 			// model — still one row, same identity.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(failureRows()).toHaveLength(1);
 			expect(failureRows()[0]?.id).toBe("failure:t1");
 		});
@@ -15939,10 +14282,7 @@ describe("ConversationStore", () => {
 		// cursor) adds nothing and must report empty, or the guard clears and a
 		// stale-cursor loop can keep re-requesting.
 		it("a page that only re-serves retained content reports no item keys", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t1", status: "completed", items: [] })] }),
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t1", status: "completed", items: [] })] }));
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -15990,22 +14330,16 @@ describe("ConversationStore", () => {
 		// when the next page's row would displace the notice, and paging goes
 		// on from the oldest row kept.
 		it("keeps paging when a page's row would displace a seated warning", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			// The warning arrives on an empty window: it seats before
 			// everything, as the oldest row the window can evict.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store)).toHaveLength(1);
 			// A resync reread fills the window: 499 model rows plus the
 			// seated notice is exactly the retained cap.
@@ -16027,10 +14361,7 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			const awaitRehydrateRead = async (count: number): Promise<void> => {
 				for (let i = 0; i < 40 && service.readProjectionCalls.length < count; i++) {
 					await Promise.resolve();
@@ -16046,24 +14377,22 @@ describe("ConversationStore", () => {
 			// window is 501 rows and the cap trims a row the entry window
 			// held.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "older-row",
-								turnId: "t0",
-								type: "userMessage",
-								text: "older",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"more",
-				),
-				nextCursor: "more",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "older-row",
+							turnId: "t0",
+							type: "userMessage",
+							text: "older",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"more",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(store.getState().olderCursor).toBe("more");
@@ -16085,8 +14414,7 @@ describe("ConversationStore", () => {
 		// the next bounded refresh, whose window omits the item, drops loaded
 		// page history.
 		it("keeps a paged item's page-ness when a refresh lends it a transcript key", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -16101,23 +14429,17 @@ describe("ConversationStore", () => {
 			// no payload the keyed reissue lacks — so the merge's no-op path
 			// carries it: the fresh items return by reference, with no fold
 			// provenance to read ownership from.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "u",
-								turnId: "t0",
-								type: "agentMessage",
-								text: "page text",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "u",
+						turnId: "t0",
+						type: "agentMessage",
+						text: "page text",
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((row) => row.id === "u")).toBe(true);
 
@@ -16154,10 +14476,7 @@ describe("ConversationStore", () => {
 					evener: evenerWith({ activeTurnId: "t1" }),
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await awaitRehydrateRead(2);
 			expect(rows(store).some((row) => row.id === "u")).toBe(true);
 
@@ -16169,10 +14488,7 @@ describe("ConversationStore", () => {
 					evener: evenerWith({ activeTurnId: "t1" }),
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await awaitRehydrateRead(3);
 			expect(rows(store).some((row) => row.id === "u")).toBe(true);
 		});
@@ -16194,8 +14510,7 @@ describe("ConversationStore", () => {
 		// or the next row-changing frame projects the carrier's failure
 		// beside the obsolete row: the same failure twice.
 		it("migrates a previously paged failure when a later page bridges its turn with another retained turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -16219,31 +14534,29 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t0",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "page boom" },
-							usage: { inputTokens: 500, outputTokens: 20 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "t0",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
-					],
-					"c9",
-				),
-				nextCursor: "c9",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t0",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "page boom" },
+						usage: { inputTokens: 500, outputTokens: 20 },
+						items: [
+							{
+								id: "k1",
+								transcriptKey: "k1",
+								turnId: "t0",
+								type: "agentMessage",
+								text: "page text",
+								status: "completed",
+							} as ThreadItem,
+						],
+					},
+				],
+				"c9",
+			);
 			await store.getState().loadOlder(service);
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			expect(failureRows()).toHaveLength(1);
@@ -16253,55 +14566,41 @@ describe("ConversationStore", () => {
 			// retained t1 (k2): the merge coalesces both under t1, and t1 now
 			// carries the failure — the committed row and its page ownership
 			// must follow.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
+			scriptOlderTurns(service, [
+				{
+					id: "tp",
+					itemsView: "fragment",
+					status: "completed",
+					usage: { inputTokens: 10, outputTokens: 1 },
+					items: [
 						{
-							id: "tp",
-							itemsView: "fragment",
+							id: "k1",
+							transcriptKey: "k1",
+							turnId: "tp",
+							type: "agentMessage",
+							text: "page text",
 							status: "completed",
-							usage: { inputTokens: 10, outputTokens: 1 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "tp",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-								{
-									id: "k2",
-									transcriptKey: "k2",
-									turnId: "tp",
-									type: "agentMessage",
-									text: "retained t1 text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
+						} as ThreadItem,
+						{
+							id: "k2",
+							transcriptKey: "k2",
+							turnId: "tp",
+							type: "agentMessage",
+							text: "retained t1 text",
+							status: "completed",
+						} as ThreadItem,
 					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(failureRows()).toHaveLength(1);
 			expect(failureRows()[0]?.id).toBe("failure:t1");
 
 			// A row-changing frame projects the carrier's failure from the
 			// model — still one row, same identity.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(failureRows()).toHaveLength(1);
 			expect(failureRows()[0]?.id).toBe("failure:t1");
 		});
@@ -16314,52 +14613,41 @@ describe("ConversationStore", () => {
 			// attachment is already there."
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "wire-Z-source",
-								transcriptKey: "key-Z",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "wire-Z-source",
+							transcriptKey: "key-Z",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			// The merge keeps the page's images (absent images mean unchanged),
 			// while the source's identity follows the reissue — the attachment
@@ -16379,53 +14667,42 @@ describe("ConversationStore", () => {
 		it("drops a page-owned attachment once its source explicitly clears its output images", async () => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "wire-Z-source",
-								transcriptKey: "key-Z",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-								outputImages: [],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "wire-Z-source",
+							transcriptKey: "key-Z",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
+							outputImages: [],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(false);
 		});
@@ -16439,57 +14716,46 @@ describe("ConversationStore", () => {
 			// beside it — never orphaned wherever it sat in the page.
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{ kind: "user", id: "p1", text: "one" },
-					{ kind: "user", id: "p2", text: "two" },
-					{
-						kind: "activity",
-						id: "wire-p3",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-p3",
-					},
-					{
-						kind: "attachments",
-						id: "wire-p3:attachments",
-						items: [{ id: "att-p3", src: "https://example.com/p3.png" }],
-						sourceTranscriptKey: "key-p3",
-					},
-					{ kind: "user", id: "p4", text: "four" },
-					{ kind: "user", id: "p5", text: "five" },
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{ kind: "user", id: "p1", text: "one" },
+				{ kind: "user", id: "p2", text: "two" },
+				{
+					kind: "activity",
+					id: "wire-p3",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-p3",
+				},
+				{
+					kind: "attachments",
+					id: "wire-p3:attachments",
+					items: [{ id: "att-p3", src: "https://example.com/p3.png" }],
+					sourceTranscriptKey: "key-p3",
+				},
+				{ kind: "user", id: "p4", text: "four" },
+				{ kind: "user", id: "p5", text: "five" },
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).map((item) => item.id)).toEqual(["p1", "p2", "wire-p3", "wire-p3:attachments", "p4", "p5"]);
 
 			// The snapshot re-emits key-p3 under a new wire id, no outputImages.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "wire-p3-new",
-								transcriptKey: "key-p3",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "wire-p3-new",
+							transcriptKey: "key-p3",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			const ids = rows(store).map((item) => item.id);
 			expect(ids).toEqual(["p1", "p2", "wire-p3-new", "wire-p3-new:attachments", "p4", "p5"]);
@@ -16502,53 +14768,42 @@ describe("ConversationStore", () => {
 			// (d), below, adds a second path to the same drop.
 			const { store, service } = await openRunningTurn([]);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "wire-Z",
-								transcriptKey: "key-Z",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-								outputImages: [{ source: "z", url: "https://example.com/z.png" }],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "wire-Z",
+							transcriptKey: "key-Z",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
+							outputImages: [{ source: "z", url: "https://example.com/z.png" }],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			// The snapshot's own "wire-Z:attachments" supersedes the page's.
 			expect(rows(store).filter((item) => item.id === "wire-Z:attachments")).toHaveLength(1);
@@ -16563,53 +14818,42 @@ describe("ConversationStore", () => {
 			// row and one fresh one, for the same message.
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "old-wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "old-wire-Z:attachments",
-						items: [{ id: "att-old", src: "https://example.com/old.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "old-wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "old-wire-Z:attachments",
+					items: [{ id: "att-old", src: "https://example.com/old.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "old-wire-Z:attachments")).toBe(true);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "commandExecution",
-								id: "new-wire-Z",
-								transcriptKey: "key-Z",
-								toolName: "shell",
-								status: "completed",
-								output: "done",
-								outputImages: [{ source: "new", url: "https://example.com/new.png" }],
-							},
-							turnId: "t1",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "commandExecution",
+							id: "new-wire-Z",
+							transcriptKey: "key-Z",
+							toolName: "shell",
+							status: "completed",
+							output: "done",
+							outputImages: [{ source: "new", url: "https://example.com/new.png" }],
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t1",
+					},
+				],
+			});
 
 			const ids = rows(store).map((item) => item.id);
 			// The page's superseded copy is gone, not kept alongside the fresh one.
@@ -16624,8 +14868,7 @@ describe("ConversationStore", () => {
 		// row the seated cap just evicted, so the model would carry page history
 		// the actual 500-row display window no longer holds.
 		it("bounds the rehydrate's retained page payloads against the seated window the publish shows", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -16646,38 +14889,31 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, sink, "ref-1");
 			// One older page loads a single page-owned row below the live row.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("tp", [
-							{
-								id: "page-row",
-								turnId: "tp",
-								type: "userMessage",
-								text: "page text",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("tp", [
+						{
+							id: "page-row",
+							turnId: "tp",
+							type: "userMessage",
+							text: "page text",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"cursor-2",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(rows(store).map((row) => row.id)).toEqual(["page-row", "live-1"]);
 			// The warning arrives while the live row is the newest row the window
 			// holds, so it anchors there and seats directly after it.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store)).toHaveLength(3);
 			expect(rows(store)[2]?.kind).toBe("failure");
 			// A resync reread fills the window: the page row, the live row, and
@@ -16712,10 +14948,7 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			const awaitRehydrateRead = async (count: number): Promise<void> => {
 				for (let i = 0; i < 40 && service.readProjectionCalls.length < count; i += 1) {
 					await Promise.resolve();
@@ -16746,45 +14979,37 @@ describe("ConversationStore", () => {
 		// entirely, the re-seat at the publish then finds no anchor, and the
 		// prune retires a notice the window kept.
 		it("keeps a seated warning through a rehydrate whose bound trims the warning's anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			// One older page loads a single page-owned row below the empty window.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("tp", [
-							{
-								id: "page-row",
-								turnId: "tp",
-								type: "userMessage",
-								text: "page text",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("tp", [
+						{
+							id: "page-row",
+							turnId: "tp",
+							type: "userMessage",
+							text: "page text",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"cursor-2",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(rows(store).map((row) => row.id)).toEqual(["page-row"]);
 			// The warning arrives on a window whose only row is the page row, so
 			// it anchors there and seats directly after it.
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			expect(rows(store)).toHaveLength(2);
 			expect(rows(store)[1]?.kind).toBe("failure");
 			// A resync reread fills the window: the page row plus 499 fresh rows
@@ -16809,10 +15034,7 @@ describe("ConversationStore", () => {
 					],
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			const awaitRehydrateRead = async (count: number): Promise<void> => {
 				for (let i = 0; i < 40 && service.readProjectionCalls.length < count; i += 1) {
 					await Promise.resolve();
@@ -16888,8 +15110,7 @@ describe("ConversationStore", () => {
 			frame: AnyNotification,
 			options: { pageItems?: MobileConversation["items"] } = {},
 		) {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -16911,10 +15132,7 @@ describe("ConversationStore", () => {
 					evener: evenerWith({ activeTurnId: "t0" }),
 				}),
 			);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			if (options.pageItems !== undefined) {
@@ -16995,16 +15213,12 @@ describe("ConversationStore", () => {
 	// is ordered at the snapshot cut).
 	describe("Residual 1: deferred trailing reread rechecks mutation revision inside effect", () => {
 		it("M1 settles and queues; M2 starts before effect; release => zero reread; settle M2 => exactly one", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start M1 that hangs (mutation pending).
@@ -17068,10 +15282,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(serviceA, createFakeSink(), "ref-A");
 			// Start a rehydrate (R) on serviceA that hangs.
 			const ctrlA = makeControlledRead(serviceA);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-A", ref: "ref-A" },
-			} as AnyNotification);
+			resync(store, "thread-A", "ref-A");
 			await ctrlA.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, start M1 that hangs (mutation pending).
@@ -17128,8 +15339,7 @@ describe("ConversationStore", () => {
 
 	describe("dedupe within one page", () => {
 		it("dedupes duplicate IDs within the incoming page (the later fragment wins), preserving order", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -17144,14 +15354,15 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// Page with a duplicate ID within itself: page-A, page-B, page-A (repeat).
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "page-A", text: "A" },
 					{ kind: "user", id: "page-B", text: "B" },
 					{ kind: "user", id: "page-A", text: "A-repeat" },
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			const items = store.getState().conversation?.items ?? [];
@@ -17172,8 +15383,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("dedupes duplicate IDs within page AND against retained items", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -17188,14 +15398,15 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// Page: "existing" (dup of retained), "page-A", "page-A" (dup within page).
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "existing", text: "dup" },
 					{ kind: "user", id: "page-A", text: "A" },
 					{ kind: "user", id: "page-A", text: "A-repeat" },
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			const items = store.getState().conversation?.items ?? [];
@@ -17211,8 +15422,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("dedupes overlapping fragments by transcriptKey when wire IDs differ", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -17235,8 +15445,9 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "opaque-cursor" });
 			// The hub lists a page's turns in chronological order, so the
 			// page-only row precedes the fragment that overlaps the window.
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "older", text: "older", position: { entry: 1, item: 0 } },
 					{
 						kind: "user",
@@ -17246,8 +15457,8 @@ describe("ConversationStore", () => {
 						text: "stale overlap",
 					},
 				],
-				nextCursor: "next",
-			};
+				"next",
+			);
 
 			await store.getState().loadOlder(service);
 
@@ -17258,8 +15469,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("rehydrates visible state after a stale v4 cursor", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", items: [userMessageItem("old", "old")] })],
 				}),
@@ -17332,57 +15542,41 @@ describe("ConversationStore", () => {
 			// item/started carries an oversized output, so the row is bounded; the
 			// completion that replaces it is short, and the row is short with it.
 			const { store } = await openProjectedWithItems([userMessageItem("base", "base")]);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								type: "commandExecution",
-								id: "tool-1",
-								transcriptKey: "shared-key",
-								toolName: "shell",
-								status: "inProgress",
-								callId: "call-A",
-								output: "x".repeat(MAX_ITEM_BYTES + 100),
-							} as ThreadItem),
-							turnId: "t0",
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							type: "commandExecution",
+							id: "tool-1",
+							transcriptKey: "shared-key",
+							toolName: "shell",
+							status: "inProgress",
+							callId: "call-A",
+							output: "x".repeat(MAX_ITEM_BYTES + 100),
+						} as ThreadItem),
+						turnId: "t0",
+					},
+				],
+			});
 			const started = rowById(store, "tool-1");
 			expect(started?.kind === "activity" && started.detail.output?.endsWith(TRUNCATION_MARKER)).toBe(true);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...({
-								type: "commandExecution",
-								id: "tool-1",
-								transcriptKey: "shared-key",
-								toolName: "shell",
-								status: "completed",
-								callId: "call-A",
-								output: "short-result",
-							} as ThreadItem),
-							turnId: "t0",
-						},
-					],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [
+					{
+						...({
+							type: "commandExecution",
+							id: "tool-1",
+							transcriptKey: "shared-key",
+							toolName: "shell",
+							status: "completed",
+							callId: "call-A",
+							output: "short-result",
+						} as ThreadItem),
+						turnId: "t0",
+					},
+				],
+			});
 
 			expect(rowById(store, "tool-1")).toMatchObject({
 				kind: "activity",
@@ -17404,12 +15598,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -17452,20 +15641,16 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: { ...omittingX, history: omittingX.history && { ...omittingX.history, incarnation: "inc-2" } },
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(
+				{ ...omittingX, history: omittingX.history && { ...omittingX.history, incarnation: "inc-2" } },
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().conversation?.items.find((i) => i.id === "X")).toBeUndefined();
 
 			// Load a page bringing X back with SHORT content — must NOT be frozen.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "user", id: "X", text: "short-page" }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "X", text: "short-page" }]);
 			await store.getState().loadOlder(service);
 			const reintroduced = store.getState().conversation?.items.find((i) => i.id === "X");
 			expect(reintroduced).toBeDefined();
@@ -17501,23 +15686,19 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...omittingX2,
 					history: omittingX2.history && { ...omittingX2.history, incarnation: "inc-2" },
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().conversation?.items.find((i) => i.id === "X")).toBeUndefined();
 
 			// Load a page bringing X back with SHORT content — must NOT be frozen.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "user", id: "X", text: "short-page" }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "X", text: "short-page" }]);
 			await store.getState().loadOlder(service);
 			const reintroduced = store.getState().conversation?.items.find((i) => i.id === "X");
 			expect(reintroduced).toBeDefined();
@@ -17540,8 +15721,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", status: options.running ? "inProgress" : "completed", items })],
 					...(options.running ? { evener: evenerWith({ activeTurnId: "t0" }) } : {}),
@@ -17563,25 +15743,17 @@ describe("ConversationStore", () => {
 			});
 			const { store, service } = await openProjectedWithItems(items);
 			expect(rows(store).filter((item) => item.transcriptKey === "stable-x")).toHaveLength(1);
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								...agentMessageItem("wire-x", "live", "completed"),
-								transcriptKey: "stable-x",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							...agentMessageItem("wire-x", "live", "completed"),
+							transcriptKey: "stable-x",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 			// A reread whose snapshot ends before that item: the row goes with it,
 			// exactly once, leaving nothing behind under either identity.
 			service.readProjectionResult = makeReadProjectionResult(
@@ -17617,10 +15789,7 @@ describe("ConversationStore", () => {
 			expect(rowById(store, "X")).toBeUndefined();
 
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toMatchObject({ kind: "assistant", markdown: "short-page" });
 
@@ -17717,21 +15886,17 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...tighter,
 					history: tighter.history && { ...tighter.history, incarnation: "inc-2" },
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "cursor-1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "cursor-1" },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(rows(store)).toHaveLength(10);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }]);
 			await store.getState().loadOlder(service);
 			const xPage = rowById(store, "X");
 			expect(xPage).toMatchObject({ kind: "assistant", markdown: "short-page" });
@@ -17744,8 +15909,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ turns: [makeTurn({ id: "t0", items })] }));
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items })] }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -17782,17 +15946,9 @@ describe("ConversationStore", () => {
 
 			// An unrelated item frame republishes every row; the member is bounded
 			// on its own content each time, not by anything remembered about it.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...{ type: "userMessage", id: "unrelated", text: "hi" }, turnId: "t0" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...{ type: "userMessage", id: "unrelated", text: "hi" }, turnId: "t0" }],
+			});
 
 			const row = rowById(store, "wire-a");
 			expect(row?.kind).toBe("activity");
@@ -17811,32 +15967,16 @@ describe("ConversationStore", () => {
 			// turn/started's read-model replacement: a turn row's "running" status
 			// for a status-less item now comes purely from the TURN's own status
 			// (project.ts's isActiveItem), which history/updated carries directly.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t1", status: "inProgress", itemsView: "default", items: [] }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t1", status: "inProgress", itemsView: "default", items: [] }],
+			});
 			return store;
 		}
 
 		function startItem(store: ReturnType<typeof createConversationStore>, item: ThreadItem): void {
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [{ ...item, turnId: "t1" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				items: [{ ...item, turnId: "t1" }],
+			});
 		}
 
 		it("projects a status-less tool item started in the active turn as running", async () => {
@@ -17911,8 +16051,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({ turns: [makeTurn({ id: "t0", items })] }),
 				ALL_TRUE_CAPS,
 				versioned,
@@ -18048,28 +16187,20 @@ describe("ConversationStore", () => {
 				true,
 			);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "reasoning",
-								id: "wire-b",
-								transcriptKey: "key-b",
-								status: "inProgress",
-								text: "second MORE",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "reasoning",
+							id: "wire-b",
+							transcriptKey: "key-b",
+							status: "inProgress",
+							text: "second MORE",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 
 			const [memberA, memberB] = clusterMembers(store, "wire-a");
 			expect(memberB?.detail.output).toBe("second MORE");
@@ -18099,27 +16230,19 @@ describe("ConversationStore", () => {
 				reasoningItem("wire-b", "key-b", "accumulated"),
 			]);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "reasoning",
-								id: "wire-b",
-								transcriptKey: "key-b",
-								status: "completed",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "reasoning",
+							id: "wire-b",
+							transcriptKey: "key-b",
+							status: "completed",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 
 			const [memberA, memberB] = clusterMembers(store, "wire-a");
 			expect(memberB?.detail.output).toBe("accumulated");
@@ -18132,27 +16255,19 @@ describe("ConversationStore", () => {
 				true,
 			);
 
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					items: [
-						{
-							...{
-								type: "reasoning",
-								id: "wire-b2",
-								transcriptKey: "key-b",
-								status: "completed",
-							},
-							turnId: "t0",
+			historyUpdated(store, {
+				items: [
+					{
+						...{
+							type: "reasoning",
+							id: "wire-b2",
+							transcriptKey: "key-b",
+							status: "completed",
 						},
-					],
-				},
-			} as AnyNotification);
+						turnId: "t0",
+					},
+				],
+			});
 
 			const [memberA, memberB] = clusterMembers(store, "wire-a");
 			// The member is replaced under its new wire id, keeping the output it
@@ -18448,29 +16563,16 @@ describe("ConversationStore", () => {
 			// new turn and its item now arrive together in one history/updated
 			// frame, which only merges against a v6 model.
 			const store = await openProjectedThread(thread, true);
-			store.getState().applyNotification({
-				method: "warning",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					title: "Provider",
-					message: "careful",
-				},
-			} as AnyNotification);
+			warning(store, {
+				title: "Provider",
+				message: "careful",
+			});
 			// A later reply arrives on a new turn, so the anchored thought
 			// sits mid-timeline.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-					items: [{ ...agentMessageItem("a2", "working on it", "completed"), turnId: "t2" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+				items: [{ ...agentMessageItem("a2", "working on it", "completed"), turnId: "t2" }],
+			});
 			expect(rows(store).some((row) => row.kind === "failure" && row.id === "warning:1")).toBe(true);
 
 			// At intent the thought is hidden; the warning re-anchors to the
@@ -18543,17 +16645,9 @@ describe("ConversationStore", () => {
 			const store = await openProjectedThread(thread, true);
 			store.getState().setDisplayConfig(intentConfig);
 			// A row-changing frame lands at intent: a new turn starts.
-			store.getState().applyNotification({
-				method: "history/updated",
-				params: {
-					threadId: "thread-1",
-					ref: "ref-1",
-					bootGeneration: "1",
-					epoch: 1,
-					snapshot: { incarnation: "inc-1", length: 1 },
-					turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
-				},
-			} as AnyNotification);
+			historyUpdated(store, {
+				turns: [{ id: "t2", itemsView: "default", status: "inProgress" }],
+			});
 			expect(store.getState().conversation?.turns[0]?.items).toHaveLength(1);
 			store.getState().setDisplayConfig(fullConfig);
 			expect(rowById(store, "r1")).toMatchObject({ kind: "activity" });
@@ -18564,8 +16658,7 @@ describe("ConversationStore", () => {
 		// the switch back to full rendered them empty. The keep-window is the
 		// level-independent union at this site as well.
 		it("a rehydrate at a coarse level keeps the hidden turn's payload", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -18582,23 +16675,21 @@ describe("ConversationStore", () => {
 			// is retained, and the turn is PAGE HISTORY now — the rehydrate's
 			// merge path runs over it.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "r1",
-								turnId: "t0",
-								type: "reasoning",
-								text: "the thought",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "r1",
+							turnId: "t0",
+							type: "reasoning",
+							text: "the thought",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			expect(store.getState().conversation?.turns[0]?.items).toHaveLength(1);
@@ -18615,8 +16706,7 @@ describe("ConversationStore", () => {
 		// as well. The page's own accounting (the admitted item keys, F10's
 		// inputs) is level-independent; only the payload bound was not.
 		it("an older page loaded at a coarse level keeps the hidden turn's payload", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -18631,23 +16721,21 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.getState().setDisplayConfig(intentConfig);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "r1",
-								turnId: "t0",
-								type: "reasoning",
-								text: "the thought",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "r1",
+							turnId: "t0",
+							type: "reasoning",
+							text: "the thought",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			// The level-hidden turn's payload survives the merge.
@@ -18785,8 +16873,7 @@ describe("ConversationStore", () => {
 	describe("the byte bound across a reread", () => {
 		it("bounds an oversized row on open and shows the reread's short version", async () => {
 			const oversized = "x".repeat(MAX_ITEM_BYTES + 100);
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", items: [agentMessageItem("X", oversized, "completed")] })],
 				}),
@@ -19118,16 +17205,9 @@ describe("ConversationStore", () => {
 
 		it("page: controlled A->B then late A success => entire state unchanged", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), {
 				olderCursor: "cursor-A",
-			};
+			});
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -19146,16 +17226,7 @@ describe("ConversationStore", () => {
 
 			// Rebind to B via rehydrate.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -19177,16 +17248,9 @@ describe("ConversationStore", () => {
 
 		it("page: controlled A->B then late A failure => entire state unchanged", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), {
 				olderCursor: "cursor-A",
-			};
+			});
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -19205,16 +17269,7 @@ describe("ConversationStore", () => {
 
 			// Rebind to B.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -19231,19 +17286,13 @@ describe("ConversationStore", () => {
 		for (const kind of ["send", "queue", "interrupt"] as const) {
 			it(`mutation: controlled A->B then late A ${kind} failure => entire state unchanged`, async () => {
 				const serviceA = new FakeConversationService();
-				serviceA.readProjectionResult = {
-					conversation: makeConversation({
+				serviceA.readProjectionResult = readResult(
+					makeConversation({
 						threadId: "thread-A",
 						status: { type: kind === "send" ? "idle" : "active" },
 					}),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+					{ olderCursor: null },
+				);
 				const sinkA = createFakeSink();
 				const store = createConversationStore();
 				await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -19269,16 +17318,7 @@ describe("ConversationStore", () => {
 
 				// Rebind to B.
 				const serviceB = new FakeConversationService();
-				serviceB.readProjectionResult = {
-					conversation: makeConversation({ threadId: "thread-B" }),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+				serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 				const sinkB = createFakeSink();
 				await store.getState().rehydrate(serviceB, sinkB);
 
@@ -19300,19 +17340,13 @@ describe("ConversationStore", () => {
 		for (const kind of ["send", "queue", "interrupt"] as const) {
 			it(`mutation: controlled A->B then late A ${kind} success => entire state unchanged`, async () => {
 				const serviceA = new FakeConversationService();
-				serviceA.readProjectionResult = {
-					conversation: makeConversation({
+				serviceA.readProjectionResult = readResult(
+					makeConversation({
 						threadId: "thread-A",
 						status: { type: kind === "send" ? "idle" : "active" },
 					}),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+					{ olderCursor: null },
+				);
 				const sinkA = createFakeSink();
 				const store = createConversationStore();
 				await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -19344,16 +17378,7 @@ describe("ConversationStore", () => {
 				const refBeforeRebind = store.getState().ref;
 				const generationBeforeRebind = store.getState().conversationGeneration;
 				const serviceB = new FakeConversationService();
-				serviceB.readProjectionResult = {
-					conversation: makeConversation({ threadId: "thread-B" }),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+				serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 				const sinkB = createFakeSink();
 				await store.getState().rehydrate(serviceB, sinkB);
 
@@ -19419,16 +17444,9 @@ describe("ConversationStore", () => {
 		it("a page ask_user item renders as its tool row, other items/order/cursor retained, askPending unchanged", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1", askPending: false }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1", askPending: false }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.askPending).toBe(false);
 
@@ -19437,36 +17455,34 @@ describe("ConversationStore", () => {
 			// rows re-project from the model through liveAskQuestions, which
 			// gates on askPending — false here — so the ask renders as the tool
 			// row it is and no question row appears.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								...askUserItem(
-									"ask-old",
-									JSON.stringify({
-										questions: [
-											{
-												header: "Which?",
-												question: "Pick one",
-												options: [{ label: "yes" }],
-												multi_select: false,
-											},
-										],
-									}),
-								),
-								position: { entry: 1, item: 0 },
-							},
-							{
-								...agentMessageItem("msg-old", "old message", "completed"),
-								position: { entry: 2, item: 0 },
-							},
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							...askUserItem(
+								"ask-old",
+								JSON.stringify({
+									questions: [
+										{
+											header: "Which?",
+											question: "Pick one",
+											options: [{ label: "yes" }],
+											multi_select: false,
+										},
+									],
+								}),
+							),
+							position: { entry: 1, item: 0 },
+						},
+						{
+							...agentMessageItem("msg-old", "old message", "completed"),
+							position: { entry: 2, item: 0 },
+						},
+					]),
+				],
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			// askPending must remain false.
@@ -19525,11 +17541,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 100 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			const sink = wrapActivityStoreAsSink(activityStore);
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(activityStore.getState().view).not.toBeNull();
@@ -19606,10 +17621,7 @@ describe("ConversationStore", () => {
 			// the read began; ready(1) confirms orig(ref) resolved and the read is
 			// parked at the release gate, so R's entry errorOwnerRev is captured.
 			const ctrl = makeControlledRead(service);
-			store.getState().applyNotification({
-				method: "evener/thread/resync",
-				params: { threadId: "thread-1", ref: "ref-1" },
-			} as AnyNotification);
+			resync(store);
 			await ctrl.started(1);
 			await ctrl.ready(1);
 			expect(ctrl.getStartedCount()).toBe(1);
