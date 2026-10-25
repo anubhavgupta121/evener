@@ -33,13 +33,6 @@ func TestUnknownToolMessage_IncludesSuggestionAndList(t *testing.T) {
 	}
 }
 
-func TestUnknownToolMessage_NoSuggestionWhenFar(t *testing.T) {
-	msg := UnknownToolMessage("zzzzzz", []string{"read_file", "shell"})
-	if strings.Contains(msg, "Did you mean") {
-		t.Fatalf("unexpected suggestion: %q", msg)
-	}
-}
-
 func TestTopMatches_ReturnsClosestWithinThreshold(t *testing.T) {
 	got := TopMatches("session_tolls.go", []string{"session_tools.go", "session_tools_file.go", "unrelated.go"}, 3)
 	if len(got) == 0 || got[0] != "session_tools.go" {

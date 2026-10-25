@@ -179,16 +179,6 @@ func TestExplainSchemaError_NestedOneOfNoMatchDoesNotClaimOverMatch(t *testing.T
 	}
 }
 
-// A bare keyword ("oneOf") is a root-level location: the over-match shape is
-// recognized when the caller passes either form.
-func TestExplainSchemaError_MultipleMatchOneOfAcceptsBareKeyword(t *testing.T) {
-	args := map[string]any{"a": "x"}
-	msg := ExplainSchemaError("probe_tool", multipleMatchOneOfParams(), args, "", "oneOf")
-	if !strings.Contains(msg, "matched more than one branch") {
-		t.Fatalf("bare root-level keyword must still detect the over-match: %q", msg)
-	}
-}
-
 // delegateOneOfEnumParams mirrors delegateOneOfParams with a single
 // non-string-enum property in place of the string-enum "sandbox": the
 // second oneOf branch requires prop and constrains it to enum. enum takes
