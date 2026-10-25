@@ -64,15 +64,11 @@ func makeGitBackedMarketplaceTwoPlugins(t *testing.T, pluginA, pluginB string) (
 }
 
 func TestUpdateAutoUpgrade_OnlyTouchesAutoUpgradeEnabled(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, pluginRepo := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	first, err := m.Install(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -132,15 +128,11 @@ func TestUpdateAutoUpgrade_OnlyTouchesAutoUpgradeEnabled(t *testing.T) {
 }
 
 func TestUpdateAutoUpgrade_NoOpNotReportedAsUpdated(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, _ := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -163,15 +155,11 @@ func TestUpdateAutoUpgrade_NoOpNotReportedAsUpdated(t *testing.T) {
 // The sweep upgrades a relative-source plugin from its refreshed marketplace
 // when its folder changed.
 func TestUpdateAutoUpgrade_UpgradesARelativeSourceWhoseFolderChanged(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t) // "widget" is a "./plugins/widget" relative source
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -203,15 +191,11 @@ func TestUpdateAutoUpgrade_UpgradesARelativeSourceWhoseFolderChanged(t *testing.
 // instead of continuing — the healthy plugin's actual upgrade is what proves
 // the per-plugin `continue` really continues.
 func TestUpdateAutoUpgrade_AggregatesFailuresButKeepsGoing(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, brokenRepo, healthyRepo := makeGitBackedMarketplaceTwoPlugins(t, "broken", "healthy")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	if _, err := m.Install(context.Background(), "broken", "acme"); err != nil {
 		t.Fatalf("Install broken: %v", err)
 	}
@@ -271,9 +255,7 @@ func TestUpdateAutoUpgrade_AggregatesFailuresButKeepsGoing(t *testing.T) {
 // stale-snapshot comparison in UpdateAutoUpgrade: this test fails against
 // that code and passes against the fix.
 func TestUpdateAutoUpgrade_ConcurrentSweepDoesNotDuplicateReport(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, pluginRepo := makeGitBackedMarketplace(t, "widget")
 
 	root := t.TempDir()
