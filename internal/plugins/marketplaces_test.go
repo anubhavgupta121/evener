@@ -1729,14 +1729,7 @@ func TestEditMarketplace_FailedRenameAndResourceKeepsASourceUnderTheOldClone(t *
 		t.Fatal(err)
 	}
 	dir := makeDirectoryMarketplace(t, "local", "widget")
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(path string, data []byte, perm os.FileMode) error {
-		if strings.HasSuffix(path, marketplacesFileName) {
-			return errors.New("injected save failure")
-		}
-		return origWrite(path, data, perm)
-	}
+	stubMarketplaceWriteFailingFile(t, marketplacesFileName, errors.New("injected save failure"))
 
 	if _, err := m.EditMarketplace(context.Background(), "acme", "gamma", &Source{Kind: SourceDirectory, Path: dir}); err == nil {
 		t.Fatal("expected the injected save failure to fail the edit")
@@ -1898,14 +1891,11 @@ func TestAddMarketplace_SaveFailureRestoresTheOldClone(t *testing.T) {
 	}
 	before := readStoreFile(t, m.marketplacesFile())
 
-	origWrite := marketplaceAtomicWriteFile
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error { return errors.New("boom") }
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
+	stubMarketplaceWriteError(t, errors.New("boom"))
 
 	if _, err := m.AddMarketplace(ctx, "acme", Source{Kind: SourceURL, URL: repoB}); err == nil {
 		t.Fatal("expected the save to fail")
 	}
-	marketplaceAtomicWriteFile = origWrite
 
 	// The failed save never overwrote the file, so the marketplace is still
 	// registered against its old clone, and that clone must still be there.
@@ -1960,14 +1950,11 @@ func TestEditMarketplace_RegistrySaveFailureRestoresTheOldClone(t *testing.T) {
 
 	// The last step before the marketplaces file, and the only one that runs
 	// after the swap on a rename.
-	origSave := installSaveRegistry
-	installSaveRegistry = func(string, Registry) error { return errors.New("boom") }
-	t.Cleanup(func() { installSaveRegistry = origSave })
+	stubInstallSaveError(t, errors.New("boom"))
 
 	if _, err := m.EditMarketplace(ctx, "acme", "beta", &Source{Kind: SourceURL, URL: repoB}); err == nil {
 		t.Fatal("expected the registry save to fail")
 	}
-	installSaveRegistry = origSave
 
 	if _, err := os.Stat(filepath.Join(m.marketplaceDir("acme"), "plugins", "widget")); err != nil {
 		t.Fatalf("the old clone was not restored: %v", err)
@@ -2020,14 +2007,11 @@ func TestEditMarketplace_MarketplacesSaveFailureRestoresTheOldClone(t *testing.T
 
 	// saveMarketplaces is the only writer through this seam, so the edit gets
 	// all the way past the swap before it fails.
-	origWrite := marketplaceAtomicWriteFile
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error { return errors.New("boom") }
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
+	stubMarketplaceWriteError(t, errors.New("boom"))
 
 	if _, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB}); err == nil {
 		t.Fatal("expected the save to fail")
 	}
-	marketplaceAtomicWriteFile = origWrite
 
 	// Each repo carries only its own plugin directory, so the clone says which
 	// source's files are in it.
@@ -2083,12 +2067,9 @@ func TestEditMarketplace_MarketplacesSaveFailureRestoresTheStore(t *testing.T) {
 	// saveMarketplaces is the only writer through this seam, so the rename
 	// gets all the way past the registry save before it fails — and the
 	// registry restore, which does not go through it, still reaches disk.
-	origWrite := marketplaceAtomicWriteFile
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error { return errors.New("boom") }
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
+	stubMarketplaceWriteError(t, errors.New("boom"))
 
 	_, err := m.EditMarketplace(ctx, name, "beta", nil)
-	marketplaceAtomicWriteFile = origWrite
 	if err == nil {
 		t.Fatal("expected the save to fail")
 	}

@@ -18,13 +18,138 @@ import (
 // asserts the caller's wire error carries none of it. The path only reaches
 // m.Stderr (discarded here), never the returned error (#1700).
 
+// newQuietManager builds a Manager over a fresh temp store with Stderr
+// discarded, plus the background context its caller drives calls with.
+func newQuietManager(t *testing.T) (*Manager, context.Context) {
+	t.Helper()
+	m := NewManager(t.TempDir())
+	m.Stderr = io.Discard
+	return m, context.Background()
+}
+
+// stubMarketplaceWriteError fails every store atomic write with err and
+// restores the primitive when the test ends.
+func stubMarketplaceWriteError(t *testing.T, err error) {
+	t.Helper()
+	orig := marketplaceAtomicWriteFile
+	t.Cleanup(func() { marketplaceAtomicWriteFile = orig })
+	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error { return err }
+}
+
+// stubMarketplaceWritePathError fails every store atomic write with a real
+// *fs.PathError naming path - what atomicWriteFile itself returns.
+func stubMarketplaceWritePathError(t *testing.T, path string) {
+	t.Helper()
+	stubMarketplaceWriteError(t, &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")})
+}
+
+// stubMarketplaceWritePathErrorFor fails the store atomic write only when it
+// targets path, letting every other write through.
+func stubMarketplaceWritePathErrorFor(t *testing.T, path string) {
+	t.Helper()
+	orig := marketplaceAtomicWriteFile
+	t.Cleanup(func() { marketplaceAtomicWriteFile = orig })
+	marketplaceAtomicWriteFile = func(p string, b []byte, mode os.FileMode) error {
+		if p == path {
+			return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
+		}
+		return orig(p, b, mode)
+	}
+}
+
+// stubMarketplaceWriteFailingFile fails the store atomic write whose target's
+// base name is file, letting every other write through.
+func stubMarketplaceWriteFailingFile(t *testing.T, file string, err error) {
+	t.Helper()
+	orig := marketplaceAtomicWriteFile
+	t.Cleanup(func() { marketplaceAtomicWriteFile = orig })
+	marketplaceAtomicWriteFile = func(p string, data []byte, perm os.FileMode) error {
+		if filepath.Base(p) == file {
+			return err
+		}
+		return orig(p, data, perm)
+	}
+}
+
+// stubMarketplaceRemovePathError fails the recursive remove of exactly path
+// with a real *fs.PathError naming it, letting every other remove through.
+func stubMarketplaceRemovePathError(t *testing.T, path string) {
+	t.Helper()
+	orig := marketplaceRemoveAll
+	t.Cleanup(func() { marketplaceRemoveAll = orig })
+	marketplaceRemoveAll = func(p string) error {
+		if p == path {
+			return &fs.PathError{Op: "remove", Path: path, Err: errors.New("permission denied")}
+		}
+		return orig(p)
+	}
+}
+
+// stubMarketplaceRenamePathError fails the rename pair matches names with a
+// real *fs.PathError naming path, letting every other rename through.
+func stubMarketplaceRenamePathError(t *testing.T, path string, matches func(from, to string) bool) {
+	t.Helper()
+	orig := marketplaceRename
+	t.Cleanup(func() { marketplaceRename = orig })
+	marketplaceRename = func(from, to string) error {
+		if matches(from, to) {
+			return &fs.PathError{Op: "rename", Path: path, Err: errors.New("permission denied")}
+		}
+		return orig(from, to)
+	}
+}
+
+// stubMarketplaceRenameError fails the rename matches names with err, letting
+// every other rename through, and restores the primitive when the test ends.
+func stubMarketplaceRenameError(t *testing.T, err error, matches func(from, to string) bool) {
+	t.Helper()
+	orig := marketplaceRename
+	t.Cleanup(func() { marketplaceRename = orig })
+	marketplaceRename = func(from, to string) error {
+		if matches(from, to) {
+			return err
+		}
+		return orig(from, to)
+	}
+}
+
+// stubInstallSavePathError fails every registry save with a real *fs.PathError
+// naming path.
+func stubInstallSavePathError(t *testing.T, path string) {
+	stubInstallSaveError(t, &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")})
+}
+
+// stubInstallSaveError fails every registry save with err and restores the
+// primitive when the test ends.
+func stubInstallSaveError(t *testing.T, err error) {
+	t.Helper()
+	orig := installSaveRegistry
+	t.Cleanup(func() { installSaveRegistry = orig })
+	installSaveRegistry = func(string, Registry) error { return err }
+}
+
+// stubRegistrySaveFailingSecondWrite lets a caller's first registry save (the
+// rekeyed one saveRename writes) land and fails the restore write that follows
+// with a *fs.PathError naming its own path.
+func stubRegistrySaveFailingSecondWrite(t *testing.T) {
+	t.Helper()
+	orig := installSaveRegistry
+	t.Cleanup(func() { installSaveRegistry = orig })
+	calls := 0
+	installSaveRegistry = func(p string, reg Registry) error {
+		calls++
+		if calls == 1 {
+			return orig(p, reg)
+		}
+		return &fs.PathError{Op: "write", Path: p, Err: errors.New("permission denied")}
+	}
+}
+
 // ensureFetched (reached here via Browse's lazy backfill) has no rollback of
 // its own: the freshly-cloned directory stays on disk, and the metadata save
 // that would have recorded it is the only thing that failed.
 func TestEnsureFetchedSaveFailureNamesNoPath(t *testing.T) {
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if err := m.saveMarketplaces(Marketplaces{"market-a": {Source: Source{Kind: SourceURL, URL: "https://example.invalid/repo.git"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -33,11 +158,7 @@ func TestEnsureFetchedSaveFailureNamesNoPath(t *testing.T) {
 	marketplaceGitClone = func(_ context.Context, _, dest, _, _ string) error { return os.MkdirAll(dest, 0o755) }
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathError(t, path)
 
 	_, err := m.Browse(ctx, "market-a")
 	if err == nil {
@@ -58,17 +179,11 @@ func TestAddMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathError(t, path)
 
 	_, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src})
 	if err == nil {
@@ -89,27 +204,12 @@ func TestAddMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 
-	origWrite := marketplaceAtomicWriteFile
-	origRemove := marketplaceRemoveAll
-	t.Cleanup(func() {
-		marketplaceAtomicWriteFile = origWrite
-		marketplaceRemoveAll = origRemove
-	})
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return errors.New("the store file could not be written")
-	}
+	stubMarketplaceWriteError(t, errors.New("the store file could not be written"))
 	clonePath := m.marketplaceDir("market-a")
-	marketplaceRemoveAll = func(p string) error {
-		if p == clonePath {
-			return &fs.PathError{Op: "remove", Path: clonePath, Err: errors.New("permission denied")}
-		}
-		return origRemove(p)
-	}
+	stubMarketplaceRemovePathError(t, clonePath)
 
 	_, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src})
 	if err == nil {
@@ -130,20 +230,14 @@ func TestRemoveMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathError(t, path)
 
 	err := m.RemoveMarketplace(ctx, "market-a")
 	if err == nil {
@@ -164,23 +258,14 @@ func TestRemoveMarketplaceCloneRemovalFailureNamesNoPath(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	clonePath := m.marketplaceDir("market-a")
-	origRemove := marketplaceRemoveAll
-	t.Cleanup(func() { marketplaceRemoveAll = origRemove })
-	marketplaceRemoveAll = func(p string) error {
-		if p == clonePath {
-			return &fs.PathError{Op: "remove", Path: clonePath, Err: errors.New("permission denied")}
-		}
-		return origRemove(p)
-	}
+	stubMarketplaceRemovePathError(t, clonePath)
 
 	err := m.RemoveMarketplace(ctx, "market-a")
 	if err == nil {
@@ -215,23 +300,14 @@ func TestRemoveMarketplaceRetryAfterCloneRemovalFailureReportsNotFound(t *testin
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	clonePath := m.marketplaceDir("market-a")
-	origRemove := marketplaceRemoveAll
-	t.Cleanup(func() { marketplaceRemoveAll = origRemove })
-	marketplaceRemoveAll = func(p string) error {
-		if p == clonePath {
-			return &fs.PathError{Op: "remove", Path: clonePath, Err: errors.New("permission denied")}
-		}
-		return origRemove(p)
-	}
+	stubMarketplaceRemovePathError(t, clonePath)
 
 	if err := m.RemoveMarketplace(ctx, "market-a"); !errors.Is(err, ErrMarketplaceUnregisteredCloneRemains) {
 		t.Fatalf("first RemoveMarketplace = %v, want ErrMarketplaceUnregisteredCloneRemains", err)
@@ -256,9 +332,7 @@ func TestRemoveMarketplace_LookupMissTouchesNothingOnDisk(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not available")
 	}
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
@@ -290,19 +364,13 @@ func TestRemoveMarketplace_LookupMissTouchesNothingOnDisk(t *testing.T) {
 // RefreshMarketplace's save failure, after a directory-source refresh (which
 // touches no disk beyond LastUpdated), is a plain metadata-save failure.
 func TestRefreshMarketplaceSaveFailureNamesNoPath(t *testing.T) {
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceDirectory, Path: makeMarketplaceRepoDirNoGit(t, "market-a")}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathError(t, path)
 
 	err := m.RefreshMarketplace(ctx, "market-a")
 	if err == nil {
@@ -324,19 +392,13 @@ func TestEditMarketplaceSaveFailureRollbackSucceedsNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathError(t, path)
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB})
 	if err == nil {
@@ -363,29 +425,14 @@ func TestEditMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	swappedIn := m.marketplaceDir("acme")
-	origWrite := marketplaceAtomicWriteFile
-	origRemove := marketplaceRemoveAll
-	t.Cleanup(func() {
-		marketplaceAtomicWriteFile = origWrite
-		marketplaceRemoveAll = origRemove
-	})
-	marketplaceAtomicWriteFile = func(string, []byte, os.FileMode) error {
-		return errors.New("boom")
-	}
-	marketplaceRemoveAll = func(p string) error {
-		if p == swappedIn {
-			return &fs.PathError{Op: "remove", Path: swappedIn, Err: errors.New("permission denied")}
-		}
-		return origRemove(p)
-	}
+	stubMarketplaceWriteError(t, errors.New("boom"))
+	stubMarketplaceRemovePathError(t, swappedIn)
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB})
 	if err == nil {
@@ -408,9 +455,7 @@ func TestEditMarketplaceUnreadableMarketplacesFileNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -436,9 +481,7 @@ func TestEditMarketplaceUnreadableRegistryFileNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -511,22 +554,13 @@ func TestEditFailureIdentityPreservesLockContention(t *testing.T) {
 // Scrubbing it again would tell the client less than the identical failure
 // reports through ListMarketplaces (#1854).
 func TestEditMarketplaceMigrationSaveFailureNamesTheStoreFile(t *testing.T) {
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
+	m, _ := newQuietManager(t)
 	plantLegacyMarketplace(t, m, "a/b", "widget")
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(p string, data []byte, perm os.FileMode) error {
-		if filepath.Base(p) == marketplacesFileName {
-			return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-		}
-		return origWrite(p, data, perm)
-	}
+	stubMarketplaceWritePathErrorFor(t, path)
 
 	_, err := m.EditMarketplace(context.Background(), "a/b", "", nil)
-	marketplaceAtomicWriteFile = origWrite
 	if err == nil {
 		t.Fatal("expected the migration's save to fail the edit")
 	}
@@ -662,9 +696,7 @@ func TestEditMarketplaceFetchFailureNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -677,7 +709,6 @@ func TestEditMarketplaceFetchFailureNamesNoPath(t *testing.T) {
 	}
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB})
-	marketplaceGitClone = orig
 	if err == nil {
 		t.Fatal("expected the fetch to fail")
 	}
@@ -699,26 +730,16 @@ func TestEditMarketplaceAsideMoveFailureNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	dest := m.marketplaceDir("acme")
 	aside := m.marketplaceDir(asideCloneName)
-	orig := marketplaceRename
-	t.Cleanup(func() { marketplaceRename = orig })
-	marketplaceRename = func(from, to string) error {
-		if from == dest && to == aside {
-			return &fs.PathError{Op: "rename", Path: dest, Err: errors.New("permission denied")}
-		}
-		return orig(from, to)
-	}
+	stubMarketplaceRenamePathError(t, dest, func(from, to string) bool { return from == dest && to == aside })
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repoB})
-	marketplaceRename = orig
 	if err == nil {
 		t.Fatal("expected the aside move to fail")
 	}
@@ -737,9 +758,7 @@ func TestEditMarketplaceCloneRenameFailureNamesNoPath(t *testing.T) {
 		t.Skip("git not available")
 	}
 	mktRepo, name := makeInstallableMarketplace(t)
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -748,17 +767,9 @@ func TestEditMarketplaceCloneRenameFailureNamesNoPath(t *testing.T) {
 	}
 
 	clone := m.marketplaceDir(name)
-	orig := marketplaceRename
-	t.Cleanup(func() { marketplaceRename = orig })
-	marketplaceRename = func(from, to string) error {
-		if from == clone {
-			return &fs.PathError{Op: "rename", Path: clone, Err: errors.New("permission denied")}
-		}
-		return orig(from, to)
-	}
+	stubMarketplaceRenamePathError(t, clone, func(from, _ string) bool { return from == clone })
 
 	_, err := m.EditMarketplace(ctx, name, "beta", nil)
-	marketplaceRename = orig
 	if err == nil {
 		t.Fatal("expected the clone rename to fail")
 	}
@@ -782,25 +793,15 @@ func TestEditMarketplaceInstallFailureNamesNoPath(t *testing.T) {
 	}
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	repo := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceDirectory, Path: dir}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
 
 	dest := m.marketplaceDir("acme")
-	orig := marketplaceRename
-	t.Cleanup(func() { marketplaceRename = orig })
-	marketplaceRename = func(from, to string) error {
-		if to == dest {
-			return &fs.PathError{Op: "rename", Path: dest, Err: errors.New("permission denied")}
-		}
-		return orig(from, to)
-	}
+	stubMarketplaceRenamePathError(t, dest, func(_, to string) bool { return to == dest })
 
 	_, err := m.EditMarketplace(ctx, "acme", "", &Source{Kind: SourceURL, URL: repo})
-	marketplaceRename = orig
 	if err == nil {
 		t.Fatal("expected the install to fail")
 	}
@@ -825,9 +826,7 @@ func TestEditMarketplaceSwapRollbackFailureNamesNoPath(t *testing.T) {
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -874,9 +873,7 @@ func TestEditMarketplaceRenameRegistrySaveFailureNamesRegistryFile(t *testing.T)
 		t.Skip("git not available")
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -885,11 +882,7 @@ func TestEditMarketplaceRenameRegistrySaveFailureNamesRegistryFile(t *testing.T)
 	}
 
 	regPath := m.registryPath()
-	origSave := installSaveRegistry
-	t.Cleanup(func() { installSaveRegistry = origSave })
-	installSaveRegistry = func(string, Registry) error {
-		return &fs.PathError{Op: "write", Path: regPath, Err: errors.New("permission denied")}
-	}
+	stubInstallSavePathError(t, regPath)
 
 	_, err := m.EditMarketplace(ctx, "acme", "beta", nil)
 	if err == nil {
@@ -916,9 +909,7 @@ func TestEditMarketplaceRenameBetweenNamesErrorSurvivesIdentity(t *testing.T) {
 		t.Skip("git not available")
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -927,28 +918,10 @@ func TestEditMarketplaceRenameBetweenNamesErrorSurvivesIdentity(t *testing.T) {
 	}
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(p string, b []byte, mode os.FileMode) error {
-		if p == path {
-			return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-		}
-		return origWrite(p, b, mode)
-	}
-
-	origSave := installSaveRegistry
-	saveCalls := 0
-	t.Cleanup(func() { installSaveRegistry = origSave })
-	installSaveRegistry = func(p string, reg Registry) error {
-		saveCalls++
-		if saveCalls == 1 {
-			// The rekeyed registry saveRename writes before the marketplaces
-			// file - lets that one land so the restore below is a real
-			// second write, not a no-op.
-			return origSave(p, reg)
-		}
-		return &fs.PathError{Op: "write", Path: p, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathErrorFor(t, path)
+	// The stub below lets the rekeyed first registry save land so the restore
+	// it fails is a real second write, not a no-op.
+	stubRegistrySaveFailingSecondWrite(t)
 
 	_, err := m.EditMarketplace(ctx, "acme", "beta", nil)
 	if err == nil {
@@ -977,9 +950,7 @@ func TestEditMarketplaceRenameBetweenNamesRollbackFailureSurvivesIdentity(t *tes
 	}
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -989,38 +960,11 @@ func TestEditMarketplaceRenameBetweenNamesRollbackFailureSurvivesIdentity(t *tes
 
 	path := m.marketplacesFile()
 	swappedIn := m.marketplaceDir("beta")
-	origWrite := marketplaceAtomicWriteFile
-	origRemove := marketplaceRemoveAll
-	t.Cleanup(func() {
-		marketplaceAtomicWriteFile = origWrite
-		marketplaceRemoveAll = origRemove
-	})
-	marketplaceAtomicWriteFile = func(p string, b []byte, mode os.FileMode) error {
-		if p == path {
-			return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-		}
-		return origWrite(p, b, mode)
-	}
-	marketplaceRemoveAll = func(p string) error {
-		if p == swappedIn {
-			return &fs.PathError{Op: "remove", Path: swappedIn, Err: errors.New("permission denied")}
-		}
-		return origRemove(p)
-	}
-
-	origSave := installSaveRegistry
-	saveCalls := 0
-	t.Cleanup(func() { installSaveRegistry = origSave })
-	installSaveRegistry = func(p string, reg Registry) error {
-		saveCalls++
-		if saveCalls == 1 {
-			// The rekeyed registry saveRename writes before the marketplaces
-			// file - lets that one land so the restore below is a real
-			// second write, not a no-op.
-			return origSave(p, reg)
-		}
-		return &fs.PathError{Op: "write", Path: p, Err: errors.New("permission denied")}
-	}
+	stubMarketplaceWritePathErrorFor(t, path)
+	stubMarketplaceRemovePathError(t, swappedIn)
+	// The stub below lets the rekeyed first registry save land so the restore
+	// it fails is a real second write, not a no-op.
+	stubRegistrySaveFailingSecondWrite(t)
 
 	_, err := m.EditMarketplace(ctx, "acme", "beta", &Source{Kind: SourceURL, URL: repoB})
 	if err == nil {
@@ -1040,19 +984,11 @@ func TestEditMarketplaceRenameBetweenNamesRollbackFailureSurvivesIdentity(t *tes
 // directly. saveRename's own scrub has to cover this caller too, not only
 // EditMarketplace's.
 func TestMigrationTriggeredSaveFailureNamesNoPath(t *testing.T) {
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
+	m, _ := newQuietManager(t)
 	plantLegacyMarketplace(t, m, "a/b", "widget")
 
 	path := m.marketplacesFile()
-	origWrite := marketplaceAtomicWriteFile
-	t.Cleanup(func() { marketplaceAtomicWriteFile = origWrite })
-	marketplaceAtomicWriteFile = func(p string, data []byte, perm os.FileMode) error {
-		if filepath.Base(p) == marketplacesFileName {
-			return &fs.PathError{Op: "write", Path: path, Err: errors.New("permission denied")}
-		}
-		return origWrite(p, data, perm)
-	}
+	stubMarketplaceWritePathErrorFor(t, path)
 
 	_, err := m.ListMarketplaces(context.Background())
 	if err == nil {
@@ -1075,9 +1011,7 @@ func TestBrowseCorruptCatalogNamesNoPath(t *testing.T) {
 		t.Skip("git not available")
 	}
 	src := makeMarketplaceRepo(t, "acme")
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: src}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -1138,9 +1072,7 @@ func TestUpgradeCorruptCatalogNamesNoPath(t *testing.T) {
 		t.Skip("git not available")
 	}
 	mktRepo, name := makeInstallableMarketplace(t)
-	m := NewManager(t.TempDir())
-	m.Stderr = io.Discard
-	ctx := context.Background()
+	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
