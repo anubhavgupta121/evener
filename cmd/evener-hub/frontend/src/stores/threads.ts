@@ -1110,9 +1110,17 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
 // possible — used to leave the pane that way permanently: nothing re-opened
 // the record, so the thread store's documented bounded source recovery (S02:
 // "the accepted baseline restores display, older paging and live updates")
-// never ran. One tracked re-open closes the gap: bounded by the same lookup
-// deadline, deduplicated per live route, and registered in trackedHydrationCompletions
-// so a caller awaiting the acquisition's completion (including
+// never ran. A tracked re-open closes the gap, and it must RE-ARM: its own
+// open reads the same slow cache and can miss the same deadline again, so a
+// fixed number of attempts just strands the pane one attempt later (the
+// whole-suite third-miss failure this re-arm closes). Each attempt is bounded
+// by the same lookup deadline, and only an attempt's completion decides the
+// next one — an event-completion chain, not a timer loop — so it stops at the
+// first successful open, when the foreground holder releases, or when the
+// route retires; a fast recovery-needed refusal (usable display) never
+// re-arms. One tracked chain covers every attempt, deduplicated per live
+// route, and is registered in trackedHydrationCompletions so a caller
+// awaiting the acquisition's completion (including
 // settleEntryTranscriptForTests) also awaits the display's convergence.
 // The route a pending recovery belongs to, keyed by ref: a recovery opened for
 // a retired route must never suppress a fresh acquisition's recovery, and a
@@ -1125,7 +1133,17 @@ function scheduleEntryOpeningRecovery(ref: string): void {
   if (pendingOpeningRecoveries.get(ref) === route) return;
   if ((refCounts.get(ref) ?? 0) <= 0) return; // no live foreground holder to recover for
   pendingOpeningRecoveries.set(ref, route);
-  const recovery = openEntryTranscript(ref).then(
+  const recovery = (async () => {
+    for (;;) {
+      const opened = await openEntryTranscript(ref);
+      if (opened) return;
+      if (entryTranscriptRoute(ref) !== route) return; // a retired route's recovery must not outlive it
+      if ((refCounts.get(ref) ?? 0) <= 0) return; // holder released: nothing left to recover for
+      if (route.localOpenDeadlineMissed !== true) return; // usable display: recovery churn would only disturb it
+      // The attempt missed the deadline again under sustained slowness; the
+      // pane is still stranded and held, so try once more.
+    }
+  })().then(
     () => undefined,
     () => undefined,
   );

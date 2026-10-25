@@ -1869,6 +1869,59 @@ it("a foreground opening that misses its bounded lookup twice still converges th
   await lease.release();
 });
 
+it("a foreground opening that misses its bounded lookup three times still converges the recorded display", async () => {
+  const storage = cache();
+  // Sustained slowness does not stop at two: the recovery's own bounded open
+  // reads the same cache and can miss the same 250ms deadline a third time.
+  // Withhold the first THREE window reads once armed, so both of the
+  // foreground acquisition's opens AND the first recovery attempt miss
+  // deterministically (the withheld promise never resolves; only the store's
+  // own deadline resolves each race). Later reads run normally, so a recovery
+  // that re-arms while the pane is still stranded restores the display
+  // without any timing luck.
+  let armedWindowReads = 0;
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    armedWindowReads += 1;
+    return armedWindowReads <= 0
+      ? (new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>)
+      : (realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+          typeof realGetLatestWindow
+        >);
+  };
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  armedWindowReads = -3; // the next three reads (two opens plus the first recovery) miss; then reads recover
+  await threadsStore.getState().ensureThread(ref);
+  // Convergence must not depend on how many times the deadline missed while
+  // the pane stayed held: the recovery keeps re-arming until an open succeeds.
+  await settleEntryTranscriptForTests(ref);
+  expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+  expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  threadsStore.getState().releaseThread(ref);
+  await lease.release();
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";
