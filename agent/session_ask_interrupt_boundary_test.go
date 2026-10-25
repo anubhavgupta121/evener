@@ -42,11 +42,7 @@ func TestAskUser_RejectedInterruptUsesDurableBoundary(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolCallResponse(ask, cancelCall) },
 		},
 	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
 
 	markerFailure := errors.New("interrupt marker rejected after clean rollback")
 	toolResultsFailure := errors.New("tool results record rejected")
