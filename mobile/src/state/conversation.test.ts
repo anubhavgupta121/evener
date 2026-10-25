@@ -129,6 +129,26 @@ function readResult(
 	};
 }
 
+// The eviction family's standard projected open: a versioned thread-1 read
+// whose row payload the caller scripts, opened through the standard sink.
+async function openVersionedRows(olderCursor: string, over: Partial<MobileConversation> = {}) {
+	const service = new FakeConversationService();
+	const sink = createFakeSink();
+	const store = createConversationStore();
+	service.readProjectionResult = readResult(
+		makeConversation({
+			threadId: "thread-1",
+			instanceId: "instance-1",
+			usage: null,
+			olderCursor,
+			...over,
+		}),
+		{ olderCursor },
+	);
+	await store.getState().openProjected(service, sink, "ref-1");
+	return { service, sink, store };
+}
+
 // The hub refusing a mutation whose capability moved on without a status frame
 // this client saw (F11: a real WireError, matched by identity).
 const refusal = () =>
@@ -900,8 +920,7 @@ describe("ConversationStore", () => {
 		// (projectOlderTurns and its fake Thread are gone), so the page's own
 		// wire turns are the whole input.
 		it("renders an older page's rows from the merged model", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "completed", items: [] })],
 				}),
@@ -945,8 +964,7 @@ describe("ConversationStore", () => {
 			// rule (newer field ?? older field) folds the page's images in — the
 			// web's rule (decision 2), now that rows project from the model and
 			// no row filter or model-side strip runs ahead of the merge.
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -998,8 +1016,7 @@ describe("ConversationStore", () => {
 			// service-side projection filter died with projectOlderTurns.
 			const askArgs =
 				'{"questions":[{"header":"Choose","question":"Pick one","options":[{"label":"A","detail":"da"},{"label":"B","detail":"db"}],"multi_select":false}]}';
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					evener: {
 						ref: "ref-1",
@@ -2696,8 +2713,7 @@ describe("ConversationStore", () => {
 		// as a reread: a frame delivered before its response is already folded
 		// into the snapshot, so it is neither replayed nor a reason to reread.
 		it("does not reread for a frame that precedes the initial read's response", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ status: { type: "idle" } }));
+			const service = serviceForThread(makeThread({ status: { type: "idle" } }));
 			const store = createConversationStore();
 			const ctrl = makeControlledRead(service);
 			const opening = store.getState().openProjected(service, createFakeSink(), "ref-1");
@@ -3886,8 +3902,7 @@ describe("ConversationStore", () => {
 		// members are still history nobody else holds, and the projection keeps
 		// them clustered in the rebuilt row.
 		it("keeps the paged cluster's other members when the snapshot holds one of them", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(runningTurnThread());
+			const service = serviceForThread(runningTurnThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -3951,8 +3966,7 @@ describe("ConversationStore", () => {
 		// and the next publish as history nobody else holds, never reading as a
 		// duplicate of the keyed member beside it.
 		it("keeps a paged cluster's keyless member when the snapshot catches the keyed one", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(runningTurnThread());
+			const service = serviceForThread(runningTurnThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -4577,8 +4591,7 @@ describe("ConversationStore", () => {
 					},
 				],
 			});
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				runningTurnThread([askUserItem("ask-1", bigAsk)], {
 					evener: evenerWith({ activeTurnId: "t1", askPending: true }),
 				}),
@@ -5329,10 +5342,7 @@ describe("ConversationStore", () => {
 				},
 			],
 		] as const)("rereads when %s names an active turn this window does not hold", async (_label, frame) => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ evener: evenerWith({ activeTurnId: "t-outside-window" }) }),
-			);
+			const service = serviceForThread(makeThread({ evener: evenerWith({ activeTurnId: "t-outside-window" }) }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.activeTurnId).toBe("t-outside-window");
@@ -5356,8 +5366,7 @@ describe("ConversationStore", () => {
 		// warning-item conversion), so the canonical read cannot carry it either
 		// and asking for one buys nothing.
 		it("does not reread for a warning the wire drops because no turn is active", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.activeTurnId).toBeUndefined();
@@ -5381,8 +5390,7 @@ describe("ConversationStore", () => {
 		// the canonical read is the one honest way to drop them: settling a turn
 		// that still holds warning items must request that read.
 		it("rereads when a bare turn/completed settles a turn still holding warning items, and the read drops them", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5423,8 +5431,7 @@ describe("ConversationStore", () => {
 		// the model and the transient warning returned. The rehydrate must keep
 		// live-only warnings out of the retained turn history it merges.
 		it("the settle reread's warning cleanup sticks across later frames once page turns are loaded", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5469,8 +5476,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a settle reread whose fresh window re-issues the turn's content under a new id still drops the transient warning", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -5769,8 +5775,7 @@ describe("ConversationStore", () => {
 			// The conversation transition clears it: reopened, the conversation
 			// does not resurrect a notice from before it.
 			store.getState().reset();
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(rows(store).filter((row) => row.kind === "failure")).toEqual([]);
 		});
@@ -5881,8 +5886,7 @@ describe("ConversationStore", () => {
 		// belongs on the transient surface like any warning the reducer could
 		// not place.
 		it("shows a warning whose active turn lies outside the loaded window, and keeps it through the gap reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -5940,8 +5944,7 @@ describe("ConversationStore", () => {
 		// deleted the notice outright. Anchors must resolve through the
 		// identities a row OWNS, members included.
 		it("reseats a warning through a cluster that absorbed its anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6017,8 +6020,7 @@ describe("ConversationStore", () => {
 		// cluster splits at the anchored member instead, so the notice keeps
 		// the position it arrived at, above the rows that arrived later.
 		it("seats a warning above later members when a cluster grows past its anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6202,8 +6204,7 @@ describe("ConversationStore", () => {
 		// whole run stays above it and only members that join LATER split
 		// below it.
 		it("seats a warning after the whole cluster that was displayed when it arrived", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -6808,8 +6809,7 @@ describe("ConversationStore", () => {
 			// and the next page names that row.
 			const filler: ThreadItem[] = [];
 			for (let i = 0; i < 499; i++) filler.push(userMessageItem(`filler-${i}`, ""));
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -7267,38 +7267,27 @@ describe("ConversationStore", () => {
 		// claim let the warning restore the stale pagination cursor and report
 		// "loaded" for a complete snapshot.
 		it("an unmatched warning-only turn does not claim cursor coverage", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [
-						fillerTurn(500),
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "rk",
-									transcriptKey: "PK",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "real text",
-									position: { entry: 98, item: 0 },
-									status: "completed",
-								},
-							],
-							usage: { inputTokens: 9, outputTokens: 9 },
-						},
-					],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [
+					fillerTurn(500),
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "rk",
+								transcriptKey: "PK",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "real text",
+								position: { entry: 98, item: 0 },
+								status: "completed",
+							},
+						],
+						usage: { inputTokens: 9, outputTokens: 9 },
+					},
+				],
+			});
 
 			// After pagination the store retains a warning alongside the ordinary
 			// message: a row-less page turn that compacts at its own load (its
@@ -7443,20 +7432,9 @@ describe("ConversationStore", () => {
 		// The wire-text repair cannot rescue it either: a wire item that omitted
 		// text has nothing to adopt.
 		it("a sparse reread reissue of a compact identity settles to empty text, never undefined", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// Row-less page turn: compacts at its own load and remembers px.
 			scriptOlderTurns(
@@ -7539,20 +7517,9 @@ describe("ConversationStore", () => {
 		// item — the injection's fold would erase the retained copy's text and
 		// the wire-text repair would then re-adopt the OLDER page's text.
 		it("an id-only compaction restored with a key keeps the retained text through an overlapping page", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// Row-less page turn carrying an ID-ONLY item: compacts at its own
 			// load, remembering the bare id.
@@ -7682,20 +7649,9 @@ describe("ConversationStore", () => {
 		// that legitimate empty — not the reconcile of the two fragments within
 		// the page, and not the fold into the turn's remembered skeleton.
 		it("a later fragment's explicit empty text is not overwritten by an earlier fragment's text", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// The page brings px as a real row item: under D23d the model keeps
 			// the page turn's own row while it stays in the window.
@@ -7852,38 +7808,27 @@ describe("ConversationStore", () => {
 		// as an empty turn that could claim coverage for a reason the pin is
 		// not about.
 		it("a noncolliding compact turn does not claim cursor coverage over a complete fresh read", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "rk",
-									transcriptKey: "PK",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "real text",
-									position: { entry: 98, item: 0 },
-									status: "completed",
-								},
-							],
-							usage: { inputTokens: 9, outputTokens: 9 },
-						},
-						fillerTurn(499),
-					],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, sink, store } = await openVersionedRows("c0", {
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "rk",
+								transcriptKey: "PK",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "real text",
+								position: { entry: 98, item: 0 },
+								status: "completed",
+							},
+						],
+						usage: { inputTokens: 9, outputTokens: 9 },
+					},
+					fillerTurn(499),
+				],
+			});
 
 			// The page's position says older history — below the snapshot's own
 			// oldest row — so its row is the oldest in the merged projection and
@@ -8066,20 +8011,9 @@ describe("ConversationStore", () => {
 		// the full folded payload in the window. The bound's absorbed-identity
 		// read stays as defense for shapes a future projector could still mint.
 		it("a folded call keeps its payload when only the result row is retained", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A page turn carrying a call and its result: the pair folds into a
 			// single host item, so the host's own row is the only row either
@@ -8158,25 +8092,14 @@ describe("ConversationStore", () => {
 		// transcript key left its keyless backing item outside the window and
 		// the bound shed the payload behind a row still on screen.
 		it("a keyed retained row keeps its keyless backing item's turn in the window", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A page whose display row is keyed while its backing fragment item
 			// arrives keyless — the exact pair itemIdentityMatches still matches
@@ -8237,25 +8160,14 @@ describe("ConversationStore", () => {
 		// order: content from the newer side of the merge wins independently
 		// of where the aliases sort.
 		it("a page's untouched stale alias does not overwrite the retained fold", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holds the item's fresh payload under
 			// {id pa, transcriptKey pk}, in window.
@@ -8353,25 +8265,14 @@ describe("ConversationStore", () => {
 		// are the items to exclude — the ones carrying no field a fold keeps —
 		// never real items merely because their text is omitted.
 		it("a retained tool item with omitted text keeps its fields through the fold", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained tool item whose wire omitted the text field — hydrated
 			// with the omitted-text marker — carrying its CURRENT output.
@@ -8457,25 +8358,14 @@ describe("ConversationStore", () => {
 		// duplicate reconciliation by source precedence over the keyed sibling
 		// holding the restored fields.
 		it("a sparse wire fragment folds without claiming freshness over a restored sibling", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding the SPARSE fragment the wire reissued:
 			// identity and ordering fields only — no text, no arguments, no
@@ -8556,25 +8446,14 @@ describe("ConversationStore", () => {
 		// output must resolve in list order, not ride the item's status-borne
 		// freshness.
 		it("a status-only fresh fragment does not promote inherited stale output", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding a STATUS-ONLY fragment: identity and
 			// ordering fields plus a completed status — no text, no arguments,
@@ -8657,25 +8536,14 @@ describe("ConversationStore", () => {
 		// the alias's inherited stale TEXT over a later sibling's restored
 		// text: text counts as supplied only when a fresh leaf provided it.
 		it("a status-only fresh fragment does not promote inherited stale text", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: Array.from({ length: 480 }, (_, j) => ({
-						kind: "user" as const,
-						id: `f-${j}`,
-						text: `f-${j}`,
-					})),
-					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
-					olderCursor: "c0",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c0", {
+				items: Array.from({ length: 480 }, (_, j) => ({
+					kind: "user" as const,
+					id: `f-${j}`,
+					text: `f-${j}`,
+				})),
+				turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
+			});
 
 			// A retained turn holding a STATUS-ONLY agentMessage fragment:
 			// identity and ordering fields plus a completed status — no text of
@@ -8752,47 +8620,36 @@ describe("ConversationStore", () => {
 		// fresh input supplied survives, the status the other side supplied
 		// survives, and everything else falls to the later-wins tiebreak.
 		it("two fresh-folded duplicates keep each side's fresh-supplied fields", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "pa",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "fresh",
-									transcriptKey: "kk",
-									position: { entry: 70, item: 0 },
-									status: "completed",
-								},
-								// The second retained alias carries ONLY a status — its
-								// text is the omitted marker, so it supplies no text.
-								markItemTextOmitted({
-									id: "pb",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "completed",
-									position: { entry: 71, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "pa",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "fresh",
+								transcriptKey: "kk",
+								position: { entry: 70, item: 0 },
+								status: "completed",
+							},
+							// The second retained alias carries ONLY a status — its
+							// text is the omitted marker, so it supplies no text.
+							markItemTextOmitted({
+								id: "pb",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "completed",
+								position: { entry: 71, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues both retained aliases keyless — each holding
 			// its own STALE text — and the second one already keyed: both
@@ -8841,41 +8698,30 @@ describe("ConversationStore", () => {
 		// merge's own presence rules: null is absent for the nullish-fallback
 		// fields.
 		it("a fresh null raw field does not promote inherited stale metadata", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-bearing retained fragment whose raw is NULL —
-								// it supplies a status but no raw of its own.
-								markItemTextOmitted({
-									id: "s1",
-									turnId: "rt",
-									type: "commandExecution",
-									callId: "c9",
-									text: "",
-									status: "completed",
-									raw: null,
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-bearing retained fragment whose raw is NULL —
+							// it supplies a status but no raw of its own.
+							markItemTextOmitted({
+								id: "s1",
+								turnId: "rt",
+								type: "commandExecution",
+								callId: "c9",
+								text: "",
+								status: "completed",
+								raw: null,
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying STALE
 			// raw metadata the null-raw fragment cannot displace — followed by
@@ -8928,36 +8774,25 @@ describe("ConversationStore", () => {
 		// as a second item of one identity. The reconciliation must keep
 		// folding the merged result until no accumulated candidate matches.
 		it("a three-item alias bridge reconciles to one item", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "k", text: "k row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								{
-									id: "b",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "retained b",
-									position: { entry: 20, item: 0 },
-									status: "completed",
-								},
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "k", text: "k row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							{
+								id: "b",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "retained b",
+								position: { entry: 20, item: 0 },
+								status: "completed",
+							},
+						],
+					},
+				],
+			});
 
 			// The page carries the bridge: a bare {id b} alias, a keyed {id a,
 			// tk k} item, and the {id b, tk k} reissue. The reissue folds into
@@ -9017,40 +8852,29 @@ describe("ConversationStore", () => {
 		// The provenance must record in list order: a side's leaves read, in
 		// the fold's walk, in the same precedence the resolution used.
 		it("a corrected call output survives the result fold after reconciliation", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-only retained CALL fragment: it supplies a
-								// status but no output of its own.
-								markItemTextOmitted({
-									id: "item_tool_9",
-									turnId: "rt",
-									type: "commandExecution",
-									callId: "c9",
-									text: "",
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-only retained CALL fragment: it supplies a
+							// status but no output of its own.
+							markItemTextOmitted({
+								id: "item_tool_9",
+								turnId: "rt",
+								type: "commandExecution",
+								callId: "c9",
+								text: "",
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying the
 			// STALE output — followed by a keyed sibling carrying the
@@ -9113,40 +8937,29 @@ describe("ConversationStore", () => {
 		// clear at reconciliation: the later stale duplicate's index came
 		// back. Presence, not value, decides the spread-merged fields.
 		it("a fresh fragment's explicit clear survives alias reconciliation", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A status-bearing retained fragment whose EXPLICIT
-								// undefined transcript entry index clears the field.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "completed",
-									transcriptKey: "kk",
-									transcriptEntryIndex: undefined,
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A status-bearing retained fragment whose EXPLICIT
+							// undefined transcript entry index clears the field.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "completed",
+								transcriptKey: "kk",
+								transcriptEntryIndex: undefined,
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
 			// entry index the explicit clear must displace — followed by a
@@ -9202,39 +9015,28 @@ describe("ConversationStore", () => {
 		// restored the later duplicate's stale index. (The round-22 test
 		// misses this: its fragment carries a status.)
 		it("a clear-only fragment is not identity-only", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// A retained fragment carrying ONLY an explicit clear —
-								// its text omitted, no status, no payload field.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									transcriptKey: "kk",
-									transcriptEntryIndex: undefined,
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// A retained fragment carrying ONLY an explicit clear —
+							// its text omitted, no status, no payload field.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								transcriptKey: "kk",
+								transcriptEntryIndex: undefined,
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
 			// entry index — followed by a keyed sibling carrying the restored
@@ -9374,40 +9176,29 @@ describe("ConversationStore", () => {
 		// completed status. Status counts as supplied only when a fresh
 		// leaf's own status is what the merge kept.
 		it("an inProgress fragment does not promote an inherited failed status", async () => {
-			const service = new FakeConversationService();
-			const sink = createFakeSink();
-			const store = createConversationStore();
-			service.readProjectionResult = readResult(
-				makeConversation({
-					threadId: "thread-1",
-					instanceId: "instance-1",
-					usage: null,
-					items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
-					turns: [
-						{
-							id: "rt",
-							status: "completed",
-							items: [
-								// An in-progress retained fragment: its rank cannot beat
-								// the failed alias it folds into, so the merge keeps the
-								// alias's failure.
-								markItemTextOmitted({
-									id: "f9",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "",
-									status: "inProgress",
-									transcriptKey: "kk",
-									position: { entry: 50, item: 0 },
-								}),
-							],
-						},
-					],
-					olderCursor: "c1",
-				}),
-				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
-			);
-			await store.getState().openProjected(service, sink, "ref-1");
+			const { service, store } = await openVersionedRows("c1", {
+				items: [{ kind: "user" as const, id: "kk", text: "kk row" }],
+				turns: [
+					{
+						id: "rt",
+						status: "completed",
+						items: [
+							// An in-progress retained fragment: its rank cannot beat
+							// the failed alias it folds into, so the merge keeps the
+							// alias's failure.
+							markItemTextOmitted({
+								id: "f9",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "",
+								status: "inProgress",
+								transcriptKey: "kk",
+								position: { entry: 50, item: 0 },
+							}),
+						],
+					},
+				],
+			});
 
 			// The page reissues the fragment's keyless alias — carrying the
 			// FAILED status the in-progress fragment cannot displace —
@@ -10341,8 +10132,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ turns }), ALL_TRUE_CAPS, true);
+			const service = serviceForThread(makeThread({ turns }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -10482,10 +10272,7 @@ describe("ConversationStore", () => {
 			for (let i = 0; i < 500; i++) {
 				windowItems.push({ ...userMessageItem(`item-${i}`, ""), position: { entry: 100 + i, item: 0 } });
 			}
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t-latest", items: windowItems })] }),
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t-latest", items: windowItems })] }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
@@ -10520,8 +10307,7 @@ describe("ConversationStore", () => {
 	// omits (but the still-current held item carries) gets cleared.
 	describe("rehydrate does not act on a discarded (stale) read", () => {
 		it("a same-incarnation reread with a shorter length does not clear a held payload it omits", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -10580,12 +10366,7 @@ describe("ConversationStore", () => {
 		// race (e.g. a resync bumped epoch/bootGeneration past what this read's
 		// own snapshot carries).
 		it("resumeProjected stays open and keeps the subscription when its read is discarded as stale", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -10615,12 +10396,7 @@ describe("ConversationStore", () => {
 		// PRE-suspend generation — every live frame after a discarded resume
 		// read is then silently ignored, freezing the activity/jobs/usage panel.
 		it("a discarded resume read still installs the new generation's identity, so later live frames are not ignored", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items: [] })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
@@ -11761,11 +11537,21 @@ describe("ConversationStore", () => {
 		};
 	}
 
+	// A fake service whose read projection hydrates exactly this thread.
+	function serviceForThread(
+		thread: Thread,
+		capabilities: ThreadCapabilities = ALL_TRUE_CAPS,
+		versioned = false,
+	): FakeConversationService {
+		const service = new FakeConversationService();
+		service.readProjectionResult = makeReadProjectionResult(thread, capabilities, versioned);
+		return service;
+	}
+
 	// A store opened through openProjected onto a fresh fake service serving
 	// `thread` as its projection.
 	async function openProjectedThread(thread: Thread, versioned = false) {
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread, ALL_TRUE_CAPS, versioned);
+		const service = serviceForThread(thread, ALL_TRUE_CAPS, versioned);
 		const store = createConversationStore();
 		await store.getState().openProjected(service, createFakeSink(), "ref-1");
 		return store;
@@ -11795,8 +11581,7 @@ describe("ConversationStore", () => {
 		thread: Thread;
 	}> {
 		const thread = runningTurnThread(items, over);
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread, ALL_TRUE_CAPS, versioned);
+		const service = serviceForThread(thread, ALL_TRUE_CAPS, versioned);
 		const store = createConversationStore();
 		const sink = createFakeSink();
 		await store.getState().openProjected(service, sink, "ref-1");
@@ -11844,8 +11629,7 @@ describe("ConversationStore", () => {
 			],
 			evener: evenerWith({ activeTurnId: "t1" }),
 		});
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(thread);
+		const service = serviceForThread(thread);
 		const store = createConversationStore();
 		const sink = createFakeSink();
 		await store.getState().openProjected(service, sink, "ref-1");
@@ -12380,8 +12164,7 @@ describe("ConversationStore", () => {
 					makeTurn({ id: "t2", items: [], status: "inProgress" }),
 				],
 			});
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(askThread, ALL_TRUE_CAPS, true);
+			const service = serviceForThread(askThread, ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.askPending).toBe(true);
@@ -13062,8 +12845,7 @@ describe("ConversationStore", () => {
 	// drops the deferred request entirely.
 	describe("I1: trailing reread deferred until mutation settles", () => {
 		it("zero trailing reads while mutation pending, exactly one after settlement", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
@@ -13106,8 +12888,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("zero trailing reads while mutation pending (failed terminal), exactly one after", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
@@ -13202,8 +12983,7 @@ describe("ConversationStore", () => {
 		snapshot: Thread,
 		initial: Thread = makeThread(),
 	) {
-		const service = new FakeConversationService();
-		service.readProjectionResult = makeReadProjectionResult(initial);
+		const service = serviceForThread(initial);
 		const store = createConversationStore();
 		await store.getState().openProjected(service, createFakeSink(), "ref-1");
 		service.readProjectionResult = makeReadProjectionResult(snapshot);
@@ -13374,8 +13154,7 @@ describe("ConversationStore", () => {
 		// The ordering the protocol does allow: a frame delivered after the
 		// response lands on top of the committed snapshot.
 		it("applies a frame that arrives after the response on top of the snapshot", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			service.readProjectionResult = makeReadProjectionResult(
@@ -13455,8 +13234,7 @@ describe("ConversationStore", () => {
 		// conversation and opening another must leave the next conversation's
 		// frames applied and the dead read's snapshot never committed.
 		it("never commits a dead read's snapshot after the conversation closes", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			service.readProjectionResult = makeReadProjectionResult(makeThread({ name: "old read's snapshot" }));
@@ -13604,8 +13382,7 @@ describe("ConversationStore", () => {
 		// live-owned row must be recognized as that identity and dropped, leaving
 		// exactly one failure row.
 		it("merges a warning to one failure row across a reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(withActiveTurn([]));
+			const service = serviceForThread(withActiveTurn([]));
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -13686,8 +13463,7 @@ describe("ConversationStore", () => {
 		// key-first identity — treated the surviving page history as unowned
 		// and an omitting rehydrate dropped it.
 		it("migrates a page item's claim to the transcript key a completion reissues it under", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -13765,8 +13541,7 @@ describe("ConversationStore", () => {
 		// live item to page history; an omitting rehydrate then kept live
 		// content the wire had withdrawn.
 		it("keeps a same-id different-key item from adopting the bare-id claim another item owns", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -13902,8 +13677,7 @@ describe("ConversationStore", () => {
 		// can actually serve — never a placeholder id (the old service-side
 		// projection hydrated a fake Thread under the thread id for this).
 		it("routes an older page's sha-only image through the merged model's session", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -13929,8 +13703,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a paged running item settles with the snapshot's completed turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -13995,8 +13768,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a full turn completion withdraws a page-loaded item it omits", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14053,8 +13825,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a full turn completion with no items list withdraws them all", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14107,8 +13878,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a missed completion's stale active flag does not keep the discarded items", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "tA", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "tA" }),
@@ -14156,8 +13926,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a reread that drops a turn's error does not resurrect the failure", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14217,8 +13986,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a paged fragment of a turn does not shield its live-acquired failure from a clean reread", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14282,8 +14050,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("a settled snapshot withdraws a matched item's retained failure status", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -14405,8 +14172,7 @@ describe("ConversationStore", () => {
 		// the fold at the pagination commit too (rounds 30-31 covered the
 		// rehydrate side), with the same one-row-per-identity reconciliation.
 		it("migrates a failed page turn's failure row when the pagination merge folds it into a retained turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -14516,10 +14282,7 @@ describe("ConversationStore", () => {
 		// cursor) adds nothing and must report empty, or the guard clears and a
 		// stale-cursor loop can keep re-requesting.
 		it("a page that only re-serves retained content reports no item keys", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t1", status: "completed", items: [] })] }),
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t1", status: "completed", items: [] })] }));
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -14567,8 +14330,7 @@ describe("ConversationStore", () => {
 		// when the next page's row would displace the notice, and paging goes
 		// on from the oldest row kept.
 		it("keeps paging when a page's row would displace a seated warning", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -14652,8 +14414,7 @@ describe("ConversationStore", () => {
 		// the next bounded refresh, whose window omits the item, drops loaded
 		// page history.
 		it("keeps a paged item's page-ness when a refresh lends it a transcript key", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t1", status: "inProgress", items: [] })],
 					evener: evenerWith({ activeTurnId: "t1" }),
@@ -14749,8 +14510,7 @@ describe("ConversationStore", () => {
 		// or the next row-changing frame projects the carrier's failure
 		// beside the obsolete row: the same failure twice.
 		it("migrates a previously paged failure when a later page bridges its turn with another retained turn", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15108,8 +14868,7 @@ describe("ConversationStore", () => {
 		// row the seated cap just evicted, so the model would carry page history
 		// the actual 500-row display window no longer holds.
 		it("bounds the rehydrate's retained page payloads against the seated window the publish shows", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15220,8 +14979,7 @@ describe("ConversationStore", () => {
 		// entirely, the re-seat at the publish then finds no anchor, and the
 		// prune retires a notice the window kept.
 		it("keeps a seated warning through a rehydrate whose bound trims the warning's anchor row", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
@@ -15352,8 +15110,7 @@ describe("ConversationStore", () => {
 			frame: AnyNotification,
 			options: { pageItems?: MobileConversation["items"] } = {},
 		) {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15456,8 +15213,7 @@ describe("ConversationStore", () => {
 	// is ordered at the snapshot cut).
 	describe("Residual 1: deferred trailing reread rechecks mutation revision inside effect", () => {
 		it("M1 settles and queues; M2 starts before effect; release => zero reread; settle M2 => exactly one", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread());
+			const service = serviceForThread(makeThread());
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Start a rehydrate (R) that hangs.
@@ -15583,8 +15339,7 @@ describe("ConversationStore", () => {
 
 	describe("dedupe within one page", () => {
 		it("dedupes duplicate IDs within the incoming page (the later fragment wins), preserving order", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15628,8 +15383,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("dedupes duplicate IDs within page AND against retained items", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15668,8 +15422,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("dedupes overlapping fragments by transcriptKey when wire IDs differ", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -15716,8 +15469,7 @@ describe("ConversationStore", () => {
 		});
 
 		it("rehydrates visible state after a stale v4 cursor", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", items: [userMessageItem("old", "old")] })],
 				}),
@@ -15846,12 +15598,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
-				makeThread({ turns: [makeTurn({ id: "t0", items })] }),
-				ALL_TRUE_CAPS,
-				true,
-			);
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items })] }), ALL_TRUE_CAPS, true);
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -15974,8 +15721,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", status: options.running ? "inProgress" : "completed", items })],
 					...(options.running ? { evener: evenerWith({ activeTurnId: "t0" }) } : {}),
@@ -16163,8 +15909,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(makeThread({ turns: [makeTurn({ id: "t0", items })] }));
+			const service = serviceForThread(makeThread({ turns: [makeTurn({ id: "t0", items })] }));
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			return { store, service };
@@ -16306,8 +16051,7 @@ describe("ConversationStore", () => {
 			store: ReturnType<typeof createConversationStore>;
 			service: FakeConversationService;
 		}> {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({ turns: [makeTurn({ id: "t0", items })] }),
 				ALL_TRUE_CAPS,
 				versioned,
@@ -16914,8 +16658,7 @@ describe("ConversationStore", () => {
 		// the switch back to full rendered them empty. The keep-window is the
 		// level-independent union at this site as well.
 		it("a rehydrate at a coarse level keeps the hidden turn's payload", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -16963,8 +16706,7 @@ describe("ConversationStore", () => {
 		// as well. The page's own accounting (the admitted item keys, F10's
 		// inputs) is level-independent; only the payload bound was not.
 		it("an older page loaded at a coarse level keeps the hidden turn's payload", async () => {
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [
 						makeTurn({
@@ -17131,8 +16873,7 @@ describe("ConversationStore", () => {
 	describe("the byte bound across a reread", () => {
 		it("bounds an oversized row on open and shows the reread's short version", async () => {
 			const oversized = "x".repeat(MAX_ITEM_BYTES + 100);
-			const service = new FakeConversationService();
-			service.readProjectionResult = makeReadProjectionResult(
+			const service = serviceForThread(
 				makeThread({
 					turns: [makeTurn({ id: "t0", items: [agentMessageItem("X", oversized, "completed")] })],
 				}),
