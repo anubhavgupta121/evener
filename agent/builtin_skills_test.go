@@ -1,13 +1,11 @@
 package agent
 
 import (
-	"context"
 	"maps"
 	"os"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"primeradiant.com/evener/agent/execenv"
 	"primeradiant.com/evener/agent/skill"
@@ -144,9 +142,7 @@ func TestEmbeddedSkills_ProjectShadowsEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	_, _ = sess.ProcessInput(ctx, "hi", nil)
 	sess.Close()
 
@@ -196,9 +192,7 @@ func TestEmbeddedSkills_UseSkillWithProjectSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	_, err = sess.ProcessInput(ctx, "use my skill", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -244,9 +238,7 @@ func TestEmbeddedSkills_UseSkillUnknownReturnsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	_, err = sess.ProcessInput(ctx, "check my work", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)

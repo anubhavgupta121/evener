@@ -76,11 +76,7 @@ func TestAskUser_RejectedInterruptUsesDurableBoundary(t *testing.T) {
 
 	meta := sess.Meta()
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 0 {
 		t.Fatalf("restored ask pending count = %d, want 0", got)
 	}
@@ -206,11 +202,7 @@ func TestFoldTail_CanceledAskPairRidingTailDoesNotResurrectAfterRestore(t *testi
 
 	meta := sess.Meta()
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 0 {
 		t.Fatalf("restored ask pending count after fold tail = %d, want 0 (the canceled pair resurrected through the rewrite tail)", got)
 	}
@@ -357,11 +349,7 @@ func TestFoldTail_FailedPairTombstoneKeepsSnapshotPositions(t *testing.T) {
 
 	meta := sess.Meta()
 	sess.Close()
-	restored, err := RestoreSessionFromMeta(newAskRestoreClient(), NewOpenAIProfile("gpt-5.2"), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
-	if err != nil {
-		t.Fatalf("RestoreSessionFromMeta: %v", err)
-	}
-	defer restored.Close()
+	restored := restoreAskSession(t, meta, dir)
 	if got := restored.askPendingCount(); got != 0 {
 		t.Fatalf("restored ask pending count after fold tail = %d, want 0", got)
 	}

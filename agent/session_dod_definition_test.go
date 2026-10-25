@@ -1133,10 +1133,7 @@ func TestSession_AbortThenFollowup(t *testing.T) {
 			return "", ctx.Err()
 		},
 	})
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	outerCtx, outerCancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -1319,10 +1316,7 @@ func TestSession_AbortErrorDrainsQueuedInputWithFreshContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	outerCtx, outerCancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -1790,10 +1784,7 @@ func TestSession_Subagent_AutoNudgeExplicitBuiltinSubagent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	agentID := spawnRuntimeAgent(t, sess, "survey the project", "", 0, "subagent", "", nil)
@@ -2061,10 +2052,7 @@ func TestProcessInput_ToolChoiceIsNeverForced(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	_, _ = sess.ProcessInput(context.Background(), "hello", nil)
 }
 
@@ -2092,10 +2080,7 @@ func TestProcessInput_DrainsSteeringBeforeFirstLLMCall(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	// Queue steering BEFORE ProcessInput
 	sess.Steer("do it differently")
@@ -2223,10 +2208,7 @@ func TestProviderOptions_PassedToLLMRequest(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	_, err = sess.ProcessInput(context.Background(), "hello", nil)
 	if err != nil {
@@ -2306,10 +2288,7 @@ func TestMaxTurns_CountsConversationTurns(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	// First input (turn 1): should work (even with tool round)
 	_, err = sess.ProcessInput(context.Background(), "first", nil)
@@ -2350,10 +2329,7 @@ func TestAssistantTurn_CapturesUsageAndResponseID(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
 	defer cancel()
@@ -2396,20 +2372,14 @@ func TestSession_GracefulShutdown_ClosesSubagents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	// Create a sub-session and manually register it as a subagent.
 	subSess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
 	if err != nil {
 		t.Fatalf("NewSession (sub): %v", err)
 	}
-	go func() {
-		for range subSess.Events() {
-		}
-	}()
+	drainSessionEvents(subSess)
 
 	sub := &subagent{
 		id:   "test-sub",
@@ -3691,10 +3661,7 @@ func TestSession_RoundLimit_ReturnsTypedErrorAndPartialOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -3732,10 +3699,7 @@ func TestSession_TurnLimit_UsesGreaterEqual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -3780,10 +3744,7 @@ func TestSession_TurnLimit_ReturnsTypedError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -3888,10 +3849,7 @@ func TestSession_Subagent_AutoNudgeOnEmptyResponseExhaustion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 	defer sess.Close()
 
 	agentID := spawnRuntimeAgent(t, sess, "survey the project", "", 0, "", "", nil)

@@ -457,8 +457,7 @@ func TestCommunicate_StatusBatchedWithDelegateDoesNotEndTurn(t *testing.T) {
 	// answered in-process with no I/O; the parent turn normally completes in
 	// well under a second. 30s only fires on a genuine hang, not scheduler
 	// contention under a loaded suite.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "start the observer flow", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)

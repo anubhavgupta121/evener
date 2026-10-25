@@ -40,9 +40,7 @@ func TestSession_FollowUp_ProcessesAfterCompletion(t *testing.T) {
 	if err := sess.FollowUp("do second"); err != nil {
 		t.Fatal(err)
 	}
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "do first", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -84,9 +82,7 @@ func TestSession_LoopDetection_EmitsEventAndInjectsSteering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	_, err = sess.ProcessInput(ctx, "loop", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)
@@ -197,9 +193,7 @@ func TestSession_SessionEnd_EmittedExactlyOnce(t *testing.T) {
 	}
 	eventsPtr, mu, doneCh := collectEvents(sess)
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hello", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -292,8 +286,7 @@ func TestSession_GenuineTurnFailureEmitsSessionEndWithFailedStatus(t *testing.T)
 
 	// TRIPWIRE: streamingAdapter returns its scripted error in-process, no
 	// real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hi", nil); err == nil {
 		t.Fatal("expected genuine provider failure")
 	}
@@ -353,8 +346,7 @@ func TestSession_GenuineTurnFailureNotifiesLiveSubscriberOfFailedStatus(t *testi
 
 	// TRIPWIRE: streamingAdapter returns its scripted error in-process, no
 	// real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hi", nil); err == nil {
 		t.Fatal("expected genuine provider failure")
 	}
@@ -579,10 +571,7 @@ func TestSession_CloseCannotBeReopenedByLateTurnCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	processDone := make(chan error, 1)
 	go func() {
@@ -626,10 +615,7 @@ func TestSession_ExecToolRefusesClosedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	ran := false
 	sess.RegisterTool("late_tool", "late tool", map[string]any{}, func(context.Context, any) (any, error) {
@@ -781,10 +767,7 @@ func TestSession_AppendCanceledToolResultsPreservesCompletedStatus(t *testing.T)
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	calls := []llm.ToolCallData{
 		{ID: "ok_call", Name: "ok_tool"},
@@ -827,10 +810,7 @@ func TestSession_AppendToolResultsSynthesizesCanceledResultsOnCancel(t *testing.
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	go func() {
-		for range sess.Events() {
-		}
-	}()
+	drainSessionEvents(sess)
 
 	calls := []llm.ToolCallData{
 		{ID: "ok_call", Name: "ok_tool"},
@@ -1140,9 +1120,7 @@ func TestSession_LoopDetection_WarningWording(t *testing.T) {
 		}
 	}()
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "loop", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1209,9 +1187,7 @@ func TestSession_Meta_PopulatesOriginalPrompt(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "write a haiku about goroutines", nil); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -1264,9 +1240,7 @@ func TestSession_ProcessInput_WithImage_BuildsMultiPartUserMessage(t *testing.T)
 		{MediaType: "image/png", Data: imgBytes, Name: "test.png"},
 	}
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "caption", imgs); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -1337,9 +1311,7 @@ func TestSession_ProcessInput_ImageOnly_OmitsEmptyTextPart(t *testing.T) {
 		{MediaType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff}, Name: "p.jpg"},
 	}
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "", imgs); err != nil {
 		t.Fatalf("ProcessInput: %v", err)
 	}
@@ -1398,9 +1370,7 @@ func TestSession_Enqueue_DrainsAfterTurnCompletes(t *testing.T) {
 		t.Fatalf("QueueDepth after Enqueue: got %d, want 1", depth)
 	}
 
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "first user input", nil)
 	if err != nil {
 		t.Fatalf("ProcessInput: %v", err)

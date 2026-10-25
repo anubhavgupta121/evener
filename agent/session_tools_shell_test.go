@@ -346,8 +346,7 @@ func TestShellToolIntentLandsOnJobRecord(t *testing.T) {
 	// TRIPWIRE: starting a background shell job returns as soon as the job
 	// is recorded (see TestShellToolBackgroundReturnsJobID); this normally
 	// returns in well under a second, so 30s only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 
 	res := s.reg.ExecuteCall(ctx, s.env, llm.ToolCallData{
 		ID:   "c-intent",
@@ -386,8 +385,7 @@ func TestShellToolBackgroundReturnsJobID(t *testing.T) {
 	// recorded, without waiting for the "sleep 30" command itself; this
 	// normally returns in well under a second, so 30s only fires on a
 	// genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 
 	res := s.reg.ExecuteCall(ctx, s.env, llm.ToolCallData{
 		ID:        "c1",
@@ -440,8 +438,7 @@ func TestShellToolBackgroundModelOutputRetainsJobIDUnderRegistryLimits(t *testin
 
 	// TRIPWIRE: background launch normally returns in well under a second;
 	// 30s only fires if the registered shell path genuinely hangs.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := tripwireCtx(t)
 	res := s.reg.ExecuteCall(ctx, s.env, llm.ToolCallData{
 		ID:        "c1",
 		Name:      "shell",
