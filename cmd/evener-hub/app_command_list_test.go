@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"primeradiant.com/evener/appwire"
+	"primeradiant.com/evener/appwire/appwiretest"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hubcore"
 	"primeradiant.com/evener/internal/plugins"
 )
@@ -260,7 +261,7 @@ func TestHubCommandList_ViaTypedRPCClient(t *testing.T) {
 	})
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	resp, err := client.CommandList(context.Background())
+	resp, err := appwiretest.CommandList(context.Background(), client)
 	if err != nil {
 		t.Fatalf("CommandList: %v", err)
 	}

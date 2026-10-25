@@ -9,6 +9,7 @@ import (
 
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
+	"primeradiant.com/evener/appwire/appwiretest"
 	"primeradiant.com/evener/cmd/evener-hub/internal/appsource"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hubcore"
 	"primeradiant.com/evener/rendezvous"
@@ -42,7 +43,7 @@ func TestHubRPCTranscriptTargetsUseEvenerParentRefs(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
 
-	resp, err := client.ThreadTranscriptList(context.Background(), appwire.ThreadTranscriptListParams{
+	resp, err := appwiretest.ThreadTranscriptList(context.Background(), client, appwire.ThreadTranscriptListParams{
 		Ref: appwire.Ref{SourceID: "local", ThreadID: parentID}.String(),
 	})
 	if err != nil {

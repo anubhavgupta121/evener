@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"primeradiant.com/evener/appwire"
+	"primeradiant.com/evener/appwire/appwiretest"
 	"primeradiant.com/evener/cmd/evener-hub/internal/appsource"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hubcore"
 	"primeradiant.com/evener/internal/appserver"
@@ -235,7 +236,7 @@ func TestNewHubAppServer_NilPluginManagerFallbackBroadcasts(t *testing.T) {
 	hub := httptest.NewServer(http.HandlerFunc(server.ServeWebSocket))
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	if _, err := client.MarketplaceAdd(context.Background(), appwire.MarketplaceAddParams{
+	if _, err := appwiretest.MarketplaceAdd(context.Background(), client, appwire.MarketplaceAddParams{
 		Source: appwire.MarketplaceSourceInput{Kind: "directory", Path: dir},
 	}); err != nil {
 		t.Fatalf("MarketplaceAdd: %v", err)
@@ -268,7 +269,7 @@ func TestNewWebServer_WiresPluginStoreBroadcastToItsOwnServer(t *testing.T) {
 	})
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	if _, err := client.MarketplaceAdd(context.Background(), appwire.MarketplaceAddParams{
+	if _, err := appwiretest.MarketplaceAdd(context.Background(), client, appwire.MarketplaceAddParams{
 		Source: appwire.MarketplaceSourceInput{Kind: "directory", Path: dir},
 	}); err != nil {
 		t.Fatalf("MarketplaceAdd: %v", err)

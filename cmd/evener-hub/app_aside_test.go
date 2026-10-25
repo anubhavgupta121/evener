@@ -7,6 +7,7 @@ import (
 
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
+	"primeradiant.com/evener/appwire/appwiretest"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hubcore"
 )
 
@@ -23,7 +24,7 @@ func TestHubRPCThreadForkAsideCreatesSideThread(t *testing.T) {
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
+	resp, err := appwiretest.ThreadFork(context.Background(), client, appwire.ThreadForkParams{
 		Ref:   "local:" + parentID,
 		Aside: true,
 	})

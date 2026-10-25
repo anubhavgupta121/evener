@@ -13,6 +13,7 @@ import (
 
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
+	"primeradiant.com/evener/appwire/appwiretest"
 	"primeradiant.com/evener/cmd/evener-hub/internal/appsource"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hubcore"
 	"primeradiant.com/evener/identifier"
@@ -351,7 +352,7 @@ func TestHubRPCThreadForkExitedSessionSucceeds(t *testing.T) {
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
+	resp, err := appwiretest.ThreadFork(context.Background(), client, appwire.ThreadForkParams{
 		Ref:           "local:" + sessionID,
 		SourceItemKey: "apptranscript-item-v2:t_1:0:0",
 		EditedInput:   "edited",
@@ -390,16 +391,16 @@ func TestHubRPCTurnControlsDoNotResumeExitedSession(t *testing.T) {
 		call func(*appwire.Client) error
 	}{
 		{"steer", func(c *appwire.Client) error {
-			return c.TurnSteer(ctx, appwire.TurnSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: ref, Input: []appwire.InputItem{{Type: "text", Text: "x"}}})
+			return appwiretest.TurnSteer(ctx, c, appwire.TurnSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: ref, Input: []appwire.InputItem{{Type: "text", Text: "x"}}})
 		}},
 		{"interrupt", func(c *appwire.Client) error {
-			return c.TurnInterrupt(ctx, appwire.TurnInterruptParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: ref})
+			return appwiretest.TurnInterrupt(ctx, c, appwire.TurnInterruptParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: ref})
 		}},
 		{"drainAsSteer", func(c *appwire.Client) error {
-			return c.TurnDrainAsSteer(ctx, appwire.TurnDrainAsSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, ExpectedQueueRevision: 0, Ref: ref, Input: []appwire.InputItem{{Type: "text", Text: "x"}}})
+			return appwiretest.TurnDrainAsSteer(ctx, c, appwire.TurnDrainAsSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, ExpectedQueueRevision: 0, Ref: ref, Input: []appwire.InputItem{{Type: "text", Text: "x"}}})
 		}},
 		{"promoteQueuedAsSteer", func(c *appwire.Client) error {
-			return c.TurnPromoteQueuedAsSteer(ctx, appwire.TurnPromoteQueuedAsSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, ExpectedEntryID: "test-entry", Ref: ref, Index: 0})
+			return appwiretest.TurnPromoteQueuedAsSteer(ctx, c, appwire.TurnPromoteQueuedAsSteerParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, ExpectedEntryID: "test-entry", Ref: ref, Index: 0})
 		}},
 		{"cancelQueued", func(c *appwire.Client) error {
 			_, err := c.TurnCancelQueued(ctx, appwire.TurnCancelQueuedParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, ExpectedEntryID: "test-entry", Ref: ref, Index: 0})
@@ -455,7 +456,7 @@ func newExitedSessionHub(t *testing.T) (*appwire.Client, *bool) {
 func TestHubRPCTurnQueueResumesExitedSession(t *testing.T) {
 	const sessionID = "02wMz5Txv1C3Hut0M8GCeB"
 	client, resumeCalled := newExitedSessionHub(t)
-	err := client.TurnQueue(context.Background(), appwire.TurnQueueParams{
+	err := appwiretest.TurnQueue(context.Background(), client, appwire.TurnQueueParams{
 		ClientMutationID:   "test-mutation",
 		ExpectedInstanceID: sessionID,
 		Ref:                "local:" + sessionID,
@@ -1019,7 +1020,7 @@ func TestHubRPCResumeRetrySourceResolutionFailureIsNotAccepted(t *testing.T) {
 			name: "turn/queue via withSessionResume",
 			dispatch: func(t *testing.T, client *appwire.Client, ref, sessionID, mutationID string) error {
 				t.Helper()
-				return client.TurnQueue(context.Background(), appwire.TurnQueueParams{
+				return appwiretest.TurnQueue(context.Background(), client, appwire.TurnQueueParams{
 					Ref: ref, ClientMutationID: mutationID, ExpectedInstanceID: sessionID,
 					Input: []appwire.InputItem{{Type: "text", Text: "queue it"}},
 				})

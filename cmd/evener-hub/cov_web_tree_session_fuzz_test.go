@@ -57,9 +57,6 @@ func FuzzCovWebTreeSessionHandlers(f *testing.F) {
 	f.Add(byte(0), []byte(`{}`))
 	f.Add(byte(1), []byte(`{"text":"hello"}`))
 	f.Fuzz(func(t *testing.T, selector byte, body []byte) {
-		if len(body) > hubcore.SendMaxRequestBytes+1 {
-			t.Skip()
-		}
 		sb := newSandbox(t)
 		h := sb.Web.Handler()
 		routes := []struct{ method, path string }{
@@ -81,8 +78,7 @@ func FuzzCovWebTreeSessionHandlers(f *testing.F) {
 
 		_ = sb.Web.archiveDecisions()
 		_, _ = sb.Web.favoriteDecisions()
-		_, _ = sb.Web.memoTree(t.Context())
 		_, _, _ = sb.Web.navigationTreeInputs(t.Context())
-		_ = sb.Web.remoteTreeThreads(t.Context())
+		_ = sb.Web.remoteThreadFetch(t.Context()).threads
 	})
 }
