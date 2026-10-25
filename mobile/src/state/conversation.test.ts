@@ -553,6 +553,17 @@ function wirePageFromRows(rows: MobileConversation["items"]): ThreadTurnsListRes
 	return { data, nextCursor: undefined };
 }
 
+// Scripts loadOlder's answer through the wire-page seam: one turns page whose
+// cursor is also the cursor the next request sees.
+function scriptOlderTurns(service: FakeConversationService, turns: Turn[], cursor?: string): void {
+	service.olderItems = { turnsPage: turnsPage(turns, cursor), nextCursor: cursor };
+}
+
+// Scripts loadOlder's answer through the row seam: one page of rows.
+function scriptOlderRows(service: FakeConversationService, items: MobileConversation["items"], cursor?: string): void {
+	service.olderItems = { items, nextCursor: cursor };
+}
+
 // A fake ConversationService that returns scripted values without any network.
 class FakeConversationService implements LiveConversationService {
 	ref: string | null = null;
@@ -632,6 +643,7 @@ class FakeConversationService implements LiveConversationService {
 				},
 			};
 		}
+
 		return {
 			conversation: {
 				...this.hydratedUnder(ref, this.openConv),
@@ -853,10 +865,7 @@ describe("ConversationStore", () => {
 	describe("loadOlder", () => {
 		it("sets loadingOlder and prepends items", async () => {
 			const service = new FakeConversationService();
-			service.olderItems = {
-				items: [{ kind: "user", id: "older-result", text: "older" }],
-				nextCursor: "next",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "older-result", text: "older" }], "next");
 			const store = createConversationStore();
 			await store.getState().open(service, "ref-1");
 			// Set a cursor so loadOlder has a page to request.
@@ -901,23 +910,21 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "m1",
-								turnId: "t0",
-								type: "userMessage",
-								text: "page text",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "m1",
+							turnId: "t0",
+							type: "userMessage",
+							text: "page text",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			if (result.status !== "loaded") return;
@@ -962,25 +969,19 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "user",
-								transcriptKey: "user",
-								turnId: "t0",
-								type: "userMessage",
-								text: "look",
-								status: "completed",
-								images: [{ type: "image", mediaType: "image/png", data: "AQID" }],
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "user",
+						transcriptKey: "user",
+						turnId: "t0",
+						type: "userMessage",
+						text: "look",
+						status: "completed",
+						images: [{ type: "image", mediaType: "image/png", data: "AQID" }],
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).find((row) => row.kind === "attachments")).toMatchObject({
 				id: "user:attachments",
@@ -1019,13 +1020,9 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[wireTurnFragment("t0", [askUserItem("ask-old", askArgs), userMessageItem("reply", "the answer")])],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [askUserItem("ask-old", askArgs), userMessageItem("reply", "the answer")]),
+			]);
 			await store.getState().loadOlder(service);
 			// The page's settled ask is history: a tool row, never a question row.
 			expect(rows(store).some((row) => row.kind === "question" && row.id === "ask-old")).toBe(false);
@@ -3009,10 +3006,7 @@ describe("ConversationStore", () => {
 				items: [{ kind: "user", id: "new", text: "new", position: { entry: 2, item: 0 } }],
 			});
 			service.readProjectionResult = readResult(latest, { olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "user", id: "old", text: "old", position: { entry: 1, item: 0 } }],
-				nextCursor: "cursor-2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "old", text: "old", position: { entry: 1, item: 0 } }], "cursor-2");
 			await store.getState().openProjected(service, sink, "ref-1");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.items.map((item) => item.id)).toEqual(["old", "new"]);
@@ -3906,20 +3900,17 @@ describe("ConversationStore", () => {
 				state: "completed" as const,
 				detail: { output: `${id} output` },
 			});
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "m1",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "m1 output" },
-						members: [member("m1"), member("m2"), member("m3")],
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "m1",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "m1 output" },
+					members: [member("m1"), member("m2"), member("m3")],
+				},
+			]);
 			store.setState({ olderCursor: "older-cursor" });
 			await store.getState().loadOlder(service);
 			expect(rows(store)[0]).toMatchObject({ kind: "activity", id: "m1" });
@@ -3974,21 +3965,18 @@ describe("ConversationStore", () => {
 				detail: { output: `${id} output` },
 				...over,
 			});
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "keyed-first",
-						transcriptKey: "key-first",
-						label: "shell keyed-first",
-						family: "tool",
-						state: "completed",
-						detail: { output: "keyed-first output" },
-						members: [member("keyed-first", { transcriptKey: "key-first" }), member("unkeyed-second")],
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "keyed-first",
+					transcriptKey: "key-first",
+					label: "shell keyed-first",
+					family: "tool",
+					state: "completed",
+					detail: { output: "keyed-first output" },
+					members: [member("keyed-first", { transcriptKey: "key-first" }), member("unkeyed-second")],
+				},
+			]);
 			store.setState({ olderCursor: "older-cursor" });
 			await store.getState().loadOlder(service);
 
@@ -6609,13 +6597,14 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// loadOlder returns items that include a duplicate of item-1.
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "item-0", text: "older" },
 					{ kind: "user", id: "item-1", text: "duplicate" }, // duplicate id
 				],
-				nextCursor: "next-cursor",
-			};
+				"next-cursor",
+			);
 			await store.getState().loadOlder(service);
 
 			const conv = store.getState().conversation;
@@ -6677,34 +6666,32 @@ describe("ConversationStore", () => {
 			// attachment row keeps the LIVE wire id — a replay under "wire-B"
 			// never produces a second row. A control attachment for a genuinely
 			// unrelated source is included too, and is admitted.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t-page", [
-							{
-								id: "wire-B",
-								transcriptKey: "key-A",
-								turnId: "t-page",
-								type: "commandExecution",
-								toolName: "shell",
-								status: "completed",
-								outputImages: [{ source: "dup", url: "https://example.com/dup.png" }],
-							},
-							{
-								id: "wire-C",
-								transcriptKey: "unrelated-key",
-								turnId: "t-page",
-								type: "commandExecution",
-								toolName: "shell",
-								status: "completed",
-								outputImages: [{ source: "new", url: "https://example.com/new.png" }],
-							},
-						]),
-					],
-					"next-cursor",
-				),
-				nextCursor: "next-cursor",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t-page", [
+						{
+							id: "wire-B",
+							transcriptKey: "key-A",
+							turnId: "t-page",
+							type: "commandExecution",
+							toolName: "shell",
+							status: "completed",
+							outputImages: [{ source: "dup", url: "https://example.com/dup.png" }],
+						},
+						{
+							id: "wire-C",
+							transcriptKey: "unrelated-key",
+							turnId: "t-page",
+							type: "commandExecution",
+							toolName: "shell",
+							status: "completed",
+							outputImages: [{ source: "new", url: "https://example.com/new.png" }],
+						},
+					]),
+				],
+				"next-cursor",
+			);
 			await store.getState().loadOlder(service);
 
 			const conv = store.getState().conversation;
@@ -6858,8 +6845,9 @@ describe("ConversationStore", () => {
 			// cap's own verdict on the page's row, not from the cursor running
 			// out.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "activity",
 						id: "src-1",
@@ -6869,8 +6857,8 @@ describe("ConversationStore", () => {
 						detail: { output: "done" },
 					},
 				],
-				nextCursor: "more",
-			};
+				"more",
+			);
 			await store.getState().loadOlder(service);
 
 			// No duplicate was admitted beside the held copy, and no orphaned
@@ -7161,27 +7149,25 @@ describe("ConversationStore", () => {
 			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							Array.from({ length: 8 }, (_, j) => ({
-								id: `w-${j}`,
-								transcriptKey: `w-${j}`,
-								turnId: "pt",
-								type: "agentMessage",
-								text: `page item ${j}`,
-								position: { entry: 100 - j, item: 0 },
-								status: "completed",
-							})),
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						Array.from({ length: 8 }, (_, j) => ({
+							id: `w-${j}`,
+							transcriptKey: `w-${j}`,
+							turnId: "pt",
+							type: "agentMessage",
+							text: `page item ${j}`,
+							position: { entry: 100 - j, item: 0 },
+							status: "completed",
+						})),
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const loaded = store.getState().conversation?.turns.find((t) => t.id === "pt");
 			expect(loaded?.items).toHaveLength(8);
@@ -7321,39 +7307,37 @@ describe("ConversationStore", () => {
 			// warning turn whose failure row the page owns, seated above the
 			// filler bulk so the cap never evicts it — the reread keeps the row
 			// and the warning turn keeps its window seat.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"ct",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "ct",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-						wireTurnFragment("wt", [
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"ct",
+						[
 							{
-								id: "w-0",
-								turnId: "wt",
-								type: "warning",
-								text: "careful",
-								position: { entry: 200, item: 0 },
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "ct",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 99, item: 0 },
 								status: "completed",
 							},
-						]),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+					wireTurnFragment("wt", [
+						{
+							id: "w-0",
+							turnId: "wt",
+							type: "warning",
+							text: "careful",
+							position: { entry: 200, item: 0 },
+							status: "completed",
+						},
+					]),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "ct")?.items).toEqual([]);
 
@@ -7475,28 +7459,26 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// Row-less page turn: compacts at its own load and remembers px.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "warning",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "warning",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
@@ -7574,27 +7556,25 @@ describe("ConversationStore", () => {
 
 			// Row-less page turn carrying an ID-ONLY item: compacts at its own
 			// load, remembering the bare id.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "a-0",
-									turnId: "pt",
-									type: "warning",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "a-0",
+								turnId: "pt",
+								type: "warning",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
@@ -7640,29 +7620,27 @@ describe("ConversationStore", () => {
 			// text. The retained copy is the newer merge input and must win: the
 			// remembered id-only skeleton must not be injected beside the real
 			// item, so nothing erases the retained text and re-adopts the page's.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "a-0",
-									transcriptKey: "kk",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "stale old",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "a-0",
+								transcriptKey: "kk",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "stale old",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(after).toHaveLength(1);
@@ -7721,29 +7699,27 @@ describe("ConversationStore", () => {
 
 			// The page brings px as a real row item: under D23d the model keeps
 			// the page turn's own row while it stays in the window.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "px", text: "payload" }),
@@ -7786,44 +7762,42 @@ describe("ConversationStore", () => {
 			// Overlapping page carrying the SAME turn twice: the first fragment
 			// provides text, the second explicitly clears it. The later
 			// fragment's empty is the legitimate settle.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "r1",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "hello",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "r2",
-									transcriptKey: "px",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "",
-									position: { entry: 99, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "r1",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "hello",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "r2",
+								transcriptKey: "px",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "",
+								position: { entry: 99, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(folded).toHaveLength(1);
@@ -7915,29 +7889,27 @@ describe("ConversationStore", () => {
 			// oldest row — so its row is the oldest in the merged projection and
 			// the full window's cap discards it at the turn's own load: ct
 			// compacts immediately and remembers px.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"ct",
-							[
-								{
-									id: "x-0",
-									transcriptKey: "px",
-									turnId: "ct",
-									type: "agentMessage",
-									text: "payload",
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"ct",
+						[
+							{
+								id: "x-0",
+								transcriptKey: "px",
+								turnId: "ct",
+								type: "agentMessage",
+								text: "payload",
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "ct")?.items).toEqual([]);
 
@@ -8112,39 +8084,37 @@ describe("ConversationStore", () => {
 			// A page turn carrying a call and its result: the pair folds into a
 			// single host item, so the host's own row is the only row either
 			// side ever projects.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_1",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-1",
-									argumentsJson: '{"command":"make"}',
-									status: "inProgress",
-									position: { entry: 40, item: 0 },
-								},
-								{
-									id: "item_tool_result_1",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-1",
-									output: "ok",
-									exitCode: 0,
-									status: "completed",
-									position: { entry: 41, item: 0 },
-								},
-							],
-							{ inputTokens: 700, outputTokens: 70 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_1",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-1",
+								argumentsJson: '{"command":"make"}',
+								status: "inProgress",
+								position: { entry: 40, item: 0 },
+							},
+							{
+								id: "item_tool_result_1",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-1",
+								output: "ok",
+								exitCode: 0,
+								status: "completed",
+								position: { entry: 41, item: 0 },
+							},
+						],
+						{ inputTokens: 700, outputTokens: 70 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			// The folded host's own row is the retained row, and it carries the
@@ -8211,28 +8181,26 @@ describe("ConversationStore", () => {
 			// A page whose display row is keyed while its backing fragment item
 			// arrives keyless — the exact pair itemIdentityMatches still matches
 			// by bare id.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pt",
-							[
-								{
-									id: "ra",
-									turnId: "pt",
-									type: "agentMessage",
-									text: "alpha",
-									position: { entry: 90, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pt",
+						[
+							{
+								id: "ra",
+								turnId: "pt",
+								type: "agentMessage",
+								text: "alpha",
+								position: { entry: 90, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			const conv = store.getState().conversation!;
 			// The keyed row backs the keyless item by bare id, so the turn keeps
@@ -8291,29 +8259,27 @@ describe("ConversationStore", () => {
 
 			// A retained turn holds the item's fresh payload under
 			// {id pa, transcriptKey pk}, in window.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "pa",
-									transcriptKey: "pk",
-									turnId: "rt",
-									type: "agentMessage",
-									text: "fresh",
-									position: { entry: 30, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 50, outputTokens: 5 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "pa",
+								transcriptKey: "pk",
+								turnId: "rt",
+								type: "agentMessage",
+								text: "fresh",
+								position: { entry: 30, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 50, outputTokens: 5 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "pk", text: "fresh" }),
@@ -8324,37 +8290,35 @@ describe("ConversationStore", () => {
 			// STALE text. The merge folds the retained item into the keyless
 			// alias — the first identity match — and the untouched stale sibling
 			// must not then fold over the fresh result.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "pa",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "older keyless",
-									position: { entry: 30, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "sb",
-									transcriptKey: "pk",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale",
-									position: { entry: 31, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "pa",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "older keyless",
+								position: { entry: 30, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "sb",
+								transcriptKey: "pk",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale",
+								position: { entry: 31, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8411,31 +8375,29 @@ describe("ConversationStore", () => {
 
 			// A retained tool item whose wire omitted the text field — hydrated
 			// with the omitted-text marker — carrying its CURRENT output.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-9",
-									argumentsJson: '{"command":"make"}',
-									output: "current output",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-9",
+								argumentsJson: '{"command":"make"}',
+								output: "current output",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ transcriptKey: "kt", output: "current output" }),
@@ -8446,40 +8408,38 @@ describe("ConversationStore", () => {
 			// item's STALE output. The retained item folds into the keyless alias
 			// (the first identity match) — and its fields, not the stale
 			// sibling's, must come out of the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-9",
-									argumentsJson: '{"command":"make"}',
-									status: "inProgress",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									toolName: "shell",
-									callId: "call-8",
-									argumentsJson: '{"command":"make"}',
-									output: "stale output",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-9",
+								argumentsJson: '{"command":"make"}',
+								status: "inProgress",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								toolName: "shell",
+								callId: "call-8",
+								argumentsJson: '{"command":"make"}',
+								output: "stale output",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8520,27 +8480,25 @@ describe("ConversationStore", () => {
 			// A retained turn holding the SPARSE fragment the wire reissued:
 			// identity and ordering fields only — no text, no arguments, no
 			// output, no status. The projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "item_tool_7", transcriptKey: "kt" }),
@@ -8552,39 +8510,37 @@ describe("ConversationStore", () => {
 			// (the first identity match); the fold supplies no payload, so the
 			// merged item must not claim freshness, and the reconciliation must
 			// let the later keyed sibling's restored fields stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									callId: "call-8",
-									output: "restored output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								callId: "call-8",
+								output: "restored output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8624,28 +8580,26 @@ describe("ConversationStore", () => {
 			// ordering fields plus a completed status — no text, no arguments,
 			// no output. The status is real payload, so the fragment is not
 			// identity-only; the projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 50, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 50, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "item_tool_7", transcriptKey: "kt", status: "completed" }),
@@ -8657,39 +8611,37 @@ describe("ConversationStore", () => {
 			// merged item is fresh through the status, but the output it carries
 			// came from the older alias, so the restored sibling's output must
 			// still win the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_7",
-									type: "commandExecution",
-									callId: "call-9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									type: "commandExecution",
-									callId: "call-8",
-									output: "restored output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_7",
+								type: "commandExecution",
+								callId: "call-9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								type: "commandExecution",
+								callId: "call-8",
+								output: "restored output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8728,27 +8680,25 @@ describe("ConversationStore", () => {
 			// A retained turn holding a STATUS-ONLY agentMessage fragment:
 			// identity and ordering fields plus a completed status — no text of
 			// its own. The projector rows it under its transcript key.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"rt",
-							[
-								{
-									id: "msg_7",
-									type: "agentMessage",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 60, item: 0 },
-								},
-							],
-							{ inputTokens: 60, outputTokens: 6 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"rt",
+						[
+							{
+								id: "msg_7",
+								type: "agentMessage",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 60, item: 0 },
+							},
+						],
+						{ inputTokens: 60, outputTokens: 6 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([
 				expect.objectContaining({ id: "msg_7", transcriptKey: "kt", status: "completed" }),
@@ -8760,34 +8710,32 @@ describe("ConversationStore", () => {
 			// merged item is fresh through the status, but the text it carries
 			// came from the older alias, so the restored sibling's text must
 			// still win the reconciliation.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "msg_7",
-									type: "agentMessage",
-									text: "stale text",
-									position: { entry: 60, item: 0 },
-								},
-								{
-									id: "msg_8",
-									type: "agentMessage",
-									text: "restored text",
-									status: "completed",
-									transcriptKey: "kt",
-									position: { entry: 61, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "msg_7",
+								type: "agentMessage",
+								text: "stale text",
+								position: { entry: 60, item: 0 },
+							},
+							{
+								id: "msg_8",
+								type: "agentMessage",
+								text: "restored text",
+								status: "completed",
+								transcriptKey: "kt",
+								position: { entry: 61, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8850,35 +8798,33 @@ describe("ConversationStore", () => {
 			// its own STALE text — and the second one already keyed: both
 			// folds land, leaving two duplicates of the kk identity, the
 			// fresh-text one ordered first.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "pa",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "old A",
-									position: { entry: 70, item: 0 },
-								},
-								{
-									id: "pb",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "old B",
-									transcriptKey: "kk",
-									position: { entry: 71, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "pa",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "old A",
+								position: { entry: 70, item: 0 },
+							},
+							{
+								id: "pb",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "old B",
+								transcriptKey: "kk",
+								position: { entry: 71, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -8936,38 +8882,36 @@ describe("ConversationStore", () => {
 			// a keyed sibling carrying the RESTORED metadata. The alias fold
 			// inherits the stale raw; the reconciliation must let the later
 			// sibling's own raw stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "s1",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									raw: { stale: "yes" },
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "t2",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c8",
-									raw: { restored: "yes" },
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "s1",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								raw: { stale: "yes" },
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "t2",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c8",
+								raw: { restored: "yes" },
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9019,46 +8963,44 @@ describe("ConversationStore", () => {
 			// tk k} item, and the {id b, tk k} reissue. The reissue folds into
 			// the bare alias (the first id match) and the fold GAINS the key —
 			// which the keyed item ahead of it also carries.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "b",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale b",
-									position: { entry: 40, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "a",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "alpha a",
-									transcriptKey: "k",
-									position: { entry: 41, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "b",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale b2",
-									transcriptKey: "k",
-									position: { entry: 42, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "b",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale b",
+								position: { entry: 40, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "a",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "alpha a",
+								transcriptKey: "k",
+								position: { entry: 41, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "b",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale b2",
+								transcriptKey: "k",
+								position: { entry: 42, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9115,49 +9057,47 @@ describe("ConversationStore", () => {
 			// corrected one, and a result fragment for the call that OMITS
 			// output. The reconciliation keeps the corrected output; the
 			// result fold must not read the stale alias first and restore it.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "item_tool_9",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									output: "stale output",
-									exitCode: 1,
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "item_tool_8",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									output: "corrected output",
-									exitCode: 0,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-								{
-									id: "item_tool_result_1",
-									turnId: "pq",
-									type: "commandExecution",
-									callId: "c9",
-									status: "completed",
-									position: { entry: 52, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "item_tool_9",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								output: "stale output",
+								exitCode: 1,
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "item_tool_8",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								output: "corrected output",
+								exitCode: 0,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+							{
+								id: "item_tool_result_1",
+								turnId: "pq",
+								type: "commandExecution",
+								callId: "c9",
+								status: "completed",
+								position: { entry: 52, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			expect(after.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9213,39 +9153,37 @@ describe("ConversationStore", () => {
 			// keyed sibling carrying the restored text and ANOTHER index. The
 			// alias fold keeps the clear; the reconciliation must keep it too,
 			// not let the sibling's index back in.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									transcriptEntryIndex: 5,
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									transcriptEntryIndex: 7,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								transcriptEntryIndex: 5,
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								transcriptEntryIndex: 7,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			const merged = after.turns.find((turn) => turn.id === "rt")?.items ?? [];
@@ -9302,39 +9240,37 @@ describe("ConversationStore", () => {
 			// entry index — followed by a keyed sibling carrying the restored
 			// text and ANOTHER index. The alias fold keeps the clear; the
 			// reconciliation must keep it too.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									transcriptEntryIndex: 5,
-									position: { entry: 50, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									transcriptEntryIndex: 7,
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								transcriptEntryIndex: 5,
+								position: { entry: 50, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								transcriptEntryIndex: 7,
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const after = store.getState().conversation!;
 			const merged = after.turns.find((turn) => turn.id === "rt")?.items ?? [];
@@ -9394,29 +9330,27 @@ describe("ConversationStore", () => {
 			// A row-less page reissues the alias under fa's bare id; the fold
 			// leaves the turn backed by the fa row through the recorded
 			// ancestry — the item's own identity names no row.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "fa",
-									transcriptKey: "kk",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "page fa",
-									position: { entry: 70, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 700, outputTokens: 70 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "fa",
+								transcriptKey: "kk",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "page fa",
+								position: { entry: 70, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 700, outputTokens: 70 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "rt")?.items ?? [];
 			expect(folded).toEqual([expect.objectContaining({ id: "fb", transcriptKey: "kk", text: "alias restored" })]);
@@ -9480,37 +9414,35 @@ describe("ConversationStore", () => {
 			// followed by a keyed sibling carrying the restored text and a
 			// COMPLETED status. The alias fold keeps the failure; the
 			// reconciliation must let the sibling's completed status stand.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"pq",
-							[
-								{
-									id: "f9",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "stale text",
-									status: "failed",
-									position: { entry: 50, item: 0 },
-								},
-								{
-									id: "g2",
-									turnId: "pq",
-									type: "agentMessage",
-									text: "restored text",
-									status: "completed",
-									transcriptKey: "kk",
-									position: { entry: 51, item: 0 },
-								},
-							],
-							{ inputTokens: 70, outputTokens: 7 },
-						),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"pq",
+						[
+							{
+								id: "f9",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "stale text",
+								status: "failed",
+								position: { entry: 50, item: 0 },
+							},
+							{
+								id: "g2",
+								turnId: "pq",
+								type: "agentMessage",
+								text: "restored text",
+								status: "completed",
+								transcriptKey: "kk",
+								position: { entry: 51, item: 0 },
+							},
+						],
+						{ inputTokens: 70, outputTokens: 7 },
+					),
+				],
+				"c2",
+			);
 			await store.getState().loadOlder(service);
 			const afterRound24 = store.getState().conversation!;
 			expect(afterRound24.turns.find((turn) => turn.id === "rt")?.items).toEqual([
@@ -9586,29 +9518,27 @@ describe("ConversationStore", () => {
 
 			// An unrelated page load bounds the turns: no row backs rt's item,
 			// so rt compacts to identity + usage.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"un",
-							[
-								{
-									id: "un-0",
-									transcriptKey: "un",
-									turnId: "un",
-									type: "agentMessage",
-									text: "unrelated",
-									position: { entry: 91, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 9, outputTokens: 9 },
-						),
-					],
-					"c1",
-				),
-				nextCursor: "c1",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"un",
+						[
+							{
+								id: "un-0",
+								transcriptKey: "un",
+								turnId: "un",
+								type: "agentMessage",
+								text: "unrelated",
+								position: { entry: 91, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 9, outputTokens: 9 },
+					),
+				],
+				"c1",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "rt")?.items).toEqual([]);
 
@@ -9837,36 +9767,34 @@ describe("ConversationStore", () => {
 			// display row, so the retained-turn bound sheds its payloads the
 			// moment the page lands — pageItemIds gets nothing of it, and only
 			// pageOwnedTurnIds keeps the turn itself alive.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment(
-							"t1",
-							[
-								{
-									id: "t1-evicted-0",
-									turnId: "t1",
-									type: "userMessage",
-									text: "page payload 0",
-									position: { entry: 1, item: 0 },
-									status: "completed",
-								},
-								{
-									id: "t1-evicted-1",
-									turnId: "t1",
-									type: "userMessage",
-									text: "page payload 1",
-									position: { entry: 2, item: 0 },
-									status: "completed",
-								},
-							],
-							{ inputTokens: 500, outputTokens: 20 },
-						),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment(
+						"t1",
+						[
+							{
+								id: "t1-evicted-0",
+								turnId: "t1",
+								type: "userMessage",
+								text: "page payload 0",
+								position: { entry: 1, item: 0 },
+								status: "completed",
+							},
+							{
+								id: "t1-evicted-1",
+								turnId: "t1",
+								type: "userMessage",
+								text: "page payload 1",
+								position: { entry: 2, item: 0 },
+								status: "completed",
+							},
+						],
+						{ inputTokens: 500, outputTokens: 20 },
+					),
+				],
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.map((t) => t.id)).toEqual(["t1", "t2"]);
 			const landed = store.getState().conversation?.turns.find((turn) => turn.id === "t1")!;
@@ -10335,20 +10263,14 @@ describe("ConversationStore", () => {
 			expect(store.getState().olderCursor).toBe("more");
 
 			// The UI can page again from the fresh window's own cursor.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t-mid", [
-							{
-								...userMessageItem("mid-1", "mid"),
-								position: { entry: 500, item: 0 },
-							},
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t-mid", [
+					{
+						...userMessageItem("mid-1", "mid"),
+						position: { entry: 500, item: 0 },
+					},
+				]),
+			]);
 			const reloaded = await store.getState().loadOlder(service);
 			expect(reloaded).not.toMatchObject({ status: "ignored" });
 			expect(rows(store).some((row) => row.id === "mid-1")).toBe(true);
@@ -10567,21 +10489,19 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t-failed",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "boom" },
-							items: [],
-						},
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t-failed",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "boom" },
+						items: [],
+					},
+				],
+				"cursor-2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			// The cap discarded the page's only contribution (its failure row,
@@ -10867,18 +10787,16 @@ describe("ConversationStore", () => {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
 			});
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [{ ...userMessageItem("old", "old"), position: { entry: 1, item: 0 } }], {
-							inputTokens: 500,
-							outputTokens: 20,
-						}),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t1", [{ ...userMessageItem("old", "old"), position: { entry: 1, item: 0 } }], {
+						inputTokens: 500,
+						outputTokens: 20,
+					}),
+				],
+				"cursor-2",
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.turns.map((t) => t.id)).toEqual(["t1", "t2"]);
@@ -11994,10 +11912,7 @@ describe("ConversationStore", () => {
 			await yieldMicrotask();
 			// While R is in-flight, a loadOlder (L) succeeds — prepends items,
 			// advances cursor.
-			service.olderItems = {
-				items: [{ kind: "user", id: "old-page-item", text: "older" }],
-				nextCursor: "cursor-2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "old-page-item", text: "older" }], "cursor-2");
 			await store.getState().loadOlder(service);
 			const itemsAfterL = store.getState().conversation?.items ?? [];
 			const cursorAfterL = store.getState().olderCursor;
@@ -12150,10 +12065,7 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-B");
 			store.setState({ olderCursor: "cursor-B" });
 			// Start and complete a B page operation.
-			service.olderItems = {
-				items: [{ kind: "user", id: "B-item", text: "B page" }],
-				nextCursor: "cursor-B2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "B-item", text: "B page" }], "cursor-B2");
 			await store.getState().loadOlder(service);
 			expect(store.getState().conversation?.threadId).toBe("thread-B");
 			// Clear tracked calls — from this point, only A's stale resolution
@@ -12718,10 +12630,7 @@ describe("ConversationStore", () => {
 			await ctrl.started(1);
 			await yieldMicrotask();
 			// While R is in-flight, L succeeds — prepends page items, advances cursor.
-			service.olderItems = {
-				items: [{ kind: "user", id: "old-page-item", text: "older" }],
-				nextCursor: "cursor-2",
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "old-page-item", text: "older" }], "cursor-2");
 			await store.getState().loadOlder(service);
 			const itemsAfterL = store.getState().conversation?.items ?? [];
 			const cursorAfterL = store.getState().olderCursor;
@@ -12765,8 +12674,9 @@ describe("ConversationStore", () => {
 			await ctrl.started(1);
 			await yieldMicrotask();
 
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "user",
 						id: "wire-page",
@@ -12774,8 +12684,8 @@ describe("ConversationStore", () => {
 						text: "older page",
 					},
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			ctrl.release();
@@ -12810,8 +12720,9 @@ describe("ConversationStore", () => {
 			);
 			resync(store);
 			await ctrl.started(1);
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{
 						kind: "user",
 						id: "wire-page",
@@ -12819,8 +12730,8 @@ describe("ConversationStore", () => {
 						text: "older",
 					},
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 			ctrl.release();
 			await ctrl.completed(1);
@@ -13787,24 +13698,18 @@ describe("ConversationStore", () => {
 			// The page fragment of the active turn carries a KEYLESS item: the
 			// ownership record claims its bare wire id.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [
-							{
-								id: "X",
-								turnId: "t1",
-								type: "agentMessage",
-								text: "page answer",
-								position: { entry: 10, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t1", [
+					{
+						id: "X",
+						turnId: "t1",
+						type: "agentMessage",
+						text: "page answer",
+						position: { entry: 10, item: 0 },
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toBeDefined();
 			// The turn's full completion reissues the same content WITH its key.
@@ -13872,25 +13777,19 @@ describe("ConversationStore", () => {
 			// The page fragment of t1 carries a KEYED item: the claim records the
 			// key and the bare wire id.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t1", [
-							{
-								id: "X",
-								turnId: "t1",
-								transcriptKey: "K1",
-								type: "agentMessage",
-								text: "page answer",
-								position: { entry: 10, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t1", [
+					{
+						id: "X",
+						turnId: "t1",
+						transcriptKey: "K1",
+						type: "agentMessage",
+						text: "page answer",
+						position: { entry: 10, item: 0 },
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toBeDefined();
 			// A live item takes the same bare id under a different key — a
@@ -14010,24 +13909,18 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 			const sha = "a".repeat(64);
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "u-older",
-								turnId: "t0",
-								type: "userMessage",
-								text: "see attached",
-								images: [{ type: "image", name: "shot.png", metadata: { sha } }],
-								position: { entry: 1, item: 0 },
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "u-older",
+						turnId: "t0",
+						type: "userMessage",
+						text: "see attached",
+						images: [{ type: "image", name: "shot.png", metadata: { sha } }],
+						position: { entry: 1, item: 0 },
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).find((row) => row.id === "u-older:attachments")).toMatchObject({
 				kind: "attachments",
@@ -14537,31 +14430,29 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t0",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "page boom" },
-							usage: { inputTokens: 500, outputTokens: 20 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "t0",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
-					],
-					"c9",
-				),
-				nextCursor: "c9",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t0",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "page boom" },
+						usage: { inputTokens: 500, outputTokens: 20 },
+						items: [
+							{
+								id: "k1",
+								transcriptKey: "k1",
+								turnId: "t0",
+								type: "agentMessage",
+								text: "page text",
+								status: "completed",
+							} as ThreadItem,
+						],
+					},
+				],
+				"c9",
+			);
 			await store.getState().loadOlder(service);
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			// The fold moved the failure onto the retained turn — the committed
@@ -14724,24 +14615,22 @@ describe("ConversationStore", () => {
 			// window is 501 rows and the cap trims a row the entry window
 			// held.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "older-row",
-								turnId: "t0",
-								type: "userMessage",
-								text: "older",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"more",
-				),
-				nextCursor: "more",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "older-row",
+							turnId: "t0",
+							type: "userMessage",
+							text: "older",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"more",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(store.getState().olderCursor).toBe("more");
@@ -14779,23 +14668,17 @@ describe("ConversationStore", () => {
 			// no payload the keyed reissue lacks — so the merge's no-op path
 			// carries it: the fresh items return by reference, with no fold
 			// provenance to read ownership from.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "u",
-								turnId: "t0",
-								type: "agentMessage",
-								text: "page text",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+			scriptOlderTurns(service, [
+				wireTurnFragment("t0", [
+					{
+						id: "u",
+						turnId: "t0",
+						type: "agentMessage",
+						text: "page text",
+						status: "completed",
+					} as ThreadItem,
+				]),
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((row) => row.id === "u")).toBe(true);
 
@@ -14891,31 +14774,29 @@ describe("ConversationStore", () => {
 			const sink = createFakeSink();
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						{
-							id: "t0",
-							itemsView: "fragment",
-							status: "failed",
-							error: { message: "page boom" },
-							usage: { inputTokens: 500, outputTokens: 20 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "t0",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
-					],
-					"c9",
-				),
-				nextCursor: "c9",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					{
+						id: "t0",
+						itemsView: "fragment",
+						status: "failed",
+						error: { message: "page boom" },
+						usage: { inputTokens: 500, outputTokens: 20 },
+						items: [
+							{
+								id: "k1",
+								transcriptKey: "k1",
+								turnId: "t0",
+								type: "agentMessage",
+								text: "page text",
+								status: "completed",
+							} as ThreadItem,
+						],
+					},
+				],
+				"c9",
+			);
 			await store.getState().loadOlder(service);
 			const failureRows = () => rows(store).filter((row) => row.kind === "failure");
 			expect(failureRows()).toHaveLength(1);
@@ -14925,38 +14806,32 @@ describe("ConversationStore", () => {
 			// retained t1 (k2): the merge coalesces both under t1, and t1 now
 			// carries the failure — the committed row and its page ownership
 			// must follow.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
+			scriptOlderTurns(service, [
+				{
+					id: "tp",
+					itemsView: "fragment",
+					status: "completed",
+					usage: { inputTokens: 10, outputTokens: 1 },
+					items: [
 						{
-							id: "tp",
-							itemsView: "fragment",
+							id: "k1",
+							transcriptKey: "k1",
+							turnId: "tp",
+							type: "agentMessage",
+							text: "page text",
 							status: "completed",
-							usage: { inputTokens: 10, outputTokens: 1 },
-							items: [
-								{
-									id: "k1",
-									transcriptKey: "k1",
-									turnId: "tp",
-									type: "agentMessage",
-									text: "page text",
-									status: "completed",
-								} as ThreadItem,
-								{
-									id: "k2",
-									transcriptKey: "k2",
-									turnId: "tp",
-									type: "agentMessage",
-									text: "retained t1 text",
-									status: "completed",
-								} as ThreadItem,
-							],
-						},
+						} as ThreadItem,
+						{
+							id: "k2",
+							transcriptKey: "k2",
+							turnId: "tp",
+							type: "agentMessage",
+							text: "retained t1 text",
+							status: "completed",
+						} as ThreadItem,
 					],
-					undefined,
-				),
-				nextCursor: undefined,
-			};
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(failureRows()).toHaveLength(1);
 			expect(failureRows()[0]?.id).toBe("failure:t1");
@@ -14978,26 +14853,23 @@ describe("ConversationStore", () => {
 			// attachment is already there."
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
@@ -15035,26 +14907,23 @@ describe("ConversationStore", () => {
 		it("drops a page-owned attachment once its source explicitly clears its output images", async () => {
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
@@ -15087,30 +14956,27 @@ describe("ConversationStore", () => {
 			// beside it — never orphaned wherever it sat in the page.
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{ kind: "user", id: "p1", text: "one" },
-					{ kind: "user", id: "p2", text: "two" },
-					{
-						kind: "activity",
-						id: "wire-p3",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-p3",
-					},
-					{
-						kind: "attachments",
-						id: "wire-p3:attachments",
-						items: [{ id: "att-p3", src: "https://example.com/p3.png" }],
-						sourceTranscriptKey: "key-p3",
-					},
-					{ kind: "user", id: "p4", text: "four" },
-					{ kind: "user", id: "p5", text: "five" },
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{ kind: "user", id: "p1", text: "one" },
+				{ kind: "user", id: "p2", text: "two" },
+				{
+					kind: "activity",
+					id: "wire-p3",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-p3",
+				},
+				{
+					kind: "attachments",
+					id: "wire-p3:attachments",
+					items: [{ id: "att-p3", src: "https://example.com/p3.png" }],
+					sourceTranscriptKey: "key-p3",
+				},
+				{ kind: "user", id: "p4", text: "four" },
+				{ kind: "user", id: "p5", text: "five" },
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).map((item) => item.id)).toEqual(["p1", "p2", "wire-p3", "wire-p3:attachments", "p4", "p5"]);
 
@@ -15142,26 +15008,23 @@ describe("ConversationStore", () => {
 			// (d), below, adds a second path to the same drop.
 			const { store, service } = await openRunningTurn([]);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "wire-Z:attachments",
-						items: [{ id: "att-Z", src: "https://example.com/z.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "wire-Z:attachments",
+					items: [{ id: "att-Z", src: "https://example.com/z.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "wire-Z:attachments")).toBe(true);
 
@@ -15195,26 +15058,23 @@ describe("ConversationStore", () => {
 			// row and one fresh one, for the same message.
 			const { store, service } = await openRunningTurn([], {}, true);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [
-					{
-						kind: "activity",
-						id: "old-wire-Z",
-						label: "shell",
-						family: "tool",
-						state: "completed",
-						detail: { output: "done" },
-						transcriptKey: "key-Z",
-					},
-					{
-						kind: "attachments",
-						id: "old-wire-Z:attachments",
-						items: [{ id: "att-old", src: "https://example.com/old.png" }],
-						sourceTranscriptKey: "key-Z",
-					},
-				],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [
+				{
+					kind: "activity",
+					id: "old-wire-Z",
+					label: "shell",
+					family: "tool",
+					state: "completed",
+					detail: { output: "done" },
+					transcriptKey: "key-Z",
+				},
+				{
+					kind: "attachments",
+					id: "old-wire-Z:attachments",
+					items: [{ id: "att-old", src: "https://example.com/old.png" }],
+					sourceTranscriptKey: "key-Z",
+				},
+			]);
 			await store.getState().loadOlder(service);
 			expect(rows(store).some((item) => item.id === "old-wire-Z:attachments")).toBe(true);
 
@@ -15270,24 +15130,22 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, sink, "ref-1");
 			// One older page loads a single page-owned row below the live row.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("tp", [
-							{
-								id: "page-row",
-								turnId: "tp",
-								type: "userMessage",
-								text: "page text",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("tp", [
+						{
+							id: "page-row",
+							turnId: "tp",
+							type: "userMessage",
+							text: "page text",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"cursor-2",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(rows(store).map((row) => row.id)).toEqual(["page-row", "live-1"]);
@@ -15369,24 +15227,22 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, sink, "ref-1");
 			// One older page loads a single page-owned row below the empty window.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("tp", [
-							{
-								id: "page-row",
-								turnId: "tp",
-								type: "userMessage",
-								text: "page text",
-								position: { entry: 1, item: 0 },
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("tp", [
+						{
+							id: "page-row",
+							turnId: "tp",
+							type: "userMessage",
+							text: "page text",
+							position: { entry: 1, item: 0 },
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"cursor-2",
+			);
 			const loaded = await store.getState().loadOlder(service);
 			expect(loaded.status).toBe("loaded");
 			expect(rows(store).map((row) => row.id)).toEqual(["page-row"]);
@@ -15743,14 +15599,15 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// Page with a duplicate ID within itself: page-A, page-B, page-A (repeat).
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "page-A", text: "A" },
 					{ kind: "user", id: "page-B", text: "B" },
 					{ kind: "user", id: "page-A", text: "A-repeat" },
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			const items = store.getState().conversation?.items ?? [];
@@ -15787,14 +15644,15 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "cursor-1" });
 
 			// Page: "existing" (dup of retained), "page-A", "page-A" (dup within page).
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "existing", text: "dup" },
 					{ kind: "user", id: "page-A", text: "A" },
 					{ kind: "user", id: "page-A", text: "A-repeat" },
 				],
-				nextCursor: "cursor-2",
-			};
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			const items = store.getState().conversation?.items ?? [];
@@ -15834,8 +15692,9 @@ describe("ConversationStore", () => {
 			store.setState({ olderCursor: "opaque-cursor" });
 			// The hub lists a page's turns in chronological order, so the
 			// page-only row precedes the fragment that overlaps the window.
-			service.olderItems = {
-				items: [
+			scriptOlderRows(
+				service,
+				[
 					{ kind: "user", id: "older", text: "older", position: { entry: 1, item: 0 } },
 					{
 						kind: "user",
@@ -15845,8 +15704,8 @@ describe("ConversationStore", () => {
 						text: "stale overlap",
 					},
 				],
-				nextCursor: "next",
-			};
+				"next",
+			);
 
 			await store.getState().loadOlder(service);
 
@@ -16044,10 +15903,7 @@ describe("ConversationStore", () => {
 
 			// Load a page bringing X back with SHORT content — must NOT be frozen.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "user", id: "X", text: "short-page" }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "X", text: "short-page" }]);
 			await store.getState().loadOlder(service);
 			const reintroduced = store.getState().conversation?.items.find((i) => i.id === "X");
 			expect(reintroduced).toBeDefined();
@@ -16095,10 +15951,7 @@ describe("ConversationStore", () => {
 
 			// Load a page bringing X back with SHORT content — must NOT be frozen.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "user", id: "X", text: "short-page" }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "user", id: "X", text: "short-page" }]);
 			await store.getState().loadOlder(service);
 			const reintroduced = store.getState().conversation?.items.find((i) => i.id === "X");
 			expect(reintroduced).toBeDefined();
@@ -16190,10 +16043,7 @@ describe("ConversationStore", () => {
 			expect(rowById(store, "X")).toBeUndefined();
 
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }]);
 			await store.getState().loadOlder(service);
 			expect(rowById(store, "X")).toMatchObject({ kind: "assistant", markdown: "short-page" });
 
@@ -16300,10 +16150,7 @@ describe("ConversationStore", () => {
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(rows(store)).toHaveLength(10);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				items: [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }],
-				nextCursor: undefined,
-			};
+			scriptOlderRows(service, [{ kind: "assistant", id: "X", markdown: "short-page", streaming: false }]);
 			await store.getState().loadOlder(service);
 			const xPage = rowById(store, "X");
 			expect(xPage).toMatchObject({ kind: "assistant", markdown: "short-page" });
@@ -17085,23 +16932,21 @@ describe("ConversationStore", () => {
 			// is retained, and the turn is PAGE HISTORY now — the rehydrate's
 			// merge path runs over it.
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "r1",
-								turnId: "t0",
-								type: "reasoning",
-								text: "the thought",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "r1",
+							turnId: "t0",
+							type: "reasoning",
+							text: "the thought",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			expect(store.getState().conversation?.turns[0]?.items).toHaveLength(1);
@@ -17134,23 +16979,21 @@ describe("ConversationStore", () => {
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.getState().setDisplayConfig(intentConfig);
 			store.setState({ olderCursor: "cursor-1" });
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								id: "r1",
-								turnId: "t0",
-								type: "reasoning",
-								text: "the thought",
-								status: "completed",
-							} as ThreadItem,
-						]),
-					],
-					"c2",
-				),
-				nextCursor: "c2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							id: "r1",
+							turnId: "t0",
+							type: "reasoning",
+							text: "the thought",
+							status: "completed",
+						} as ThreadItem,
+					]),
+				],
+				"c2",
+			);
 			const result = await store.getState().loadOlder(service);
 			expect(result.status).toBe("loaded");
 			// The level-hidden turn's payload survives the merge.
@@ -17871,36 +17714,34 @@ describe("ConversationStore", () => {
 			// rows re-project from the model through liveAskQuestions, which
 			// gates on askPending — false here — so the ask renders as the tool
 			// row it is and no question row appears.
-			service.olderItems = {
-				turnsPage: turnsPage(
-					[
-						wireTurnFragment("t0", [
-							{
-								...askUserItem(
-									"ask-old",
-									JSON.stringify({
-										questions: [
-											{
-												header: "Which?",
-												question: "Pick one",
-												options: [{ label: "yes" }],
-												multi_select: false,
-											},
-										],
-									}),
-								),
-								position: { entry: 1, item: 0 },
-							},
-							{
-								...agentMessageItem("msg-old", "old message", "completed"),
-								position: { entry: 2, item: 0 },
-							},
-						]),
-					],
-					"cursor-2",
-				),
-				nextCursor: "cursor-2",
-			};
+			scriptOlderTurns(
+				service,
+				[
+					wireTurnFragment("t0", [
+						{
+							...askUserItem(
+								"ask-old",
+								JSON.stringify({
+									questions: [
+										{
+											header: "Which?",
+											question: "Pick one",
+											options: [{ label: "yes" }],
+											multi_select: false,
+										},
+									],
+								}),
+							),
+							position: { entry: 1, item: 0 },
+						},
+						{
+							...agentMessageItem("msg-old", "old message", "completed"),
+							position: { entry: 2, item: 0 },
+						},
+					]),
+				],
+				"cursor-2",
+			);
 			await store.getState().loadOlder(service);
 
 			// askPending must remain false.
