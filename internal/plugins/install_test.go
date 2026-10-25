@@ -24,9 +24,7 @@ func TestInstall_MaterializesAndRegisters(t *testing.T) {
 	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 
 	entry, err := m.Install(context.Background(), "widget", name)
 	if err != nil {
@@ -63,9 +61,7 @@ func TestInstall_AcceptsAPluginNameThatCarriesAnAt(t *testing.T) {
 	writePlugin(t, filepath.Join(dir, "plugins", "widget"), "widget", nil)
 
 	m, ctx := newManagerCtx(t)
-	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceDirectory, Path: dir}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceDirectory, Path: dir})
 
 	if _, err := m.Install(ctx, "wid@get", "acme"); err != nil {
 		t.Fatalf("Install: %v", err)
@@ -108,9 +104,7 @@ func TestInstall_AcceptsAPluginNamedForAScratchDirectory(t *testing.T) {
 	makeGitRepo(t, mktRepo, "README.md", "mkt")
 
 	m, ctx := newManagerCtx(t)
-	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
 
 	entry, err := m.Install(ctx, asideCloneName, "acme")
 	if err != nil {
@@ -174,9 +168,7 @@ func TestInstall_FromGitSubdirMarketplace(t *testing.T) {
 	makeGitRepo(t, repo, "README.md", "root")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceGitSubdir, URL: repo, Path: "mkt"}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceGitSubdir, URL: repo, Path: "mkt"})
 	entry, err := m.Install(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatalf("Install from git-subdir marketplace: %v", err)
@@ -204,9 +196,7 @@ func TestInstall_ManifestLessPlugin_MCPServerRegisters(t *testing.T) {
 	makeGitRepo(t, mktRepo, "README.md", "x")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(context.Background(), "bare-mcp", "acme")
 	if err != nil {
 		t.Fatalf("Install of a manifest-less plugin with an mcpServers entry: %v", err)
@@ -244,9 +234,7 @@ func TestInstall_ManifestLessPlugin_NoUsableFields_Installs(t *testing.T) {
 	makeGitRepo(t, mktRepo, "README.md", "x")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(context.Background(), "bare-nothing", "acme")
 	if err != nil {
 		t.Fatalf("Install of a manifest-less, component-less plugin: %v", err)
@@ -333,9 +321,7 @@ func installBareNPMRepo(t *testing.T, pluginName string, files map[string]string
 	makeGitRepo(t, mktRepo, "README.md", "x")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(context.Background(), pluginName, "acme")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -413,9 +399,7 @@ func TestInstall_PluginWithOwnManifest_EntryIgnored(t *testing.T) {
 	makeGitRepo(t, mktRepo, "README.md", "x")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -441,9 +425,7 @@ func TestInstall_SaveRegistryFailureNamesNoPath(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 
 	path := m.registryPath()
 	origSave := installSaveRegistry
@@ -478,9 +460,7 @@ func TestRemove_CacheRemovalFailureReportsAppliedLitter(t *testing.T) {
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
 	ctx := context.Background()
-	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, ctx, "", Source{Kind: SourceURL, URL: mktRepo})
 	entry, err := m.Install(ctx, "widget", name)
 	if err != nil {
 		t.Fatalf("Install: %v", err)

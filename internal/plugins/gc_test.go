@@ -23,9 +23,7 @@ func TestGcPreservesPublishedRevisions(t *testing.T) {
 	mktRepo, pluginRepo := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 	first, err := m.Install(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -75,9 +73,7 @@ func TestGc_DirectorySourceInstallPathNeverConsidered(t *testing.T) {
 	pluginDir := filepath.Join(mktRepo, "plugins", "widget")
 
 	m := NewManager(t.TempDir())
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceDirectory, Path: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceDirectory, Path: mktRepo})
 	entry, err := m.Install(context.Background(), "widget", name)
 	if err != nil {
 		t.Fatalf("Install: %v", err)

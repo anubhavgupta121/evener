@@ -103,9 +103,7 @@ func TestLockStore_ReportsAccumulatedChangeOnceAfterRelease(t *testing.T) {
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
-	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
-		t.Fatalf("AddMarketplace: %v", err)
-	}
+	mustAddMarketplace(t, m, context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
 
 	reports := recordStoreChanges(m)
 	if _, err := m.Install(context.Background(), "widget", name); err != nil {
