@@ -223,11 +223,13 @@ func (c *RetirementController) beginMutation(sessionID, category string, naming 
 // question, an in-memory job notification, an active goal between turns, the
 // shared tree's in-memory owner state, a running job, a watch, a journal-only
 // pending notification, pending attention) cannot end the wait on its own, and
-// TryClaim refuses over it while it is present, so awaitNaming reads those
-// directly and skips the wait when one exists (#4055, #4528). The sources whose
-// read used to block are read under TryLock counters or a bounded lock-free
-// journal scan; a source that cannot be read without waiting contributes no
-// evidence, so a retire beside only that work keeps today's wait.
+// TryClaim refuses over it while it is present (the shared tree's wake set is a
+// conservative proxy; the full read decides from the transcript folds), so
+// awaitNaming reads those directly and skips the wait when one exists (#4055,
+// #4528). The sources whose read used to block are read under TryLock counters
+// or a bounded lock-free journal scan; a source that cannot be read without
+// waiting contributes no evidence, so a retire beside only that work keeps
+// today's wait.
 func (c *RetirementController) TryManualClaim(ctx context.Context) (*RetirementClaim, RetirementSnapshot, error) {
 	c.awaitNaming(ctx, sessionNameTimeout)
 	if err := ctx.Err(); err != nil {
