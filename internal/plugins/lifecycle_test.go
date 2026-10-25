@@ -9,9 +9,7 @@ import (
 )
 
 func TestRemoveEnableDisable(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})

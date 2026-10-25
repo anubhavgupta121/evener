@@ -545,9 +545,7 @@ func TestDoctor_MarketplaceSeededPointerIsOK(t *testing.T) {
 }
 
 func TestDoctor_MarketplaceNotAGitRepo(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m := NewManager(t.TempDir())
 	dir := t.TempDir() // a real directory, but never `git init`-ed
 	if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755); err != nil {
@@ -573,9 +571,7 @@ func TestDoctor_MarketplaceNotAGitRepo(t *testing.T) {
 }
 
 func TestDoctor_MarketplaceStaleWarns(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	src := makeMarketplaceRepo(t, "acme")
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: src}); err != nil {

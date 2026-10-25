@@ -19,9 +19,7 @@ func TestGc_NoCacheDirYet(t *testing.T) {
 }
 
 func TestGcPreservesPublishedRevisions(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, pluginRepo := makeGitBackedMarketplace(t, "widget")
 
 	m := NewManager(t.TempDir())
@@ -72,9 +70,7 @@ func TestGcPreservesPublishedRevisions(t *testing.T) {
 }
 
 func TestGc_DirectorySourceInstallPathNeverConsidered(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t) // "widget" is a "./plugins/widget" relative source
 	pluginDir := filepath.Join(mktRepo, "plugins", "widget")
 

@@ -176,9 +176,7 @@ func TestEnsureFetchedSaveFailureNamesNoPath(t *testing.T) {
 // is a plain refusal - but the save error itself is atomicWriteFile's own,
 // which names the store's path.
 func TestAddMarketplaceSaveFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 
@@ -201,9 +199,7 @@ func TestAddMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 // fails, the store is left changed - and the rollback failure (os.RemoveAll's
 // own *fs.PathError) must not reach the caller either.
 func TestAddMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 
@@ -227,9 +223,7 @@ func TestAddMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
 // removal, so a save failure is a plain refusal - but its own error still
 // names the store's path.
 func TestRemoveMarketplaceSaveFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
@@ -255,9 +249,7 @@ func TestRemoveMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 // orphaned clone is litter the caller cannot undo, reported as an error that
 // must not carry os.RemoveAll's own path.
 func TestRemoveMarketplaceCloneRemovalFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
@@ -297,9 +289,7 @@ func TestRemoveMarketplaceCloneRemovalFailureNamesNoPath(t *testing.T) {
 // TestRemoveMarketplace_LookupMissTouchesNothingOnDisk). Whoever wants the
 // litter cleaned up retries some other way.
 func TestRemoveMarketplaceRetryAfterCloneRemovalFailureReportsNotFound(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
@@ -329,9 +319,7 @@ func TestRemoveMarketplaceRetryAfterCloneRemovalFailureReportsNotFound(t *testin
 // ".." to its parent - either one handed to marketplaceRemoveAll on a
 // caller-controlled miss would delete far more than a leftover clone.
 func TestRemoveMarketplace_LookupMissTouchesNothingOnDisk(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m, ctx := newQuietManager(t)
 	src := makeMarketplaceRepo(t, "market-a")
 	if _, err := m.AddMarketplace(ctx, "market-a", Source{Kind: SourceURL, URL: src}); err != nil {
@@ -387,9 +375,7 @@ func TestRefreshMarketplaceSaveFailureNamesNoPath(t *testing.T) {
 // atomicWriteFile's own *fs.PathError, naming this machine's absolute
 // plugin-store path directly.
 func TestEditMarketplaceSaveFailureRollbackSucceedsNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -420,9 +406,7 @@ func TestEditMarketplaceSaveFailureRollbackSucceedsNamesNoPath(t *testing.T) {
 // (undoSwap/runUndo) also fails - a re-source's swap-in succeeding but the
 // save after it failing, and the swap's own undo failing too.
 func TestEditMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -450,9 +434,7 @@ func TestEditMarketplaceRollbackFailureNamesNoPath(t *testing.T) {
 // is built as "reading <absolute path>: ...", so it must be scrubbed like the
 // write side is (#1854).
 func TestEditMarketplaceUnreadableMarketplacesFileNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -476,9 +458,7 @@ func TestEditMarketplaceUnreadableMarketplacesFileNamesNoPath(t *testing.T) {
 }
 
 func TestEditMarketplaceUnreadableRegistryFileNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -612,9 +592,7 @@ func TestEditFailedScrubsACompositeUnderANonCanonicalRoot(t *testing.T) {
 // a store failure: its message carries no path, so it must reach the caller
 // naming the kind and keep its sentinel for the wire classification (#1854).
 func TestEditMarketplaceUnsupportedSourceKindKeepsItsReason(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
@@ -691,9 +669,7 @@ func TestStoreRootErrorNamesTheRejectedRoot(t *testing.T) {
 // rollback machinery exists, so its failure names that absolute path too. It
 // must be scrubbed like every later step's (#1854).
 func TestEditMarketplaceFetchFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -725,9 +701,7 @@ func TestEditMarketplaceFetchFailureNamesNoPath(t *testing.T) {
 // unchanged - but the failure is still os.Rename's own, naming the destination
 // directly (#1854).
 func TestEditMarketplaceAsideMoveFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -754,9 +728,7 @@ func TestEditMarketplaceAsideMoveFailureNamesNoPath(t *testing.T) {
 // A clone rename can fail before any store write. Its filesystem error must
 // stay out of the client-facing message while the published cache stays fixed.
 func TestEditMarketplaceCloneRenameFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
@@ -788,9 +760,7 @@ func TestEditMarketplaceCloneRenameFailureNamesNoPath(t *testing.T) {
 // directly, so the failure must be scrubbed even though nothing was left
 // changed (#1854).
 func TestEditMarketplaceInstallFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	dir := makeDirectoryMarketplace(t, "acme", "widget")
 	repo := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -821,9 +791,7 @@ func TestEditMarketplaceInstallFailureNamesNoPath(t *testing.T) {
 // name instead; the paths are the hub's log's, and
 // errRenameRollbackIncomplete still marks the state (#1854).
 func TestEditMarketplaceSwapRollbackFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -869,9 +837,7 @@ func TestEditMarketplaceSwapRollbackFailureNamesNoPath(t *testing.T) {
 // installed_plugins.json, not known_marketplaces.json - the file that
 // actually failed.
 func TestEditMarketplaceRenameRegistrySaveFailureNamesRegistryFile(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
@@ -905,9 +871,7 @@ func TestEditMarketplaceRenameRegistrySaveFailureNamesRegistryFile(t *testing.T)
 // returns for this branch must still carry that identity so a caller can
 // errors.Is against it.
 func TestEditMarketplaceRenameBetweenNamesErrorSurvivesIdentity(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: repoA}); err != nil {
@@ -945,9 +909,7 @@ func TestEditMarketplaceRenameBetweenNamesErrorSurvivesIdentity(t *testing.T) {
 // that helper has to re-attach the sentinel itself, or the identity the
 // first branch preserves is lost the moment a second thing goes wrong.
 func TestEditMarketplaceRenameBetweenNamesRollbackFailureSurvivesIdentity(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repoA := makeMarketplaceRepoWithPlugin(t, "acme", "widget")
 	repoB := makeMarketplaceRepoWithPlugin(t, "acme", "gadget")
 	m, ctx := newQuietManager(t)
@@ -1007,9 +969,7 @@ func TestMigrationTriggeredSaveFailureNamesNoPath(t *testing.T) {
 // plugin-store path directly. That is the read-side counterpart of every
 // write-path leak above (#1700), reached on the Browse RPC.
 func TestBrowseCorruptCatalogNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	src := makeMarketplaceRepo(t, "acme")
 	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: src}); err != nil {
@@ -1039,9 +999,7 @@ func TestBrowseCorruptCatalogNamesNoPath(t *testing.T) {
 // corrupt catalog there names the staging directory under the store - the same
 // read-side leak on the AddMarketplace RPC.
 func TestAddMarketplaceCorruptCatalogNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	dir := filepath.Join(t.TempDir(), "corrupt-acme")
 	if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1068,9 +1026,7 @@ func TestAddMarketplaceCorruptCatalogNamesNoPath(t *testing.T) {
 // catalogPlugin parses the marketplace's catalog on Install and Upgrade, so a
 // corrupt catalog there is the same read-side leak on those RPCs.
 func TestUpgradeCorruptCatalogNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m, ctx := newQuietManager(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {

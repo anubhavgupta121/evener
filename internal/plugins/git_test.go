@@ -12,9 +12,7 @@ import (
 // makeGitRepo initialises a git repo at dir with one file and returns its HEAD sha.
 func makeGitRepo(t *testing.T, dir string, file, content string) string {
 	t.Helper()
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -76,9 +74,7 @@ func TestGitRefNamesBranch_IgnoresATagInTheBranchNamespace(t *testing.T) {
 }
 
 func TestGitClone_ShaPinIsNotShadowedByATag(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	src := filepath.Join(t.TempDir(), "src")
 	first := makeGitRepo(t, src, "file.txt", "v1")
 	short := first[:7]
@@ -102,9 +98,7 @@ func TestGitClone_ShaPinIsNotShadowedByATag(t *testing.T) {
 }
 
 func TestGitSparseClone_ShaPinIsNotShadowedByATag(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	src := filepath.Join(t.TempDir(), "src")
 	makeGitRepo(t, src, "README.md", "root")
 	if err := os.MkdirAll(filepath.Join(src, "plugins"), 0o755); err != nil {
@@ -147,9 +141,7 @@ func TestGitClone_RejectsFlagLikeArgs(t *testing.T) {
 }
 
 func TestFetchPluginSource_RejectsExtTransport(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	marker := filepath.Join(t.TempDir(), "PWNED")
 	dst := filepath.Join(t.TempDir(), "out")
 	url := "ext::sh -c \"touch " + marker + "\""

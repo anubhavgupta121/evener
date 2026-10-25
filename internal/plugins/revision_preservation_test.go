@@ -22,9 +22,7 @@ type publishedRevisionFixture struct {
 
 func newPublishedRevisionFixture(t *testing.T, unversioned bool) publishedRevisionFixture {
 	t.Helper()
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	root := t.TempDir()
 	pluginRepo := filepath.Join(root, "plugin")
 	writePlugin(t, pluginRepo, "widget", map[string]string{
@@ -48,8 +46,7 @@ func newPublishedRevisionFixture(t *testing.T, unversioned bool) publishedRevisi
 		t.Fatal(err)
 	}
 	makeGitRepo(t, marketRepo, "README.md", "market")
-	m := NewManager(t.TempDir())
-	ctx := context.Background()
+	m, ctx := newManagerCtx(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: marketRepo}); err != nil {
 		t.Fatal(err)
 	}

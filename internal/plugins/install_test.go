@@ -21,9 +21,7 @@ func makeInstallableMarketplace(t *testing.T) (mktRepo, name string) {
 }
 
 func TestInstall_MaterializesAndRegisters(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
@@ -64,8 +62,7 @@ func TestInstall_AcceptsAPluginNameThatCarriesAnAt(t *testing.T) {
 	}
 	writePlugin(t, filepath.Join(dir, "plugins", "widget"), "widget", nil)
 
-	m := NewManager(t.TempDir())
-	ctx := context.Background()
+	m, ctx := newManagerCtx(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceDirectory, Path: dir}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -96,9 +93,7 @@ func TestInstall_AcceptsAPluginNameThatCarriesAnAt(t *testing.T) {
 // publishing area. A catalog is free to name a plugin that, and refusing it
 // would leave that plugin uninstallable.
 func TestInstall_AcceptsAPluginNamedForAScratchDirectory(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	// The catalog's own name for the plugin is what keys the install; the
 	// plugin's manifest names itself kebab-case, as every manifest must.
 	mktRepo := filepath.Join(t.TempDir(), "mkt-acme")
@@ -112,8 +107,7 @@ func TestInstall_AcceptsAPluginNamedForAScratchDirectory(t *testing.T) {
 	writePlugin(t, filepath.Join(mktRepo, "plugins", "widget"), "widget", nil)
 	makeGitRepo(t, mktRepo, "README.md", "mkt")
 
-	m := NewManager(t.TempDir())
-	ctx := context.Background()
+	m, ctx := newManagerCtx(t)
 	if _, err := m.AddMarketplace(ctx, "", Source{Kind: SourceURL, URL: mktRepo}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
@@ -145,9 +139,7 @@ func TestInstall_AcceptsAPluginNamedForAScratchDirectory(t *testing.T) {
 // per-open-file-description, not per-process/reentrant — a second acquisition
 // attempt from the same process spins until its own timeout and fails).
 func TestInstall_LazyFetchesSeededPointer(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	// seed a pointer (empty InstallLocation) directly, as SeedDefaultMarketplaces would.
@@ -169,9 +161,7 @@ func TestInstall_LazyFetchesSeededPointer(t *testing.T) {
 }
 
 func TestInstall_FromGitSubdirMarketplace(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repo := filepath.Join(t.TempDir(), "monorepo")
 	if err := os.MkdirAll(filepath.Join(repo, "mkt", ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -197,9 +187,7 @@ func TestInstall_FromGitSubdirMarketplace(t *testing.T) {
 }
 
 func TestInstall_ManifestLessPlugin_MCPServerRegisters(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	// A plugin repo with NO .claude-plugin (or .codex-plugin) manifest at all
 	// — the private-journal-mcp shape: a bare package, no plugin.json.
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
@@ -242,9 +230,7 @@ func TestInstall_ManifestLessPlugin_MCPServerRegisters(t *testing.T) {
 // dirs auto-discover — here nothing), so evener must install it too,
 // synthesizing a minimal name/description manifest.
 func TestInstall_ManifestLessPlugin_NoUsableFields_Installs(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	makeGitRepo(t, pluginRepo, "README.md", "bare, undeclared")
 
@@ -285,9 +271,7 @@ func TestInstall_ManifestLessPlugin_NoUsableFields_Installs(t *testing.T) {
 }
 
 func TestInstall_ManifestLessPluginValidatedBeforePublication(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "plugin")
 	makeGitRepo(t, pluginRepo, "resource.txt", "companion") // deliberately has no manifest
 	marketRepo := filepath.Join(t.TempDir(), "market")
@@ -363,9 +347,7 @@ func installBareNPMRepo(t *testing.T, pluginName string, files map[string]string
 // feature: installing a manifest-less npm MCP-server repo whose bin target
 // exists yields a plugin whose Load() surfaces a working MCP server config.
 func TestInstall_BareNPMRepo_AutoWiresMCP(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	entry, _ := installBareNPMRepo(t, "journal-mcp", map[string]string{
 		"package.json":  `{"name":"journal-mcp","version":"1.0.0","bin":{"journal-mcp":"./dist/index.js"}}`,
 		"dist/index.js": "#!/usr/bin/env node\n",
@@ -390,9 +372,7 @@ func TestInstall_BareNPMRepo_AutoWiresMCP(t *testing.T) {
 // ship). Install succeeds with zero components; the reason lands in the
 // entry's Note and persists through the registry.
 func TestInstall_BareNPMRepo_UnbuiltBin_NotePersisted(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	entry, m := installBareNPMRepo(t, "journal-mcp", map[string]string{
 		"package.json": `{"name":"journal-mcp","version":"1.0.0","bin":{"journal-mcp":"./dist/index.js"}}`,
 		"src/index.ts": "// unbuilt",
@@ -417,9 +397,7 @@ func TestInstall_BareNPMRepo_UnbuiltBin_NotePersisted(t *testing.T) {
 // a plugin that ships its own plugin.json is completely unchanged by Part 2,
 // even when its marketplace entry ALSO declares components.
 func TestInstall_PluginWithOwnManifest_EntryIgnored(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	writePlugin(t, pluginRepo, "widget", nil) // has its own plugin.json, no mcpServers
 	makeGitRepo(t, pluginRepo, "extra.txt", "v1")
@@ -459,9 +437,7 @@ func TestInstall_PluginWithOwnManifest_EntryIgnored(t *testing.T) {
 // four separate wraps, so this test exercises the boundary through the one
 // caller and the mechanism covers the other three by construction.
 func TestInstall_SaveRegistryFailureNamesNoPath(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard
@@ -497,9 +473,7 @@ func TestInstall_SaveRegistryFailureNamesNoPath(t *testing.T) {
 // outcome from a plain refusal, and the session must still report the registry
 // change so the hub broadcasts the applied removal.
 func TestRemove_CacheRemovalFailureReportsAppliedLitter(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = io.Discard

@@ -11,9 +11,7 @@ import (
 )
 
 func TestUpgrade_NewShaDirOldRemains(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	// A marketplace whose plugin source is a github/url git repo (so it has a sha).
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	writePlugin(t, pluginRepo, "widget", nil)
@@ -57,9 +55,7 @@ func TestUpgrade_NewShaDirOldRemains(t *testing.T) {
 }
 
 func TestUpgrade_NoOpKeepsLiveDir(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	writePlugin(t, pluginRepo, "widget", nil)
 	makeGitRepo(t, pluginRepo, "extra.txt", "v1")
@@ -100,9 +96,7 @@ func TestUpgrade_NoOpKeepsLiveDir(t *testing.T) {
 }
 
 func TestUpgrade_ManifestLessPlugin_FallbackAppliedToNewShaDir(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	makeGitRepo(t, pluginRepo, "extra.txt", "v1")
 

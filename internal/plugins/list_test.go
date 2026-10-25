@@ -9,9 +9,7 @@ import (
 )
 
 func TestList_FlagsBroken(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	mktRepo, name := makeInstallableMarketplace(t)
 	m := NewManager(t.TempDir())
 	m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: mktRepo})
@@ -36,9 +34,7 @@ func TestList_FlagsBroken(t *testing.T) {
 // UpdateAll asks every plugin that can upgrade, a relative one (upgraded from
 // its marketplace clone) as well as a git-backed one.
 func TestUpdateAll_UpgradesGitBackedAndRelative(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	pluginRepo := filepath.Join(t.TempDir(), "pluginrepo")
 	writePlugin(t, pluginRepo, "gitwidget", nil)
 	makeGitRepo(t, pluginRepo, "extra.txt", "v1")

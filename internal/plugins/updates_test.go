@@ -24,9 +24,7 @@ type urlPluginFixture struct {
 // repo and its head commit.
 func installURLPlugin(t *testing.T, sourceExtra func(repo, head string) string) urlPluginFixture {
 	t.Helper()
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	f := urlPluginFixture{
 		pluginRepo: filepath.Join(t.TempDir(), "pluginrepo"),
 		mktRepo:    filepath.Join(t.TempDir(), "mkt"),
@@ -646,9 +644,7 @@ func TestCheckUpdates_HungRefreshesLeaveTheRemoteChecksTheirTime(t *testing.T) {
 // a detached HEAD, which a fast-forward cannot move), and once its refresh
 // budget is spent it starts no more refreshes.
 func TestCheckUpdates_RefreshSkipsPinnedMarketplacesAndStopsAtItsBudget(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = &bytes.Buffer{}
 	shaRepo := makeMarketplaceRepoWithPlugin(t, "pinned", "gadget")
@@ -703,9 +699,7 @@ func hangingFetches(t *testing.T) *[]string {
 // A check whose budget ran out starts its next refresh at the marketplace it
 // left unrefreshed, so the same marketplaces are not starved every time.
 func TestCheckUpdates_RefreshResumesWhereTheLastCheckRanOut(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = &bytes.Buffer{}
 	for _, name := range []string{"first", "second"} {
@@ -749,9 +743,7 @@ func TestCheckUpdates_RefreshFetchesWithTheStoreLockFree(t *testing.T) {
 // A marketplace refresh cut off by the budget partway through goes first next
 // time, so one that is always the one in flight is not starved.
 func TestCheckUpdates_RefreshResumesAtOneTheBudgetCutOff(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	m := NewManager(t.TempDir())
 	m.Stderr = &bytes.Buffer{}
 	for _, name := range []string{"first", "second"} {
@@ -951,9 +943,7 @@ func TestCheckUpdates_ReSourcingToADirectoryWaitsForTheCheckFetch(t *testing.T) 
 // An unpinned git-subdir marketplace's sparse clone stays on its branch, so a
 // check refreshes it and sees a change pushed to a relative-source plugin.
 func TestCheckUpdates_AGitSubdirMarketplaceIsRefreshed(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repo := filepath.Join(t.TempDir(), "monorepo")
 	if err := os.MkdirAll(filepath.Join(repo, "mkt", ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -987,9 +977,7 @@ func TestCheckUpdates_AGitSubdirMarketplaceIsRefreshed(t *testing.T) {
 // never gives a clone one. A tag shadowing another branch stays a pin, and a
 // tag named like the default branch stays the branch, either way.
 func TestSourcePinned_NeedsNoOriginHEAD(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not available")
-	}
+	skipWithoutGit(t)
 	repo := makeMarketplaceRepoWithPlugin(t, "shadowed", "widget")
 	gitIn(t, repo, "tag", "rel")
 	gitIn(t, repo, "branch", "rel")
