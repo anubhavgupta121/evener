@@ -1,12 +1,14 @@
-import type { Task, TaskListResponse, ThreadCapabilities, ThreadModel } from "@evener/appwire-client";
+import type { Task, TaskListResponse, ThreadModel } from "@evener/appwire-client";
 import { absoluteTime, WireError } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetThreadsStoreForTests } from "../../../stores/threads";
 import { readModuleCss, topRuleBlock } from "../../../styles/cssBlock";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../threadTestUtils";
 import { Toast } from "../../../widgets";
 import { resetDisclosureStoreForTests } from "../../../widgets/disclosure/disclosureStore";
 import { emptyStateReasons } from "../../../widgets/emptystate/emptyStateTestUtils";
@@ -15,22 +17,6 @@ import { getToasts, resetToastStoreForTests } from "../../../widgets/toast/store
 import visuallyHiddenStyles from "../../../widgets/visuallyhidden/visuallyhidden.module.css";
 import { STATUS_TOUCH } from "../transcript/tools/taskCheck";
 import { TasksPanel, TasksPanelBody } from "./TasksPanel";
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 function testModel(overrides: Partial<ThreadModel> = {}): ThreadModel {
   const { jobsTreeRevision = null, ...rest } = overrides;
@@ -66,12 +52,6 @@ function testModel(overrides: Partial<ThreadModel> = {}): ThreadModel {
     ...rest,
     jobsTreeRevision,
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 // Wire-true fixture: the real daemon Task shape (agent/task/task_store.go:

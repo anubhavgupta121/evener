@@ -3,6 +3,7 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { captureNewTabs, NEW_TAB_POLICY, openedNewTab } from "../../../../shell/openInNewTab.testSupport";
 import { connectionStore } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
@@ -15,12 +16,6 @@ import { DeviceCodeDialog, OAuthRedirectDialog } from "./oauthDialogs";
 // The dialogs' outcomes, read from their markers: the device flow's status line
 // by its data-state and the toasts by kind, never by the words either shows.
 const statusState = (): string | null => screen.getByRole("status").getAttribute("data-state");
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 async function advanceTime(milliseconds: number): Promise<void> {
   await act(() => vi.advanceTimersByTimeAsync(milliseconds));

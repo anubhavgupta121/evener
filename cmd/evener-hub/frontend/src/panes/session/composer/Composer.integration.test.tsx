@@ -8,19 +8,14 @@
 // - not re-deriving QueueStrip's or
 // AskDock's own already-covered internal behavior.
 
-import {
-  type MethodTypes,
-  type Thread,
-  type ThreadCapabilities,
-  type ThreadReadResponse,
-  WireError,
-} from "@evener/appwire-client";
+import { type MethodTypes, type Thread, type ThreadReadResponse, WireError } from "@evener/appwire-client";
 import { deferred } from "@evener/appwire-client/testing/deferred";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { ClientProvider } from "../../../shell/clientContext";
 import { conversationPaneLifetime } from "../../../shell/paneLifetime";
 import { resetMobileViewportForTests } from "../../../shell/useIsMobile";
@@ -35,6 +30,7 @@ import {
   subscribeMutationPersistence,
   threadsStore,
 } from "../../../stores/threads";
+import { ALL_CAPABILITIES as FULL_CAPABILITIES } from "../../../threadTestUtils";
 import { Toast } from "../../../widgets";
 import { getToasts, resetToastStoreForTests } from "../../../widgets/toast/store";
 import { toastKinds } from "../../../widgets/toast/toastTestUtils";
@@ -113,22 +109,6 @@ beforeAll(() => {
   installLocalStorage(new MemoryStorage());
 });
 
-const FULL_CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
-
 function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   return {
     id: `thr_${ref}`,
@@ -161,12 +141,6 @@ function readResponse(ref: string, overrides: Partial<Thread> = {}): ThreadReadR
     epoch: 1,
     snapshot: { incarnation: "inc-1", length: 0 },
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 async function mountComposer(

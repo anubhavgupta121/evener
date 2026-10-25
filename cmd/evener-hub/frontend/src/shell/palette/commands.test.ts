@@ -3,6 +3,7 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { IDBFactory } from "fake-indexeddb";
 import { lazy } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { ALL_CAPABILITIES as CAPS } from "../../threadTestUtils";
 import "../../panes/sessionPanels";
 import { QUEUE_EMPTY, QUEUE_UNAVAILABLE, STEER_UNAVAILABLE } from "@evener/appwire-client";
 import { keyID } from "@evener/appwire-client/state/navigation";
@@ -57,22 +58,6 @@ afterAll(
 beforeAll(() => {
   installLocalStorage(new MemoryStorage());
 });
-
-const CAPS: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 const NO_CAPS: ThreadCapabilities = {
   send: false,

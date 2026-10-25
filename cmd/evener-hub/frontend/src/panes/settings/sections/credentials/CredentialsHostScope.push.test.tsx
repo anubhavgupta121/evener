@@ -4,6 +4,7 @@ import { deferRequest, FakeClient, gateSettlements } from "@evener/appwire-clien
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetCredentialsStoreForTests, resetHostInstancesForTests } from "../../../../stores/credentials";
 import { HOST_GATE_TIMEOUT_MS, hostsStore } from "../../../../stores/hosts";
@@ -62,12 +63,6 @@ const GAMMA_LIST = {
   instances: [instance({ name: "on-gamma", providerId: "anthropic", authModes: ["apiKey"] })],
   availableProviders: [],
 };
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });

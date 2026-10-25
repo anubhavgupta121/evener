@@ -1,9 +1,9 @@
 import type { SettingsOverviewResponse, UpdateCheckResponse } from "@evener/appwire-client";
 import { WireError } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetDaemonResidentsStoreForTests } from "../../../stores/daemonResidents";
 import { APPLY_TIMEOUT_MS, resetHubUpdateStoreForTests } from "../../../stores/hubUpdate";
@@ -16,12 +16,6 @@ function updateStatus(): HTMLElement {
 
 async function updateStateIs(state: string): Promise<void> {
   await waitFor(() => expect(updateStatus().getAttribute("data-state")).toBe(state));
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 function overview(buildChannel: string): SettingsOverviewResponse {

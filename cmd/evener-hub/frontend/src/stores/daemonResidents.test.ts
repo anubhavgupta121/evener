@@ -7,9 +7,9 @@
 
 import type { DaemonIdentity, DaemonListResponse, DaemonRetireResponse } from "@evener/appwire-client";
 import { friendlyErrorMessage } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectedClientPort, connectionStore } from "./connection";
 import {
   _clearDaemonResidentsInflightForTests,
@@ -18,12 +18,6 @@ import {
   residentRowKey,
   useDaemonResidentsStore,
 } from "./daemonResidents";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const EMPTY_RESPONSE: DaemonListResponse = {
   defaultTimeoutMillis: 3600000,

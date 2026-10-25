@@ -1,19 +1,13 @@
 import { friendlyErrorMessage, type SettingsOverviewResponse } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   resetSettingsOverviewStoreForTests,
   settingsOverviewStore,
   useSettingsOverviewStore,
 } from "./settingsOverview";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const SAMPLE_RESPONSE: SettingsOverviewResponse = {
   hub: {

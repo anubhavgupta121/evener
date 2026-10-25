@@ -5,11 +5,11 @@ import {
   type PluginEntry,
   WireError,
 } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { extensionsStore, resetExtensionsStoreForTests } from "../../../../stores/extensions";
 import { getToasts, resetToastStoreForTests } from "../../../../widgets/toast/store";
@@ -38,12 +38,6 @@ const INSTALLED_LINTER: PluginEntry = {
   installedAt: 1,
   lastUpdated: 1,
 };
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 // Wraps BrowseSection with the lifted expandedMarketplaces state its real
 // parent (marketplacesPlugins/index.tsx) owns - a plain useState here

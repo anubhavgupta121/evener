@@ -2,11 +2,12 @@
 // whichever client connectionStore holds, and a replaced or recovered
 // connection drops every list. The store's paging and overtaking rules are
 // tested in the package (appwire-client/typescript/archivedListStore.test.ts).
+
 import { type ArchivedListParams, type ArchivedListResponse, friendlyErrorMessage } from "@evener/appwire-client";
 import { deferred } from "@evener/appwire-client/testing/deferred";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { completeSession } from "@evener/appwire-client/testing/navigation";
 import { beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import {
   archivedListKey,
   archivedListStore,
@@ -15,12 +16,6 @@ import {
   resetArchivedListStoreForTests,
 } from "./archivedList";
 import { connectedClientPort, connectionStore } from "./connection";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const row = (ref: string) => completeSession({ ref, updated_at: "2026-09-01T00:00:00Z" });
 

@@ -2,16 +2,11 @@ import type { AgentsDocResponse, AnyNotification } from "@evener/appwire-client"
 import { friendlyErrorMessage, WireError } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { agentsDocStore, resetAgentsDocStoreForTests } from "./agentsDoc";
 import { connectionStore } from "./connection";
 
 const DOC: AgentsDocResponse = { path: "/home/u/.config/evener/AGENTS.md", exists: true, content: "# hi\n" };
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });

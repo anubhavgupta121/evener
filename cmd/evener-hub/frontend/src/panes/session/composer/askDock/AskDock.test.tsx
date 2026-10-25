@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ConnectionState, Thread, ThreadCapabilities, ThreadReadResponse } from "@evener/appwire-client";
+import type { ConnectionState, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import { hydrateThread } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -16,28 +16,13 @@ import {
   subscribeMutationPersistence,
   threadsStore,
 } from "../../../../stores/threads";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../../threadTestUtils";
 import { resetComposerFocusStoreForTests, useComposerFocusRequest } from "../composerFocus";
 import { AskDock, AskDockAnnouncements } from "./AskDock";
 import { askDockStore, resetAskDockStoreForTests } from "./askDockStore";
 import { ackAskUserCall, askArgs, ONE_QUESTION } from "./askDockTestUtils";
 
 // --- fixtures (mirrors askDockStore.test.ts's own harness) ---------------
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 function testThread(ref: string): Thread {
   return {

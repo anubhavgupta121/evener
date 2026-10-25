@@ -1,20 +1,14 @@
 import { friendlyErrorMessage, type SettingsOverviewResponse, WireError } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetDaemonResidentsStoreForTests } from "../../../stores/daemonResidents";
 import { resetSettingsOverviewStoreForTests } from "../../../stores/settingsOverview";
 import { HubSection } from "./hub";
 import { statusReasons } from "./reasonTestUtils";
 import { settingsFieldHelp, settingsFieldIds, settingsFieldValue } from "./settingsFieldTestUtils";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const SAMPLE_RESPONSE: SettingsOverviewResponse = {
   hub: {

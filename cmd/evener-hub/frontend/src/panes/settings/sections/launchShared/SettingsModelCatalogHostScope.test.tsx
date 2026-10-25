@@ -1,7 +1,8 @@
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetCredentialsStoreForTests, resetHostInstancesForTests } from "../../../../stores/credentials";
 import { SettingsModelCatalog } from "./SettingsModelCatalog";
@@ -11,12 +12,6 @@ import { SettingsModelCatalog } from "./SettingsModelCatalog";
 // host-scopes. Under a remote host it must read THAT host's model/list through
 // evener/host/request (and take its revision from that host's own provider
 // instances); the local hub keeps today's plain model/list byte-for-byte.
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 /** True when the section forwarded `method` through evener/host/request. */
 function forwarded(fake: FakeClient, method: string): boolean {

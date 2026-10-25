@@ -3,6 +3,7 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetLaunchConfigHostStoresForTests, resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
@@ -45,12 +46,6 @@ function schema(description: string): LaunchOptionSchemaResponse {
       },
     ],
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 function controllerLaunchCalls(fake: FakeClient): string[] {

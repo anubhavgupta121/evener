@@ -4,10 +4,10 @@ import type {
   LaunchOption,
   PathValidateResponse,
 } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../../stores/extensions";
 import { Toast } from "../../../../widgets";
@@ -31,11 +31,6 @@ function saveStatus(): HTMLElement {
 // The path-kind rows render PathField, whose completion loader is the
 // extensions store's own completePaths - so opening one needs a connected
 // client behind it.
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   vi.useRealTimers();

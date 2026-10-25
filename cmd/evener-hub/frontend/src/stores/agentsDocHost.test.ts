@@ -1,6 +1,6 @@
 import type { AgentsDocResponse, AnyNotification, HostRow } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import {
   agentsDocStore,
   agentsDocStoreForHost,
@@ -15,12 +15,6 @@ import { hostsStore } from "./hosts";
 // is a per-host instance whose get/set go through evener/host/request. Reads
 // and writes travel together - a remote selection both shows and changes THAT
 // host's file, never this hub's.
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const DOC: AgentsDocResponse = { path: "/home/u/.config/evener/AGENTS.md", exists: true, content: "# hi\n" };
 

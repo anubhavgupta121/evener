@@ -1,8 +1,8 @@
 // @vitest-environment node
 
 import type { HostRow, MarketplaceEntry } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import { extensionsInstanceForHost, extensionsStore, resetExtensionsStoreForTests } from "./extensions";
 import { hostsStore } from "./hosts";
@@ -11,12 +11,6 @@ import { hostsStore } from "./hosts";
 // and global launch-layer cores for the selected host. Local is the app's one
 // singleton byte-for-byte; a remote host gets its own instance over
 // evener/host/request, whose data never lands in the controller's store.
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const MARKETPLACE: MarketplaceEntry = {
   name: "acme-plugins",

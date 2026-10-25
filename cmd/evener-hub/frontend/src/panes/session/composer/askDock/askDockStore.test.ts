@@ -1,12 +1,6 @@
 // @vitest-environment node
 
-import type {
-  AnyNotification,
-  ConnectionState,
-  Thread,
-  ThreadCapabilities,
-  ThreadReadResponse,
-} from "@evener/appwire-client";
+import type { AnyNotification, ConnectionState, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import { hydrateThread } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
@@ -18,26 +12,11 @@ import {
   resetThreadsStoreForTests,
   threadsStore,
 } from "../../../../stores/threads";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../../threadTestUtils";
 import { askDockStore, resetAskDockStoreForTests } from "./askDockStore";
 import { ackAskUserCall, askArgs, askPendingStatusChanged, ONE_QUESTION } from "./askDockTestUtils";
 
 // --- fixtures (mirrors stores/threads.test.ts's own harness) -------------
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   return {

@@ -8,16 +8,11 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { extensionsStore, resetExtensionsStoreForTests } from "../../../stores/extensions";
 import { getToasts, resetToastStoreForTests } from "../../../widgets/toast/store";
 import { McpSection, type SettingsOverviewLike } from "./mcp";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 // Both launch-layer editors mount together once the layer has loaded.
 async function launchLayerLoaded(): Promise<void> {

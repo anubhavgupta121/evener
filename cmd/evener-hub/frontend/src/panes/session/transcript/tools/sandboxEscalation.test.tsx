@@ -1,18 +1,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  SandboxEscalationRequested,
-  Thread,
-  ThreadCapabilities,
-  ThreadReadResponse,
-} from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { SandboxEscalationRequested, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetThreadsStoreForTests, threadsStore } from "../../../../stores/threads";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../../threadTestUtils";
 import { SandboxEscalationCard, SandboxEscalationRail, useSandboxEscalations } from "./sandboxEscalation";
 
 // Ground truth: evener/sandbox/escalation/requested + EvenerThread.
@@ -46,22 +42,6 @@ function requested(overrides: Partial<SandboxEscalationRequested> = {}): Sandbox
   };
 }
 
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
-
 function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   return {
     id: `thr_${ref}`,
@@ -87,11 +67,6 @@ function readResponse(ref: string, overrides: Partial<Thread> = {}): ThreadReadR
 // connectFakeClient wires a fresh FakeClient through connectionStore
 // directly - the threads store's own requireClient() rides that, not React
 // context, so no <ClientProvider> is needed anywhere in this file.
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function readResponseWithEscalation(ref: string, escalation: SandboxEscalationRequested): ThreadReadResponse {
   return readResponse(ref, {

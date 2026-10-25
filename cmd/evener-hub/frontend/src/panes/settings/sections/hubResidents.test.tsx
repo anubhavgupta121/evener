@@ -15,17 +15,12 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { daemonResidentsStore, resetDaemonResidentsStoreForTests } from "../../../stores/daemonResidents";
 import { HubResidents } from "./hubResidents";
 
 const POLL_INTERVAL_MS = 2000;
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 // Checks the HTML disabled property — no jest-dom in this project.
 // Mirrors QueueStrip.test.tsx's isDisabled helper.

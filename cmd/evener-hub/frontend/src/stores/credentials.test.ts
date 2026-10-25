@@ -12,6 +12,7 @@ import { deferRequest, FakeClient } from "@evener/appwire-client/testing/fakeCli
 import { threadStartedNotification } from "@evener/appwire-client/testing/notifications";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   connectionGeneration,
@@ -31,12 +32,6 @@ import {
 } from "./credentials";
 import { hostsStore } from "./hosts";
 import { setMutationClientIdentityForTests } from "./mutationClientIdentity";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const ONE_INSTANCE: InstanceEntry = {
   name: "work",

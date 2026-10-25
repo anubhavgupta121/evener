@@ -1,10 +1,4 @@
-import type {
-  ConnectionState,
-  InputItem,
-  Thread,
-  ThreadCapabilities,
-  ThreadReadResponse,
-} from "@evener/appwire-client";
+import type { ConnectionState, InputItem, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import { NO_ACTIVE_TURN } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -20,6 +14,7 @@ import type {
 } from "../../../../stores/mutationOutbox";
 import { MutationOutboxIndexedDB } from "../../../../stores/mutationOutboxIndexedDB";
 import { resetThreadsStoreForTests, setMutationStorageForTests, threadsStore } from "../../../../stores/threads";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../../threadTestUtils";
 import { Toast } from "../../../../widgets";
 import { SHOW_DELAY_MS } from "../../../../widgets/hovercard/useFloatingLabel";
 import { getToasts, resetToastStoreForTests } from "../../../../widgets/toast/store";
@@ -36,22 +31,6 @@ import { QueueStrip } from "./QueueStrip";
 import { flushPendingTurnsProjectionForTests } from "./testing/flushPendingTurnsProjection";
 
 const originalClipboard = navigator.clipboard;
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   return {

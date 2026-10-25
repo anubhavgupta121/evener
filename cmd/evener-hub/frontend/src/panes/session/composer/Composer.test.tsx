@@ -34,6 +34,7 @@ import {
   setMutationStorageForTests,
   threadsStore,
 } from "../../../stores/threads";
+import { ALL_CAPABILITIES as FULL_CAPABILITIES } from "../../../threadTestUtils";
 import { Toast } from "../../../widgets";
 import buttonStyles from "../../../widgets/button/button.module.css";
 import { SHOW_DELAY_MS } from "../../../widgets/hovercard/useFloatingLabel";
@@ -83,22 +84,6 @@ beforeAll(async () => {
   installLocalStorage(new MemoryStorage());
   await import("../index");
 });
-
-const FULL_CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 // What a real daemon publishes for an IDLE thread, read off
 // server/appwire_runtime.go's appCapabilities: Send is !active, and Steer,

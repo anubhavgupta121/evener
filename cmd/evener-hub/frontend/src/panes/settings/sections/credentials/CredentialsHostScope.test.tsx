@@ -4,6 +4,7 @@ import { deferRequest, FakeClient } from "@evener/appwire-client/testing/fakeCli
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { resetAuthStatusesStoreForTests } from "../../../../stores/authStatuses";
 import { connectionStore } from "../../../../stores/connection";
 import {
@@ -125,12 +126,6 @@ function codexHostRequest(poll: () => { state: string }): (params: HostRequestPa
     if (params.method === "evener/auth/device/poll") return poll();
     throw new Error(`unexpected forwarded method ${params.method}`);
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 // A read whose answer this test releases itself, so the state under test is the

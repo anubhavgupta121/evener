@@ -1,9 +1,10 @@
 import { ErrorMarketplaceRemoveApplied, type MarketplaceEntry, WireError } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore, useConnectionStore } from "../../../../stores/connection";
 import { extensionsStore, resetExtensionsStoreForTests, useExtensionsStore } from "../../../../stores/extensions";
 import { Toast } from "../../../../widgets";
@@ -44,12 +45,6 @@ const FUTURE: MarketplaceEntry = {
   installLocation: "/home/u/.config/evener/plugins/marketplaces/acme",
   lastUpdated: 1_700_000_000,
 };
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function SheetHarness({
   name,

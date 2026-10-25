@@ -1,8 +1,9 @@
 import type { HostRow, LaunchOptionSchemaResponse } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetLaunchConfigHostStoresForTests, resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
@@ -29,12 +30,6 @@ function hostRow(overrides: Partial<HostRow> & Pick<HostRow, "name">): HostRow {
     removed: false,
     ...overrides,
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 function setQueryCwd(cwd: string | null): void {

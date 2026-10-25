@@ -18,6 +18,7 @@ import {
 } from "@evener/appwire-client";
 import { FakeClient, gateSettlements } from "@evener/appwire-client/testing/fakeClient";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   clearedOutcomeLine,
@@ -40,12 +41,6 @@ import {
   teardownRetryRefusalAction,
 } from "./hostOps";
 import { hostsStore } from "./hosts";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function row(name: string): HostRow {
   return {

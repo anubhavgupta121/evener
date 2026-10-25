@@ -8,14 +8,9 @@ import { HubWriteBusyError } from "@evener/appwire-client/state/extensions";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { threadStartedNotification } from "@evener/appwire-client/testing/notifications";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import { extensionsStore, type MarketplaceCatalogEntry, resetExtensionsStoreForTests } from "./extensions";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 type BrowseResult = { name: string; plugins: MarketplaceCatalogPlugin[] };
 

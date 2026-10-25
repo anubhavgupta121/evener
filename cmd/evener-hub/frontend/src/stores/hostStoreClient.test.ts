@@ -2,8 +2,8 @@
 
 import type { AnyNotification, LaunchConfigClient, PathValidateResponse } from "@evener/appwire-client";
 import type { LaunchLayerClient, MarketplacesClient, PluginsClient } from "@evener/appwire-client/state/extensions";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { beforeEach, expect, expectTypeOf, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import { type HostStoreClient, remoteHostStoreClient } from "./hostStoreClient";
 
@@ -36,12 +36,6 @@ void hostStoreTypeContract;
 // The store-boundary port a REMOTE host's package stores take (component 07b):
 // every request goes through evener/host/request, and only that host's own
 // notifications are delivered (unwrapped). There is no controller fallback.
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });

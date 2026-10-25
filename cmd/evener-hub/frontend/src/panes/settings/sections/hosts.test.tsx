@@ -6,10 +6,11 @@ import {
   RequestTimeoutError,
   WireError,
 } from "@evener/appwire-client";
-import { FakeClient, gateSettlements } from "@evener/appwire-client/testing/fakeClient";
+import { type FakeClient, gateSettlements } from "@evener/appwire-client/testing/fakeClient";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { hostOpsStore } from "../../../stores/hostOps";
 import { hostsStore } from "../../../stores/hosts";
@@ -36,12 +37,6 @@ function refusalReasons(container: HTMLElement): (string | null)[] {
   return [...container.querySelectorAll("[role='alert'][data-reason]")].map((alert) =>
     alert.getAttribute("data-reason"),
   );
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 // openHost opens a host's detail sheet from its list row - every per-host

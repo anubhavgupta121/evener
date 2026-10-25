@@ -2,19 +2,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SettingsOverviewResponse } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetSettingsOverviewStoreForTests, settingsOverviewStore } from "../../../stores/settingsOverview";
 import { resetDisclosureStoreForTests } from "../../../widgets/disclosure/disclosureStore";
 import { AboutSection, MIT_LICENSE_TEXT } from "./about";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });

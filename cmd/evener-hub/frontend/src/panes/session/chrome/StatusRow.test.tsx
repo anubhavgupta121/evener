@@ -1,14 +1,15 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ThreadCapabilities, ThreadModel } from "@evener/appwire-client";
+import type { ThreadModel } from "@evener/appwire-client";
 import { effortLabel, hydrateThread } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetThreadsStoreForTests } from "../../../stores/threads";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../../threadTestUtils";
 import { Toast } from "../../../widgets";
 import { requireClass } from "../../../widgets/internal/requireClass";
 import rawMeterStyles from "../../../widgets/meter/meter.module.css";
@@ -32,22 +33,6 @@ test("phone status CSS reserves a visible model label without dropping fixed fac
   expect(phoneBlock).toContain("padding-inline: 0");
   expect(phoneBlock).toContain("min-width: 1rem");
 });
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 function testModel(overrides: Partial<ThreadModel> = {}): ThreadModel {
   const { jobsTreeRevision = null, ...rest } = overrides;
@@ -94,12 +79,6 @@ function runningModel(overrides: Partial<ThreadModel> = {}): ThreadModel {
     activeTurnStartedAt: new Date(1_000_000).toISOString(),
     ...overrides,
   });
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 beforeEach(() => {
