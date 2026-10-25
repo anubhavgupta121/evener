@@ -1,8 +1,8 @@
 // @vitest-environment node
 
 import type { HostRow, LaunchOptionSchemaResponse } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import { hostsStore } from "./hosts";
 import {
@@ -15,12 +15,6 @@ import {
 // Host-scoped launch-config instances (component 07b). Local is today's store
 // byte-for-byte; a remote host gets its own instance over evener/host/request,
 // with its own schema cache, so one host's schema is never served for another.
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function hostRow(overrides: Partial<HostRow> & Pick<HostRow, "name">): HostRow {
   return {

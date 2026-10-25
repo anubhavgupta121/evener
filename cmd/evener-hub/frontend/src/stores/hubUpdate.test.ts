@@ -1,8 +1,9 @@
 import type { UpdateCheckResponse } from "@evener/appwire-client";
 import { HUB_UNREACHABLE_MESSAGE, WireError } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   APPLY_TIMEOUT_MS,
@@ -12,12 +13,6 @@ import {
   resetHubUpdateStoreForTests,
 } from "./hubUpdate";
 import { resetThreadsStoreForTests } from "./threads";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 const UP_TO_DATE: UpdateCheckResponse = {
   channel: "snapshot",

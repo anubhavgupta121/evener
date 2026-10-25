@@ -1,4 +1,4 @@
-import type { InitializeResponse, Thread, ThreadCapabilities, ThreadReadResponse } from "@evener/appwire-client";
+import type { InitializeResponse, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import {
   APPWIRE_PROTOCOL_VERSION,
   type HubTranscriptDisplayDefault,
@@ -12,28 +12,15 @@ import { FAKE_INITIALIZE_RESULT } from "@evener/appwire-client/testing/fakeSocke
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "../stores/connection";
 import { resetThreadsStoreForTests } from "../stores/threads";
 import { resetTranscriptDisplayStoreForTests, transcriptDisplayStore } from "../stores/transcriptDisplay";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../threadTestUtils";
 import { DevHarness } from "./DevHarness";
 
 // Mirrors the fixture helpers in ../stores/threads.test.ts (duplicated
 // rather than imported: the two test files share no test-utils module).
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 // flushUntil drains microtask turns until `done()` reports true (or a
 // bounded number of turns elapse, so a genuine hang fails fast instead of
@@ -66,11 +53,6 @@ function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
 // locked connect(client) entry point, exactly like DevHarness's own
 // bootstrap effect will find it already wired and skip creating a real
 // AppwireClient (see DevHarness.tsx: bootstrapClient's no-op guard).
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 beforeEach(() => {
   connectionStore.setState({ state: "idle", serverInfo: undefined, features: undefined, client: null });

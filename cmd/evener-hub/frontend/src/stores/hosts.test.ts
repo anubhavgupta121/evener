@@ -9,6 +9,7 @@ import { AppwireClient, type HostListResponse, type HostRow, type RemovedRow, Wi
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { FakeSocket } from "@evener/appwire-client/testing/fakeSocket";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { connectFakeClient } from "../connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   currentHostRegistration,
@@ -17,12 +18,6 @@ import {
   registrySaysHostGone,
   sameHostRegistration,
 } from "./hosts";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function row(name: string): HostRow {
   return {

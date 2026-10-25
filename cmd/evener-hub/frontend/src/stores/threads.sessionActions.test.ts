@@ -1,3 +1,5 @@
+import { appliedReceipt } from "../mutationReceiptTestUtils";
+import { ALL_CAPABILITIES as CAPABILITIES, type TestThreadOverrides, testThread } from "../threadTestUtils";
 import "fake-indexeddb/auto";
 import {
   type AnyNotification,
@@ -6,7 +8,6 @@ import {
   type MethodName,
   type MethodTypes,
   type NotesHumanSetResponse,
-  type QueueState,
   RequestTimeoutError,
   type Thread,
   type ThreadCapabilities,
@@ -107,53 +108,6 @@ afterEach(() => {
   cache.close();
   vi.restoreAllMocks();
 });
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
-
-type TestThreadOverrides = Omit<Partial<Thread>, "evener"> & {
-  evener?: Omit<Thread["evener"], "queue"> & { queue: Partial<QueueState> };
-};
-
-function testThread(ref: string, overrides: TestThreadOverrides = {}): Thread {
-  const { evener, ...threadOverrides } = overrides;
-  const threadID = threadOverrides.id ?? `thr_${ref}`;
-  return {
-    id: threadID,
-    sessionId: `sess_${ref}`,
-    preview: "test",
-    ephemeral: false,
-    modelProvider: "anthropic/claude-sonnet-4-5",
-    createdAt: 1000,
-    updatedAt: 1000,
-    status: { type: "idle" },
-    cwd: "/tmp/project",
-    cliVersion: "1.0.0",
-    source: "evener",
-    evener: {
-      ref,
-      instanceId: threadID,
-      mutationStateAuthoritative: true,
-      capabilities: CAPABILITIES,
-      ...evener,
-      queue: { revision: 0, ...evener?.queue },
-    },
-    ...threadOverrides,
-  };
-}
 
 function readResponse(ref: string, overrides: TestThreadOverrides = {}): ThreadReadResponse {
   const client = connectionStore.getState().client;
@@ -299,6 +253,16 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+// onTurnStart answers turn/start with the standard applied mutation: a fresh
+// in-progress turn_1 and the applied receipt — the handler 33 of this file's
+// tests copy-pasted inline.
+function onTurnStart(fake: FakeClient): void {
+  fake.on("turn/start", (params) => ({
+    turn: { id: "turn_1", status: "inProgress", itemsView: "" },
+    receipt: mutationReceipt(params.clientMutationId),
+  }));
 }
 
 describe("useThreadsStore session actions (setModel/setReasoningEffort/setGoal/rename/compact/shutdown/clearThread/forkFromTurn)", () => {
@@ -1761,12 +1725,7 @@ describe("useThreadsStore.drainAsSteer", () => {
   test("a queueChanged naming consumed ids settles the matching optimistic queue record", async () => {
     const fake = connectMutationClient();
     fake.on("turn/queue", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thr_ref_a",
-        projectionState: "pending",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thr_ref_a", { projectionState: "pending" }),
     }));
 
     await threadsStore.getState().queue("ref_a", "queued");
@@ -1808,12 +1767,7 @@ describe("useThreadsStore.drainAsSteer", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     fake.on("turn/queue", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thr_ref_a",
-        projectionState: "pending",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thr_ref_a", { projectionState: "pending" }),
     }));
 
     await threadsStore.getState().queue("ref_a", "queued");
@@ -3170,10 +3124,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     // connection opened here, so it is the SEND that meets the wedge below
     // rather than the hydration's own reconciliation reads.
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // Retire the connection, then make the factory's next open never answer:
     // storage is wedged for every call the send makes.
@@ -3209,10 +3160,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // The send's open lands on a database that needs its schema again, and the
     // upgrade's first store creation throws.
@@ -3235,10 +3183,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const indexedDB = new IDBFactory();
     const databaseName = "evener-mutation-outbox-send-fallback-denied";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     storage.close();
     const open = indexedDB.open.bind(indexedDB);
@@ -3264,10 +3209,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     vi.stubGlobal("indexedDB", undefined);
     try {
       const fake = connectMutationClient();
-      fake.on("turn/start", (params) => ({
-        turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-        receipt: mutationReceipt(params.clientMutationId),
-      }));
+      onTurnStart(fake);
       await ensureActiveMutationTarget(fake, "ref_a");
 
       await threadsStore.getState().send("ref_a", "sent with no IndexedDB");
@@ -3313,10 +3255,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const indexedDB = new IDBFactory();
     const databaseName = "evener-mutation-outbox-send-fallback-blocked";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     storage.close();
     const open = indexedDB.open.bind(indexedDB);
@@ -3417,10 +3356,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const indexedDB = new IDBFactory();
     const databaseName = "evener-mutation-outbox-send-fallback-reconcile-wedge";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // Retire the connection and wedge every open on the outbox database, then
     // fail a reconciliation through it: its outbox read meets the same
@@ -3478,10 +3414,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // Hold a reconcile open forever: its outbox read never settles.
     const parked = parkRefReconcileRead(storage, "ref_a");
@@ -3532,10 +3465,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     const parked = parkRefReconcileRead(storage, "ref_a");
     void threadsStore.getState().refreshThread("ref_a");
     await flushUntilArrived("the reconcile read to park", parked.opened);
@@ -3587,10 +3517,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const indexedDB = new IDBFactory();
     const databaseName = "evener-mutation-outbox-send-fallback-pending-wedge";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     storage.close();
     const openSpy = wedgeDatabaseOpens(indexedDB, databaseName);
@@ -3874,10 +3801,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const indexedDB = new IDBFactory();
     const databaseName = "evener-mutation-outbox-fallback-order";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     // A enqueues durably and, with no handler, is attempted but never
     // delivered: it stays a "submitting" row and keeps the ref pinned.
     await threadsStore.getState().queue("ref_a", "A");
@@ -3914,10 +3838,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     let enqueueAttempts = 0;
     storage.enqueueIntent = async () => {
@@ -3963,10 +3884,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     await nextMacrotask();
     await threadsStore.getState().refreshThread("ref_a");
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     expect((await storage.listOutbox("ref_a")).map((record) => record.state)).toEqual(["canceled"]);
 
     // Storage wedges; the send must still reach the daemon.
@@ -3995,10 +3913,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-commit-rearm";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     const realEnqueue = storage.enqueueIntent.bind(storage);
     let releaseWrite: () => void = () => {};
@@ -4066,10 +3981,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     await nextMacrotask();
     await threadsStore.getState().refreshThread("ref_a");
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     let aAttempts = 0;
     let releaseA: () => void = () => {};
@@ -4138,10 +4050,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
       }),
     );
     await threadsStore.getState().ensureThread("ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     await expect(threadsStore.getState().send("ref_a", "blocked")).rejects.toThrow(
       "Send isn't available until this session is resumed",
@@ -4239,10 +4148,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-stale-marker";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // After the durable send's row settles, make the clearing refresh's read
     // fail. listOptimistic is the refresh's read that the dispatcher's own
@@ -4297,10 +4203,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-stale-read-clobber";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     // Park the refresh's OWN read after A's row settles, then let it reject on
     // demand - an explicit wrapper, not a stack sniff. listOptimistic is also
@@ -4399,10 +4302,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-general-refresh";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     // Arm the failing reads at the drain's own attempt: the drain's remaining
     // work needs no list read, and the post-attempt clearing refresh is the
     // first read after this point. Both halves fail, so nothing this read can
@@ -4452,10 +4352,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-partial-read";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     const realMarkAttempted = storage.markAttempted.bind(storage);
     storage.markAttempted = async (id) => {
       const marked = await realMarkAttempted(id);
@@ -4499,10 +4396,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-settle-during-read";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     // The refresh's outbox read parks on a gate; listOptimistic stays real, so
     // the read's Promise.all waits on the outbox half alone.
     let releaseRead: (rows: MutationOutboxRecord[]) => void = () => {};
@@ -4601,10 +4495,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-unregistered-settle";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     // A store commit arms the ref for dispatch, then settles away, leaving the
     // ref with nothing the guard holds.
     await threadsStore.getState().queue("ref_a", "ours");
@@ -4653,10 +4544,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-unregistered-cancel";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     fake.on("thread/shutdown", () => ({}));
     await threadsStore.getState().queue("ref_a", "ours");
     for (let i = 0; i < 10; i += 1) await nextMacrotask();
@@ -4707,10 +4595,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-stop-names-canceled-ids";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     fake.on("thread/shutdown", () => ({}));
     // A store commit arms the ref and registers its row, which then settles
     // away, leaving the guard empty and the arm in place.
@@ -4760,10 +4645,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-discard-recovery-id";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     await threadsStore.getState().queue("ref_a", "ours");
     for (let i = 0; i < 10; i += 1) await nextMacrotask();
     const ours = await storage.listOutbox("ref_a");
@@ -4808,10 +4690,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-seed-on-read";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     // A durable queued row written straight to storage: no commit of ours, no
     // dispatch of ours.
     const persisted = await storage.enqueueIntent(queueIntent("persisted"));
@@ -4848,10 +4727,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-settle-clears";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     let settled = false;
     const realSettle = storage.settleReceipt.bind(storage);
@@ -4901,10 +4777,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     const databaseName = "evener-mutation-outbox-reload-failed-read";
     const { storage, fake } = await hydratedFallbackTarget({ indexedDB, databaseName });
     await nextMacrotask();
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     await storage.enqueueIntent(queueIntent("persisted"));
     await threadsStore.getState().refreshThread("ref_a");
     // Let the seeding read's own reconciliation settle before anything breaks
@@ -4966,10 +4839,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     // merges into the same boot generation instead of being invalidated.
     fake.on("thread/read", (params) => versionedReadResponse(params.ref ?? "ref_a"));
     await threadsStore.getState().ensureThread("ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     storage.close();
     const openSpy = wedgeDatabaseOpens(indexedDB, databaseName);
@@ -5021,10 +4891,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
     let enqueueAttempts = 0;
     const realEnqueue = storage.enqueueIntent.bind(storage);
     storage.enqueueIntent = (...args: Parameters<typeof realEnqueue>) => {
@@ -5182,10 +5049,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     const realReadStopEpoch = storage.readStopEpoch.bind(storage);
     let captureReads = 0;
@@ -5218,10 +5082,7 @@ describe("Stop cancellation durability across reload, tabs, and resume", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     await ensureActiveMutationTarget(fake, "ref_a");
-    fake.on("turn/start", (params) => ({
-      turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-      receipt: mutationReceipt(params.clientMutationId),
-    }));
+    onTurnStart(fake);
 
     const committedIds: string[] = [];
     const unsubscribe = subscribeMutationPersistence((refs, commit) => {
@@ -8480,10 +8341,7 @@ test("a send whose durable write the browser refuses for quota goes out directly
   setMutationStorageForTests(storage);
   const fake = connectMutationClient();
   await threadsStore.getState().ensureThread("ref_a");
-  fake.on("turn/start", (params) => ({
-    turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-    receipt: mutationReceipt(params.clientMutationId),
-  }));
+  onTurnStart(fake);
   const unsubscribed = nextHandledRequest(fake, "thread/unsubscribe", () => ({}));
   const add = vi.spyOn(IDBObjectStore.prototype, "add").mockImplementationOnce(() => {
     throw new DOMException("storage full", "QuotaExceededError");
@@ -8565,10 +8423,7 @@ test("a storage-timeout reconcile does not erase a genuine reconciliation failur
   setMutationStorageForTests(storage);
   const fake = connectMutationClient();
   await ensureActiveMutationTarget(fake, "ref_a");
-  fake.on("turn/start", (params) => ({
-    turn: { id: "turn_1", status: "inProgress", itemsView: "" },
-    receipt: mutationReceipt(params.clientMutationId),
-  }));
+  onTurnStart(fake);
 
   // The genuine failure: a blocked shared record or a real reconcile conflict.
   threadsStore.setState({ mutationReconciliationFailures: new Set(["ref_a"]) });

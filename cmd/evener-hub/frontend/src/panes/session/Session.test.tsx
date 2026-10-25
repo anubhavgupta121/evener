@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AnyNotification, Thread, ThreadCapabilities, ThreadReadResponse } from "@evener/appwire-client";
+import type { AnyNotification, Thread, ThreadReadResponse } from "@evener/appwire-client";
 import * as appwireClient from "@evener/appwire-client";
 import { AppwireClient, makeTranscriptDisplayConfig, WireError } from "@evener/appwire-client";
 import { keyID } from "@evener/appwire-client/state/navigation";
@@ -13,6 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { StrictMode, useSyncExternalStore } from "react";
 import { afterEach, beforeAll, beforeEach, expect, onTestFinished, test, vi } from "vitest";
+import { connectFakeClient } from "../../connectionTestUtils";
+import { appliedReceipt } from "../../mutationReceiptTestUtils";
 import { activitySidebarStore, resetActivitySidebarStoreForTests } from "../../shell/activitybar/activitySidebarStore";
 import { ClientProvider } from "../../shell/clientContext";
 import { conversationPaneLifetime } from "../../shell/paneLifetime";
@@ -45,6 +47,7 @@ import {
   threadsStore,
 } from "../../stores/threads";
 import { transcriptDisplayStore } from "../../stores/transcriptDisplay";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../../threadTestUtils";
 import { Toast } from "../../widgets";
 import { emptyStateReasons } from "../../widgets/emptystate/emptyStateTestUtils";
 import { requireClass } from "../../widgets/internal/requireClass";
@@ -132,22 +135,6 @@ async function settleForceStop(ref: string): Promise<void> {
   await flushPendingTurnsProjectionForTests();
 }
 
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
-
 function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   return {
     id: `thr_${ref}`,
@@ -204,12 +191,6 @@ function readOnlyEntityThread(ref: string, text: string): ThreadReadResponse {
       },
     ],
   });
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 // flushUntil drains microtask turns until `done()` reports true - same
@@ -3333,12 +3314,7 @@ test("heldEpoch bumps on arrival only - never on removal", async () => {
       return new Promise((resolve) => {
         steerSent.resolve(() =>
           resolve({
-            receipt: {
-              clientMutationId: params.clientMutationId,
-              disposition: "applied",
-              threadId: "thr_ref_a",
-              projectionState: "reflected",
-            },
+            receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
           }),
         );
       });

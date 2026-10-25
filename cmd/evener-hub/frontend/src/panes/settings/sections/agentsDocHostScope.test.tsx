@@ -1,8 +1,8 @@
 import type { AgentsDocResponse, HostRow } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import {
   agentsDocStoreForHost,
   resetAgentsDocHostInstancesForTests,
@@ -37,12 +37,6 @@ const CONTROLLER_DOC: AgentsDocResponse = {
   exists: true,
   content: "# controller\n",
 };
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function editor(): HTMLTextAreaElement {
   return screen.getByRole("textbox", { name: "AGENTS.md contents" }) as HTMLTextAreaElement;

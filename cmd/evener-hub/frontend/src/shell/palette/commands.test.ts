@@ -3,6 +3,8 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { IDBFactory } from "fake-indexeddb";
 import { lazy } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { appliedReceipt } from "../../mutationReceiptTestUtils";
+import { ALL_CAPABILITIES as CAPS } from "../../threadTestUtils";
 import "../../panes/sessionPanels";
 import { QUEUE_EMPTY, QUEUE_UNAVAILABLE, STEER_UNAVAILABLE } from "@evener/appwire-client";
 import { keyID } from "@evener/appwire-client/state/navigation";
@@ -57,22 +59,6 @@ afterAll(
 beforeAll(() => {
   installLocalStorage(new MemoryStorage());
 });
-
-const CAPS: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 const NO_CAPS: ThreadCapabilities = {
   send: false,
@@ -498,12 +484,7 @@ test("/steer is blocked with the floor's message and makes no wire call when the
 test("/steer sends turn/steer when a turn is active", async () => {
   const fake = connectFake();
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   focusSession("ref_a");
   seedModel("ref_a", { status: { type: "active" }, activeTurnId: "t1" });
@@ -518,12 +499,7 @@ test("/steer sends turn/steer when a turn is active", async () => {
 test("/steer sends turn/steer while the session is active with no open turn row yet", async () => {
   const fake = connectFake();
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   focusSession("ref_a");
   seedModel("ref_a", { status: { type: "active" }, activeTurnId: undefined });
@@ -626,12 +602,7 @@ test("/queue and /drain-as-steer each block with their own no-active-turn messag
 test("/interrupt sends turn/interrupt for a working session whose turn has no name yet", async () => {
   const fake = connectFake();
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   focusSession("ref_a");
   seedModel("ref_a", { status: { type: "active" }, activeTurnId: undefined });

@@ -1,3 +1,5 @@
+import { connectFakeClient } from "../connectionTestUtils";
+import { ALL_CAPABILITIES as CAPABILITIES } from "../threadTestUtils";
 import { observeProductionEntryForTests } from "./testing/entryProductionHarness";
 // The web store's adoption of the shared reducer's versioned-history contract
 // (task-15-report.md's "Contract for Tasks 16/17"; spec docs/superpowers/specs/
@@ -8,13 +10,7 @@ import { observeProductionEntryForTests } from "./testing/entryProductionHarness
 // re-reads and replaces, and a daemonless backfill page keeps a page newer
 // than the one it raced.
 import "fake-indexeddb/auto";
-import type {
-  AnyNotification,
-  ThreadCapabilities,
-  ThreadItem,
-  ThreadReadResponse,
-  ThreadTurnsListResponse,
-} from "@evener/appwire-client";
+import type { AnyNotification, ThreadItem, ThreadReadResponse, ThreadTurnsListResponse } from "@evener/appwire-client";
 import { WireError } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -31,22 +27,6 @@ import {
 
 const REF = "ref_h";
 const THREAD_ID = "thr_h";
-
-const CAPABILITIES: ThreadCapabilities = {
-  send: true,
-  steer: true,
-  interrupt: true,
-  compact: true,
-  clear: true,
-  forkFromTurn: true,
-  shutdown: true,
-  changeModel: true,
-  changeVisionModel: true,
-  queue: true,
-  goal: true,
-  sharedNotes: true,
-  rename: true,
-};
 
 interface Snapshot {
   bootGeneration?: string;
@@ -115,12 +95,6 @@ function page(
     snapshot: { incarnation: options.incarnation ?? "inc_a", length: options.length ?? 100 },
     ...(options.authoritative === undefined ? {} : { authoritative: options.authoritative }),
   };
-}
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
 }
 
 function modelName(): string | undefined {

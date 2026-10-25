@@ -1,20 +1,14 @@
 import type { LaunchConfigLayer, LaunchOptionSchemaResponse } from "@evener/appwire-client";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
 import { Toast } from "../../../widgets";
 import { getToasts } from "../../../widgets/toast/store";
 import { ProjectSection } from "./project";
 import { shownReasons } from "./reasonTestUtils";
-
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
 
 function setQueryCwd(cwd: string | null): void {
   const url = new URL(window.location.href);
