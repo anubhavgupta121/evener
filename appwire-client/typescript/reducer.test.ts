@@ -34,6 +34,7 @@ import { itemAt, turnAt } from "./testing/modelAccessors";
 import type {
   AnyNotification,
   EvenerDelegateInfo,
+  HistoryUpdatedParams,
   InputItem,
   QueueState,
   SandboxEscalationRequested,
@@ -106,29 +107,23 @@ test("recorded history rejects equal-version explicit empty fields but accepts a
     ],
   });
   const update = (version: number, text: string, images: typeof heldImages) =>
-    applyNotification(
+    applyHistory(
       model,
       {
-        method: "history/updated",
-        params: {
-          threadId: "thr_t",
-          ref: "ref_t",
-          bootGeneration: "",
-          epoch: 1,
-          snapshot: { incarnation: "inc-1", length: version },
-          items: [
-            {
-              id: "item_1",
-              transcriptKey: "entry-4/item-0",
-              turnId: "turn_1",
-              type: "assistant",
-              text,
-              images,
-              version,
-              status: "completed",
-            },
-          ],
-        },
+        snapshot: { incarnation: "inc-1", length: version },
+
+        items: [
+          {
+            id: "item_1",
+            transcriptKey: "entry-4/item-0",
+            turnId: "turn_1",
+            type: "assistant",
+            text,
+            images,
+            version,
+            status: "completed",
+          },
+        ],
       },
       1000 + version,
     );
@@ -290,6 +285,30 @@ function testHydrate(overrides: TestThreadOverrides = {}): ThreadModel {
 // same-position (i.e. still-undefined) siblings — switching every
 // testHydrate call to v6 reorders any of those fixtures that hydrate 2+
 // undated items in one turn, a regression this split avoids.
+// applyHistory folds one history/updated notification onto `model`, carrying
+// this file's standard baseline identity (threadId "thr_t", ref "ref_t",
+// bootGeneration "", epoch 1, snapshot incarnation "inc-1" length 1) plus the
+// caller's distinct content — items or turns — and any baseline field that
+// differs. The optional arrival time passes straight through to
+// applyNotification.
+function applyHistory(model: ThreadModel, params: Partial<HistoryUpdatedParams>, at: number): ThreadModel {
+  return applyNotification(
+    model,
+    {
+      method: "history/updated",
+      params: {
+        threadId: "thr_t",
+        ref: "ref_t",
+        bootGeneration: "",
+        epoch: 1,
+        snapshot: { incarnation: "inc-1", length: 1 },
+        ...params,
+      },
+    },
+    at,
+  );
+}
+
 function testHydrateV6(overrides: TestThreadOverrides = {}): ThreadModel {
   const thread = testThread(overrides);
   return hydrateThread(
@@ -725,40 +744,24 @@ test("item/completed inserts an item that had no preceding item/started", () => 
   // turn emits turn/started with an empty turn, then item/completed for the
   // userMessage — item/started is never sent for it).
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
   expect(turnAt(model, 0).items).toHaveLength(0);
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "Hi there", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "Hi there", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -776,45 +779,29 @@ test("item/completed inserts an item that had no preceding item/started", () => 
 // verbatim rather than leaving renderers to reach for turnId.
 test("wire items carry transcriptEntryIndex into the model - it is what thread/fork's divergence position is read from", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_2", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_2", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_2",
-              transcriptEntryIndex: 5,
-              text: "second task",
-              status: "completed",
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_2",
+            transcriptEntryIndex: 5,
+            text: "second task",
+            status: "completed",
           },
-        ],
-      },
+          turnId: "turn_2",
+        },
+      ],
     },
     1002,
   );
@@ -919,18 +906,10 @@ test("evener/jobs/treeUpdated updates only jobsTreeRevision and jobsUpdatedAt, n
 
 test("turn/completed applies with authoritative ref and thread identity", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
@@ -1087,60 +1066,36 @@ test("item/completed's own reasoning text differs from the seeded chunks and rep
   // (mergeCompletedText): the settle carries the complete flattened reasoning,
   // so it corrects the row instead of leaving the stale seed on screen.
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "reasoning", id: "item_r", turnId: "turn_1", text: "stale partial seed", status: "inProgress" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "reasoning", id: "item_r", turnId: "turn_1", text: "stale partial seed", status: "inProgress" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
   expect(itemAt(turnAt(model, 0), 0).reasoningSummaries).toEqual([["stale partial seed"]]);
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "reasoning", id: "item_r", turnId: "turn_1", text: "settled reasoning", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "reasoning", id: "item_r", turnId: "turn_1", text: "settled reasoning", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1003,
   );
@@ -1185,45 +1140,29 @@ test("item/completed resolves a data-carrying user image to a data: URI src (kat
   // src the browser 404s on, so ImageGallery's onError dropped the
   // thumbnail and the transcript showed no image at all.
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_1",
-              text: "[image 1]what is this?",
-              status: "completed",
-              images: [{ type: "image", mediaType: "image/png", data: "iVBORw0KGgo=", name: "tiny.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_1",
+            text: "[image 1]what is this?",
+            status: "completed",
+            images: [{ type: "image", mediaType: "image/png", data: "iVBORw0KGgo=", name: "tiny.png" }],
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -1234,45 +1173,29 @@ test("item/completed resolves a data-carrying user image to a data: URI src (kat
 
 test("item/completed preserves an input image's name alongside a src resolved from a different field", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_1",
-              text: "look at this",
-              status: "completed",
-              images: [{ type: "image", path: "uploads/photo.jpg", name: "photo.jpg" }],
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_1",
+            text: "look at this",
+            status: "completed",
+            images: [{ type: "image", path: "uploads/photo.jpg", name: "photo.jpg" }],
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -1284,46 +1207,30 @@ test("item/completed preserves an input image's name alongside a src resolved fr
 
 test("item/completed preserves an output image's name/path/source alongside a src resolved from yet another field", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "shell",
-              callId: "call_1",
-              status: "completed",
-              outputImages: [{ source: "written-file", name: "plot.png", path: "out/plot.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "shell",
+            callId: "call_1",
+            status: "completed",
+            outputImages: [{ source: "written-file", name: "plot.png", path: "out/plot.png" }],
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -1342,55 +1249,39 @@ test("item/completed preserves an output image's name/path/source alongside a sr
 // own name as an image.
 test("item/completed resolves a sha-routed tool-result image's src from its url", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_shot",
-              turnId: "turn_1",
-              toolName: "screenshot",
-              callId: "call_shot",
-              status: "completed",
-              outputImages: [
-                {
-                  source: "tool-result",
-                  name: "screenshot",
-                  mediaType: "image/png",
-                  size: 11,
-                  sha: "abc",
-                  url: "/s/02wMz5Txv733WHFsVy66SR/images/abc",
-                },
-              ],
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_shot",
             turnId: "turn_1",
+            toolName: "screenshot",
+            callId: "call_shot",
+            status: "completed",
+            outputImages: [
+              {
+                source: "tool-result",
+                name: "screenshot",
+                mediaType: "image/png",
+                size: 11,
+                sha: "abc",
+                url: "/s/02wMz5Txv733WHFsVy66SR/images/abc",
+              },
+            ],
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -1514,45 +1405,29 @@ test("a sha+bytes image with no known session keeps the data-URI (unknown-sessio
 
 test("a live item/completed with sha but no stamped url resolves to the hydrated session's route", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_1",
-              text: "look at this",
-              status: "completed",
-              images: [{ type: "image", name: "photo.png", metadata: { sha: SHA_IMAGE } }],
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_1",
+            text: "look at this",
+            status: "completed",
+            images: [{ type: "image", name: "photo.png", metadata: { sha: SHA_IMAGE } }],
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -2833,18 +2708,10 @@ test("mergeTurnHistory counts surviving output despite a folded result's discard
     turns: [{ id: "turn-live", status: "inProgress", itemsView: "full", items: [] }],
   });
   const startItem = (item: ThreadItem, at: number): ThreadModel =>
-    applyNotification(
+    applyHistory(
       model,
       {
-        method: "history/updated",
-        params: {
-          threadId: "thr_t",
-          ref: "ref_t",
-          bootGeneration: "",
-          epoch: 1,
-          snapshot: { incarnation: "inc-1", length: 1 },
-          items: [{ ...item, turnId: "turn-live" }],
-        },
+        items: [{ ...item, turnId: "turn-live" }],
       },
       at,
     );
@@ -5268,31 +5135,23 @@ test("item/started upserts an existing transcript key instead of appending a dup
       },
     ],
   });
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              id: "live-id",
-              transcriptKey: "same-key",
-              position: { entry: 1, item: 1 },
-              turnId: "turn_1",
-              type: "agentMessage",
-              text: "new",
-              status: "inProgress",
-            },
+      items: [
+        {
+          ...{
+            id: "live-id",
+            transcriptKey: "same-key",
+            position: { entry: 1, item: 1 },
             turnId: "turn_1",
+            type: "agentMessage",
+            text: "new",
+            status: "inProgress",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     2000,
   );
@@ -5321,31 +5180,23 @@ test("item/completed settles an existing transcript key despite a different disp
       },
     ],
   });
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              id: "live-id",
-              transcriptKey: "stable-key",
-              position: { entry: 1, item: 0 },
-              turnId: "turn_1",
-              type: "agentMessage",
-              text: "settled",
-              status: "completed",
-            },
+      items: [
+        {
+          ...{
+            id: "live-id",
+            transcriptKey: "stable-key",
+            position: { entry: 1, item: 0 },
             turnId: "turn_1",
+            type: "agentMessage",
+            text: "settled",
+            status: "completed",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     2000,
   );
@@ -5369,23 +5220,15 @@ test("item/completed retains legacy display-ID matching when stable identity is 
       },
     ],
   });
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ id: "legacy-id", turnId: "turn_1", type: "agentMessage", text: "settled", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ id: "legacy-id", turnId: "turn_1", type: "agentMessage", text: "settled", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     },
     2000,
   );
@@ -5479,46 +5322,30 @@ test("item lifecycle never clobbers the wire's thread-level askPending", () => {
 // denied/errored ask is distinguishable from a clean completion.
 test("item/completed maps the wire item's error onto the model (live path)", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "ask_user",
-              callId: "call_1",
-              error: "denied: user rejected",
-              status: "completed",
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "ask_user",
+            callId: "call_1",
+            error: "denied: user rejected",
+            status: "completed",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -5560,47 +5387,31 @@ test("hydrateThread maps a settled item's error onto the model (snapshot path)",
 // footer text.
 test("item/completed maps the wire item's exitCode onto the model (live path)", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "shell",
-              callId: "call_1",
-              output: "boom",
-              exitCode: 2,
-              status: "completed",
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "shell",
+            callId: "call_1",
+            output: "boom",
+            exitCode: 2,
+            status: "completed",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -6224,18 +6035,10 @@ test("a warning item survives a bare turn/completed settle stamp (composition wi
     1002,
   );
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
     },
     1003,
   );
@@ -6846,75 +6649,51 @@ test("a message-less warning with a title leaves text blank instead of falling b
 
 test("item/completed with its own argumentsJson replaces the old value (wire truth wins)", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "bash",
-              callId: "call_1",
-              argumentsJson: '{"command":"ls"}',
-              status: "inProgress",
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "bash",
+            callId: "call_1",
+            argumentsJson: '{"command":"ls"}',
+            status: "inProgress",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "bash",
-              callId: "call_1",
-              argumentsJson: '{"command":"ls -la"}',
-              status: "completed",
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "bash",
+            callId: "call_1",
+            argumentsJson: '{"command":"ls -la"}',
+            status: "completed",
           },
-        ],
-      },
+          turnId: "turn_1",
+        },
+      ],
     },
     1003,
   );
@@ -6925,39 +6704,23 @@ test("item/completed with its own argumentsJson replaces the old value (wire tru
 
 test("item/completed inserting a never-started item has no argumentsJSON (no crash, no fabrication)", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "hi", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "hi", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -7315,18 +7078,10 @@ test("pendingEscalations survives a turn/started notification — thread-level s
     evener: { ref: "ref_t", capabilities: CAPABILITIES, queue: { revision: 0 }, pendingEscalations: [escalation] },
   });
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
@@ -7339,34 +7094,18 @@ test("pendingEscalations survives a turn/completed bare-stamp settle — thread-
   let model = testHydrate({
     evener: { ref: "ref_t", capabilities: CAPABILITIES, queue: { revision: 0 }, pendingEscalations: [escalation] },
   });
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
     },
     1002,
   );
@@ -7590,39 +7329,23 @@ test("item/completed without a failure count leaves the model's figure alone", (
     status: { type: "active" },
     evener: { ref: "ref_t", capabilities: CAPABILITIES, queue: { revision: 0 }, failedToolCalls: 3 },
   });
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "Hi there", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "userMessage", id: "item_user", turnId: "turn_1", text: "Hi there", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1002,
   );
@@ -7715,18 +7438,10 @@ test("hydrateThread preserves clientMutationId on authoritative transcript items
 // render calmer than it does today, which is the opposite of the point.
 test("evener/thread/modelRetry records retry state and leaves lastFrameAt alone", () => {
   let model = testHydrate();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
@@ -7801,23 +7516,15 @@ function withActiveRetry(): ThreadModel {
 
 test("modelRetry survives an assistant message delta", () => {
   let model = withActiveRetry();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "systemMessage", id: "item_sys_1", turnId: "turn_1", status: "completed", text: "note" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "systemMessage", id: "item_sys_1", turnId: "turn_1", status: "completed", text: "note" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1003,
   );
@@ -7826,23 +7533,15 @@ test("modelRetry survives an assistant message delta", () => {
 
 test("modelRetry survives a userMessage item completion", () => {
   let model = withActiveRetry();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "userMessage", id: "item_user_1", turnId: "turn_1", status: "completed", text: "hi" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "userMessage", id: "item_user_1", turnId: "turn_1", status: "completed", text: "hi" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1003,
   );
@@ -7851,40 +7550,22 @@ test("modelRetry survives a userMessage item completion", () => {
 
 test("modelRetry clears once the model's own output item (agentMessage) completes", () => {
   let model = withActiveRetry();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          { ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "inProgress" }, turnId: "turn_1" },
-        ],
-      },
+      items: [{ ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "inProgress" }, turnId: "turn_1" }],
     },
     1003,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "completed", text: "done" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+      items: [
+        {
+          ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "completed", text: "done" },
+          turnId: "turn_1",
+        },
+      ],
     },
     1004,
   );
@@ -8278,76 +7959,52 @@ test("an empty input images list never erases the images an older page carries",
 // stale attachment silently wins — this case is what turns that red.
 test("item/completed carrying a different images list overrides the images the item already had", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_1",
-              text: "look",
-              status: "completed",
-              images: [{ type: "image", mediaType: "image/png", data: "iVBORw0KGgo=", name: "shot.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_1",
+            text: "look",
+            status: "completed",
+            images: [{ type: "image", mediaType: "image/png", data: "iVBORw0KGgo=", name: "shot.png" }],
           },
-        ],
-      },
-    } as AnyNotification,
+          turnId: "turn_1",
+        },
+      ],
+    },
     1002,
   );
   expect(itemAt(turnAt(model, 0), 0).images).toEqual([{ src: "data:image/png;base64,iVBORw0KGgo=", name: "shot.png" }]);
 
   // Same item, and this settle's own image is the one that must win.
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "userMessage",
-              id: "item_user",
-              turnId: "turn_1",
-              text: "look",
-              status: "completed",
-              images: [{ type: "image", mediaType: "image/png", data: "BAUG", name: "new.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "userMessage",
+            id: "item_user",
             turnId: "turn_1",
+            text: "look",
+            status: "completed",
+            images: [{ type: "image", mediaType: "image/png", data: "BAUG", name: "new.png" }],
           },
-        ],
-      },
-    } as AnyNotification,
+          turnId: "turn_1",
+        },
+      ],
+    },
     1003,
   );
   expect(itemAt(turnAt(model, 0), 0).images).toEqual([{ src: "data:image/png;base64,BAUG", name: "new.png" }]);
@@ -8355,79 +8012,55 @@ test("item/completed carrying a different images list overrides the images the i
 
 test("item/completed carrying a different outputImages list overrides the output images the item already had", () => {
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "shell",
-              callId: "call_1",
-              status: "completed",
-              outputImages: [{ source: "written-file", name: "plot.png", path: "out/plot.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "shell",
+            callId: "call_1",
+            status: "completed",
+            outputImages: [{ source: "written-file", name: "plot.png", path: "out/plot.png" }],
           },
-        ],
-      },
-    } as AnyNotification,
+          turnId: "turn_1",
+        },
+      ],
+    },
     1002,
   );
   expect(itemAt(turnAt(model, 0), 0).outputImages).toEqual([
     { src: "out/plot.png", name: "plot.png", path: "out/plot.png", source: "written-file" },
   ]);
 
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{
-              type: "commandExecution",
-              id: "item_tool",
-              turnId: "turn_1",
-              toolName: "shell",
-              callId: "call_1",
-              status: "completed",
-              outputImages: [{ source: "tool-result", url: "/s/sess_t/images/capture", name: "capture.png" }],
-            },
+      items: [
+        {
+          ...{
+            type: "commandExecution",
+            id: "item_tool",
             turnId: "turn_1",
+            toolName: "shell",
+            callId: "call_1",
+            status: "completed",
+            outputImages: [{ source: "tool-result", url: "/s/sess_t/images/capture", name: "capture.png" }],
           },
-        ],
-      },
-    } as AnyNotification,
+          turnId: "turn_1",
+        },
+      ],
+    },
     1003,
   );
   expect(itemAt(turnAt(model, 0), 0).outputImages).toEqual([
@@ -8473,18 +8106,10 @@ test("item/completed carrying an explicit empty outputImages list clears the ima
     );
 
   let model = testHydrateV6();
-  model = applyNotification(
+  model = applyHistory(
     model,
     {
-      method: "history/updated",
-      params: {
-        threadId: "thr_t",
-        ref: "ref_t",
-        bootGeneration: "",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
-      },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "" }],
     },
     1001,
   );
