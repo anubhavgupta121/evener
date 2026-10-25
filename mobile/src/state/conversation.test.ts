@@ -115,6 +115,20 @@ const ALL_TRUE_CAPS: ThreadCapabilities = {
 	pageBefore: true,
 };
 
+// The read a test scripts before opening the store: one conversation over an
+// empty activity view, with the projection's optional fields as overrides.
+function readResult(
+	conversation: MobileConversation,
+	over: Partial<ConversationReadProjection> = {},
+): ConversationReadProjection {
+	return {
+		olderCursor: null,
+		conversation,
+		activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
+		...over,
+	};
+}
+
 // The hub refusing a mutation whose capability moved on without a status frame
 // this client saw (F11: a real WireError, matched by identity).
 const refusal = () =>
@@ -2714,11 +2728,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-proj" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-proj" }), {
 				activity: activityView,
 				olderCursor: "cursor-initial",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(store.getState().conversation?.threadId).toBe("thread-proj");
 			expect(store.getState().olderCursor).toBe("cursor-initial");
@@ -2739,16 +2752,7 @@ describe("ConversationStore", () => {
 		it("preserves olderCursor across openProjected", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation(),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "page-1",
-			};
+			service.readProjectionResult = readResult(makeConversation(), { olderCursor: "page-1" });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().olderCursor).toBe("page-1");
 		});
@@ -2759,16 +2763,7 @@ describe("ConversationStore", () => {
 			// Set draft from a prior thread
 			store.getState().setDraft("old thread draft");
 			// Open a new projected conversation
-			service.readProjectionResult = {
-				conversation: makeConversation(),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation(), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Draft should be reset — not carried from the prior thread.
 			expect(store.getState().draft).toBe("");
@@ -2784,11 +2779,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			// Emit a notification that both stores should handle
 			const n: AnyNotification = {
@@ -3014,16 +3008,7 @@ describe("ConversationStore", () => {
 				instanceId: "instance-1",
 				items: [{ kind: "user", id: "new", text: "new", position: { entry: 2, item: 0 } }],
 			});
-			service.readProjectionResult = {
-				conversation: latest,
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "cursor-1",
-			};
+			service.readProjectionResult = readResult(latest, { olderCursor: "cursor-1" });
 			service.olderItems = {
 				items: [{ kind: "user", id: "old", text: "old", position: { entry: 1, item: 0 } }],
 				nextCursor: "cursor-2",
@@ -3062,16 +3047,7 @@ describe("ConversationStore", () => {
 				items: [{ kind: "user", id: "replacement", text: "replacement" }],
 			});
 			service.readProjectionBlock = null;
-			service.readProjectionResult = {
-				conversation: replacement,
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: "fresh-cursor",
-			};
+			service.readProjectionResult = readResult(replacement, { olderCursor: "fresh-cursor" });
 			await store.getState().rehydrate(service, sink);
 			expect(store.getState().conversation?.items.map((item) => item.id)).toEqual(["replacement"]);
 			expect(store.getState().olderCursor).toBe("fresh-cursor");
@@ -4834,16 +4810,9 @@ describe("ConversationStore", () => {
 		it("coalesces evener/thread/resync into one rehydrate call", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-after-resync",
-			};
+			});
 			// F2: openProjected binds the coalescer internally.
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
@@ -4869,16 +4838,9 @@ describe("ConversationStore", () => {
 		it("unsupported item transition triggers coalesced rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }, true),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }, true), {
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
 			const initialReads = service.readProjectionCalls.length;
@@ -4933,16 +4895,9 @@ describe("ConversationStore", () => {
 		it("preserves draft text across rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			store.getState().setDraft("my unsent draft");
 			// Rehydrate: should preserve the draft
@@ -4955,16 +4910,9 @@ describe("ConversationStore", () => {
 			// state lives in live-ui-store. Rehydrate only preserves draft.
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Rehydrate should preserve draft but not carry presentation state.
 			store.getState().setDraft("my draft");
@@ -4977,29 +4925,15 @@ describe("ConversationStore", () => {
 		it("preserves olderCursor from openProjected through rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "initial-cursor",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().olderCursor).toBe("initial-cursor");
 			// Update the projection result for rehydrate
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "updated-cursor",
-			};
+			});
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().olderCursor).toBe("updated-cursor");
 		});
@@ -5127,16 +5061,9 @@ describe("ConversationStore", () => {
 		it("coalesces multiple signals to one readProjection", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			// F2: openProjected binds the coalescer internally.
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
@@ -5173,11 +5100,10 @@ describe("ConversationStore", () => {
 				usage: {},
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: "cursor-1",
-			};
+			});
 
 			// Track what the sink receives.
 			const setLiveViewCalls: {
@@ -5666,8 +5592,8 @@ describe("ConversationStore", () => {
 			}> {
 				const thread = runningTurnThread();
 				const service = new FakeConversationService();
-				service.readProjectionResult = {
-					conversation: projectConversation(
+				service.readProjectionResult = readResult(
+					projectConversation(
 						hydrateThread(
 							{
 								thread,
@@ -5679,9 +5605,8 @@ describe("ConversationStore", () => {
 							0,
 						),
 					),
-					activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-					olderCursor: null,
-				};
+					{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+				);
 				const store = createConversationStore();
 				await store.getState().openProjected(service, createFakeSink(), "ref-1");
 				return { store, service };
@@ -6610,16 +6535,9 @@ describe("ConversationStore", () => {
 		it("stale rehydrate catch does not set error on newer generation", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 
 			// Start a rehydrate that will fail.
@@ -6634,16 +6552,9 @@ describe("ConversationStore", () => {
 
 			// While rehydrate is in-flight, open a new conversation (new generation).
 			service.readProjection = origReadProjection;
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-2" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-2" }), {
 				olderCursor: "cursor-2",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-2");
 
 			// Now the stale rehydrate fails.
@@ -7214,8 +7125,8 @@ describe("ConversationStore", () => {
 			const store = createConversationStore();
 			// 492 fresh rows + an 8-row page = exactly the 500-row cap, so the
 			// page loads without eviction and its turn keeps full payloads.
-			service.readProjectionResult = {
-				conversation: makeConversation(
+			service.readProjectionResult = readResult(
+				makeConversation(
 					{
 						threadId: "thread-1",
 						instanceId: "instance-1",
@@ -7246,9 +7157,8 @@ describe("ConversationStore", () => {
 					},
 					true,
 				),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			service.olderItems = {
@@ -7374,8 +7284,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -7400,9 +7310,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// After pagination the store retains a warning alongside the ordinary
@@ -7450,8 +7359,8 @@ describe("ConversationStore", () => {
 
 			// A complete fresh read that repeats the unchanged real turn and its
 			// message but omits the warning entirely.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -7475,9 +7384,8 @@ describe("ConversationStore", () => {
 						},
 					],
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// The warning's turn survived with its warning item (the retained
@@ -7554,17 +7462,16 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// Row-less page turn: compacts at its own load and remembers px.
@@ -7597,8 +7504,8 @@ describe("ConversationStore", () => {
 			// under the same turn id, so the fold adopts the fresh item's own row
 			// and pt stays in-window. With nothing to adopt, the fold's settle must
 			// be the valid empty string the wire's own hydration would produce.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -7626,9 +7533,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			const folded = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(folded).toHaveLength(1);
@@ -7654,17 +7560,16 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// Row-less page turn carrying an ID-ONLY item: compacts at its own
@@ -7696,8 +7601,8 @@ describe("ConversationStore", () => {
 			// Restoration: the fresh read re-issues the item with a gained
 			// transcript key (same id); the item's own projection is the row that
 			// keeps it in the window.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -7722,9 +7627,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			const restored = store.getState().conversation?.turns.find((t) => t.id === "pt")?.items ?? [];
 			expect(restored).toHaveLength(1);
@@ -7803,17 +7707,16 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page brings px as a real row item: under D23d the model keeps
@@ -7849,8 +7752,8 @@ describe("ConversationStore", () => {
 			// Window churn: the fresh read fills the window, the cap evicts pt's
 			// row — the oldest-positioned one — and the bound compacts the turn,
 			// remembering px through the item's real row shape.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -7860,26 +7763,24 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 			expect(store.getState().conversation?.turns.find((t) => t.id === "pt")?.items).toEqual([]);
 
 			// The next read shows a smaller window (the snapshot is authoritative
 			// for the fresh window), so the overlapping page's folded row survives
 			// the cap and paging keeps flowing.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().rehydrate(service, sink);
 
 			// Overlapping page carrying the SAME turn twice: the first fragment
@@ -7980,8 +7881,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8006,9 +7907,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page's position says older history — below the snapshot's own
@@ -8045,8 +7945,8 @@ describe("ConversationStore", () => {
 			// nothing the compact turn remembers — no collision, no injection —
 			// and re-serves the window bulk it still holds. The fresh read's own
 			// cursor is null: nothing older exists.
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8070,9 +7970,8 @@ describe("ConversationStore", () => {
 						fillerTurn(499),
 					],
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// The complete read's null cursor stands: the compact turn survives
@@ -8198,17 +8097,16 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A page turn carrying a call and its result: the pair folds into a
@@ -8293,8 +8191,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8306,9 +8204,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A page whose display row is keyed while its backing fragment item
@@ -8375,8 +8272,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8388,9 +8285,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A retained turn holds the item's fresh payload under
@@ -8496,8 +8392,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8509,9 +8405,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A retained tool item whose wire omitted the text field — hydrated
@@ -8605,8 +8500,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8618,9 +8513,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A retained turn holding the SPARSE fragment the wire reissued:
@@ -8709,8 +8603,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8722,9 +8616,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A retained turn holding a STATUS-ONLY fragment: identity and
@@ -8815,8 +8708,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8828,9 +8721,8 @@ describe("ConversationStore", () => {
 					turns: [{ id: "ft", status: "completed", items: [], usage: { inputTokens: 1, outputTokens: 1 } }],
 					olderCursor: "c0",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// A retained turn holding a STATUS-ONLY agentMessage fragment:
@@ -8915,8 +8807,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -8950,9 +8842,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues both retained aliases keyless — each holding
@@ -9007,8 +8898,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9036,9 +8927,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues the fragment's keyless alias — carrying STALE
@@ -9097,8 +8987,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9121,9 +9011,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page carries the bridge: a bare {id b} alias, a keyed {id a,
@@ -9189,8 +9078,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9217,9 +9106,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues the fragment's keyless alias — carrying the
@@ -9288,8 +9176,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9316,9 +9204,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
@@ -9380,8 +9267,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9407,9 +9294,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues the fragment's keyless alias — carrying a STALE
@@ -9557,8 +9443,8 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const sink = createFakeSink();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({
+			service.readProjectionResult = readResult(
+				makeConversation({
 					threadId: "thread-1",
 					instanceId: "instance-1",
 					usage: null,
@@ -9585,9 +9471,8 @@ describe("ConversationStore", () => {
 					],
 					olderCursor: "c1",
 				}),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c1" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page reissues the fragment's keyless alias — carrying the
@@ -9651,8 +9536,8 @@ describe("ConversationStore", () => {
 			// cap runs. Under the cutover the rows reproject from the model on
 			// the completion, so the payload is backed only while its row is
 			// retained; the bound must trim what the cap evicted.
-			service.readProjectionResult = {
-				conversation: makeConversation(
+			service.readProjectionResult = readResult(
+				makeConversation(
 					{
 						threadId: "thread-1",
 						instanceId: "instance-1",
@@ -9695,9 +9580,8 @@ describe("ConversationStore", () => {
 					},
 					true,
 				),
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "c0",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "c0" },
+			);
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// An unrelated page load bounds the turns: no row backs rt's item,
@@ -9826,11 +9710,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// 200 more rows below the window: the cap discards every one of them,
@@ -9855,11 +9738,10 @@ describe("ConversationStore", () => {
 			// rows all fell off the cut and its payloads bounded away with them,
 			// so no retained transcript evidence claims coverage — the reread's
 			// own window cursor is the wire truth.
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			expect(conv.olderCursor).toBe("cursor-1");
@@ -9877,11 +9759,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t1", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 5 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			// No loadOlder ever ran - pageOwnedIds/pageOwnedTurnIds stay empty, so
 			// there is no page history to preserve.
@@ -9893,11 +9774,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 8 } }],
 				olderCursor: undefined,
 			});
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// t1 is gone - there was no page history to preserve it, so the fresh
@@ -9946,11 +9826,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page's turn is genuinely new, but every one of its rows sits
@@ -9996,11 +9875,10 @@ describe("ConversationStore", () => {
 			// The reread's own window re-serves the retained rows; the evicted
 			// page turn must survive it with its usage.
 			const fresh = opened;
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			// Order is not asserted (see the "rehydrate preserves..." test above).
@@ -10075,11 +9953,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			service.olderItems = {
@@ -10101,11 +9978,10 @@ describe("ConversationStore", () => {
 				],
 				olderCursor: undefined,
 			});
-			service.readProjectionResult = {
-				conversation: fresh,
+			service.readProjectionResult = readResult(fresh, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 			const conv = store.getState().conversation!;
 			expect(conv.turns.map((t) => t.id).sort()).toEqual(["t1", "t2"]);
@@ -10125,11 +10001,10 @@ describe("ConversationStore", () => {
 			turns: [{ id: "turn-initial", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 1 } }],
 			olderCursor: "cursor-initial",
 		});
-		service.readProjectionResult = {
-			conversation: opened,
+		service.readProjectionResult = readResult(opened, {
 			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 			olderCursor: "cursor-initial",
-		};
+		});
 		await store.getState().openProjected(service, sink, "ref-1");
 
 		// The page reaches the beginning of the old window. Its undefined
@@ -10141,17 +10016,16 @@ describe("ConversationStore", () => {
 		await store.getState().loadOlder(service);
 		expect(store.getState().conversation?.olderCursor).toBeUndefined();
 
-		service.readProjectionResult = {
-			conversation: makeConversation({
+		service.readProjectionResult = readResult(
+			makeConversation({
 				threadId: "thread-1",
 				instanceId: "instance-1",
 				usage: null,
 				turns: [{ id: "turn-fresh", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 2 } }],
 				olderCursor: "fresh-cursor",
 			}),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: "fresh-cursor",
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "fresh-cursor" },
+		);
 		await store.getState().rehydrate(service, sink);
 
 		const conv = store.getState().conversation!;
@@ -10171,11 +10045,10 @@ describe("ConversationStore", () => {
 			turns: [{ id: "turn-a", status: "completed", items: [], usage: { inputTokens: 10, outputTokens: 1 } }],
 			olderCursor: "cursor-a",
 		});
-		service.readProjectionResult = {
-			conversation: initial,
+		service.readProjectionResult = readResult(initial, {
 			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 			olderCursor: "cursor-a",
-		};
+		});
 		await store.getState().openProjected(service, sink, "ref-1");
 		service.olderItems = {
 			turnsPage: turnsPage([wireTurn("turn-page-a", 500, 20)], "cursor-page-a"),
@@ -10183,17 +10056,16 @@ describe("ConversationStore", () => {
 		};
 		await store.getState().loadOlder(service);
 
-		service.readProjectionResult = {
-			conversation: makeConversation({
+		service.readProjectionResult = readResult(
+			makeConversation({
 				threadId: "thread-1",
 				instanceId: "instance-b",
 				usage: null,
 				turns: [{ id: "turn-b", status: "completed", items: [], usage: { inputTokens: 20, outputTokens: 2 } }],
 				olderCursor: "cursor-b",
 			}),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: "cursor-b",
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "cursor-b" },
+		);
 		await store.getState().rehydrate(service, sink);
 		expect(store.getState().conversation?.turns.map((turn) => turn.id)).toEqual(["turn-b"]);
 
@@ -10204,8 +10076,8 @@ describe("ConversationStore", () => {
 		// nothing new in, leaving turn-b standing; applyReadModel's
 		// disposition (from a real bootGeneration differing from the prior
 		// rehydrate's own seeded "") reads this as a genuine replace instead.
-		service.readProjectionResult = {
-			conversation: makeConversation(
+		service.readProjectionResult = readResult(
+			makeConversation(
 				{
 					threadId: "thread-1",
 					instanceId: "instance-b",
@@ -10215,9 +10087,8 @@ describe("ConversationStore", () => {
 				},
 				true,
 			),
-			activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-			olderCursor: null,
-		};
+			{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+		);
 		await store.getState().rehydrate(service, sink);
 
 		const conv = store.getState().conversation!;
@@ -10252,11 +10123,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -10318,11 +10188,10 @@ describe("ConversationStore", () => {
 				turns: [{ id: "t2", status: "completed", items: [], usage: { inputTokens: 60, outputTokens: 40 } }],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -10394,11 +10263,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 
 			// The page's rows all fall below the full window: the cap discards
@@ -10439,11 +10307,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-9",
 			};
-			service.readProjectionResult = {
-				conversation: disjoint,
+			service.readProjectionResult = readResult(disjoint, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-9",
-			};
+			});
 			resync(store);
 			const awaitRehydrateRead = async (count: number): Promise<void> => {
 				for (let i = 0; i < 40 && service.readProjectionCalls.length < count; i++) {
@@ -10499,11 +10366,10 @@ describe("ConversationStore", () => {
 				turns: [],
 				olderCursor: "cursor-1",
 			});
-			service.readProjectionResult = {
-				conversation: opened,
+			service.readProjectionResult = readResult(opened, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, sink, "ref-1");
 			store.setState({ olderCursor: "cursor-1" });
 
@@ -10764,8 +10630,8 @@ describe("ConversationStore", () => {
 			});
 			// A stale response: same incarnation, SHORTER length, and it omits
 			// the output the held item already carries.
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...makeReadProjectionResult(
 						makeThread({
 							turns: [
@@ -10781,9 +10647,8 @@ describe("ConversationStore", () => {
 						true,
 					).conversation,
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, sink);
 			expect(rowById(store, "call-1")).toMatchObject({ detail: { output: "held output" } });
 		});
@@ -10998,11 +10863,10 @@ describe("ConversationStore", () => {
 				).conversation,
 				olderCursor: "cursor-1",
 			};
-			service.readProjectionResult = {
-				conversation: latest,
+			service.readProjectionResult = readResult(latest, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: "cursor-1",
-			};
+			});
 			service.olderItems = {
 				turnsPage: turnsPage(
 					[
@@ -11171,16 +11035,7 @@ describe("ConversationStore", () => {
 	describe("I1: projected binding epoch — stale work suppressed before effect", () => {
 		it("queued rehydrate for A is suppressed after switch to B (zero serviceA reads/sinkA writes)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 
@@ -11191,16 +11046,7 @@ describe("ConversationStore", () => {
 			resync(store, "thread-A", "ref-A");
 			// Now set up serviceB and switch to B before the scheduler fires.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().openProjected(serviceB, sinkB, "ref-B");
 			const readsA = serviceA.readProjectionCalls.length;
@@ -11216,16 +11062,7 @@ describe("ConversationStore", () => {
 
 		it("queued rehydrate for A is suppressed after close (no serviceA reads)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -11240,16 +11077,7 @@ describe("ConversationStore", () => {
 
 		it("queued rehydrate for A is suppressed after reset (no serviceA reads)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -11262,16 +11090,7 @@ describe("ConversationStore", () => {
 
 		it("plain open clears projected bindings (no projected rehydrate after open)", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -11292,16 +11111,7 @@ describe("ConversationStore", () => {
 
 		it("rehydrate can never call serviceA with refB", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sink = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sink, "ref-1");
@@ -11309,16 +11119,7 @@ describe("ConversationStore", () => {
 			resync(store);
 			// Before the scheduler fires, openProjected with a different service+ref.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-2" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-2" }), { olderCursor: null });
 			await store.getState().openProjected(serviceB, sink, "ref-2");
 			const readsA = serviceA.readProjectionCalls.length;
 			await yieldMicrotask();
@@ -11390,11 +11191,10 @@ describe("ConversationStore", () => {
 				usage: {},
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			// Subscribe to store state changes to record when the conversation
 			// projection lands.
 			const order: string[] = [];
@@ -11420,16 +11220,7 @@ describe("ConversationStore", () => {
 		it("coalesces a synchronous pre-effect burst to one rehydrate", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const ctrl = makeControlledRead(service);
 			const initialReads = service.readProjectionCalls.length;
@@ -11450,16 +11241,7 @@ describe("ConversationStore", () => {
 		it("retains a request during an in-flight rehydrate and drains it", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Hang every readProjection so we can control when each completes.
 			const ctrl = makeControlledRead(service);
@@ -11488,16 +11270,7 @@ describe("ConversationStore", () => {
 		it("scheduler drains all trailing work recursively (no test-only flush)", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const ctrl = makeControlledRead(service);
 			resync(store);
@@ -11524,16 +11297,7 @@ describe("ConversationStore", () => {
 		it("catches rehydrate errors without unhandled rejections and remains usable", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			// Make readProjection throw on the first rehydrate call.
 			const origRead = service.readProjection.bind(service);
@@ -11572,16 +11336,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			sink.setLiveViewResult = () => false;
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(store.getState().conversation).toBeNull();
@@ -11593,16 +11350,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const openSink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, openSink, "ref-1");
 			expect(store.getState().conversation).not.toBeNull();
 			const rejectSink = createFakeSink();
@@ -11616,16 +11366,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, sink, "ref-1");
 			const identity = sink.setLiveViewCalls[0]?.identity;
 			expect(identity?.threadId).toBe("thread-1");
@@ -11637,16 +11378,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const sink = createFakeSink();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, sink, "ref-1");
 			sink.notificationOutcome = () => "rehydrate";
 			const initialReads = service.readProjectionCalls.length;
@@ -11670,11 +11402,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 42 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
 			expect(activityStore.getState().view).toBe(activityView);
 			expect(activityStore.getState().status).toBe("open");
@@ -11684,16 +11415,7 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			await store.getState().openProjected(service, activityStore.getState(), "ref-1");
 			const initialReads = service.readProjectionCalls.length;
 			service.notificationHandler?.({
@@ -11722,16 +11444,9 @@ describe("ConversationStore", () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
 			const activityStore = createActivityStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			const realState = activityStore.getState();
 			const staleSink: LiveActivitySink = {
 				setLiveView(view, identity) {
@@ -11763,16 +11478,7 @@ describe("ConversationStore", () => {
 			// epoch increment suppresses the queued A effect — serviceA/sinkA
 			// are never called after the rebind.
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-1");
@@ -11785,16 +11491,7 @@ describe("ConversationStore", () => {
 			// This increments bindingEpoch before assignment, so the queued A
 			// effect is suppressed.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -11863,16 +11560,7 @@ describe("ConversationStore", () => {
 	describe("same-key reread coalescing through public notifications", () => {
 		it("multiple same-key reread requests during a blocker produce exactly one trailing read", async () => {
 			const service = new FakeConversationService();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), { olderCursor: null });
 			const store = createConversationStore();
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			const readCtrl = makeControlledRead(service);
@@ -14024,11 +13712,10 @@ describe("ConversationStore", () => {
 			const liveIdentity = liveRows[0]!.transcriptKey ?? liveRows[0]!.id;
 
 			const reread = projectConversation(store.getState().conversation!);
-			service.readProjectionResult = {
-				conversation: reread,
+			service.readProjectionResult = readResult(reread, {
 				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
 				olderCursor: null,
-			};
+			});
 			await store.getState().rehydrate(service, sink);
 
 			const rows = (store.getState().conversation?.items ?? []).filter((row) => row.kind === "failure");
@@ -16348,11 +16035,10 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: { ...omittingX, history: omittingX.history && { ...omittingX.history, incarnation: "inc-2" } },
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+			service.readProjectionResult = readResult(
+				{ ...omittingX, history: omittingX.history && { ...omittingX.history, incarnation: "inc-2" } },
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().conversation?.items.find((i) => i.id === "X")).toBeUndefined();
 
@@ -16397,14 +16083,13 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...omittingX2,
 					history: omittingX2.history && { ...omittingX2.history, incarnation: "inc-2" },
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: null,
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: null },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(store.getState().conversation?.items.find((i) => i.id === "X")).toBeUndefined();
 
@@ -16605,14 +16290,13 @@ describe("ConversationStore", () => {
 				ALL_TRUE_CAPS,
 				true,
 			).conversation;
-			service.readProjectionResult = {
-				conversation: {
+			service.readProjectionResult = readResult(
+				{
 					...tighter,
 					history: tighter.history && { ...tighter.history, incarnation: "inc-2" },
 				},
-				activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS },
-				olderCursor: "cursor-1",
-			};
+				{ activity: { tasks: [], work: [], usage: {}, capabilities: ALL_TRUE_CAPS }, olderCursor: "cursor-1" },
+			);
 			await store.getState().rehydrate(service, createFakeSink());
 			expect(rows(store)).toHaveLength(10);
 			store.setState({ olderCursor: "cursor-1" });
@@ -17937,16 +17621,9 @@ describe("ConversationStore", () => {
 
 		it("page: controlled A->B then late A success => entire state unchanged", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), {
 				olderCursor: "cursor-A",
-			};
+			});
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -17965,16 +17642,7 @@ describe("ConversationStore", () => {
 
 			// Rebind to B via rehydrate.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -17996,16 +17664,9 @@ describe("ConversationStore", () => {
 
 		it("page: controlled A->B then late A failure => entire state unchanged", async () => {
 			const serviceA = new FakeConversationService();
-			serviceA.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-A" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			serviceA.readProjectionResult = readResult(makeConversation({ threadId: "thread-A" }), {
 				olderCursor: "cursor-A",
-			};
+			});
 			const sinkA = createFakeSink();
 			const store = createConversationStore();
 			await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -18024,16 +17685,7 @@ describe("ConversationStore", () => {
 
 			// Rebind to B.
 			const serviceB = new FakeConversationService();
-			serviceB.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-B" }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
-				olderCursor: null,
-			};
+			serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 			const sinkB = createFakeSink();
 			await store.getState().rehydrate(serviceB, sinkB);
 
@@ -18050,19 +17702,13 @@ describe("ConversationStore", () => {
 		for (const kind of ["send", "queue", "interrupt"] as const) {
 			it(`mutation: controlled A->B then late A ${kind} failure => entire state unchanged`, async () => {
 				const serviceA = new FakeConversationService();
-				serviceA.readProjectionResult = {
-					conversation: makeConversation({
+				serviceA.readProjectionResult = readResult(
+					makeConversation({
 						threadId: "thread-A",
 						status: { type: kind === "send" ? "idle" : "active" },
 					}),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+					{ olderCursor: null },
+				);
 				const sinkA = createFakeSink();
 				const store = createConversationStore();
 				await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -18088,16 +17734,7 @@ describe("ConversationStore", () => {
 
 				// Rebind to B.
 				const serviceB = new FakeConversationService();
-				serviceB.readProjectionResult = {
-					conversation: makeConversation({ threadId: "thread-B" }),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+				serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 				const sinkB = createFakeSink();
 				await store.getState().rehydrate(serviceB, sinkB);
 
@@ -18119,19 +17756,13 @@ describe("ConversationStore", () => {
 		for (const kind of ["send", "queue", "interrupt"] as const) {
 			it(`mutation: controlled A->B then late A ${kind} success => entire state unchanged`, async () => {
 				const serviceA = new FakeConversationService();
-				serviceA.readProjectionResult = {
-					conversation: makeConversation({
+				serviceA.readProjectionResult = readResult(
+					makeConversation({
 						threadId: "thread-A",
 						status: { type: kind === "send" ? "idle" : "active" },
 					}),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+					{ olderCursor: null },
+				);
 				const sinkA = createFakeSink();
 				const store = createConversationStore();
 				await store.getState().openProjected(serviceA, sinkA, "ref-A");
@@ -18163,16 +17794,7 @@ describe("ConversationStore", () => {
 				const refBeforeRebind = store.getState().ref;
 				const generationBeforeRebind = store.getState().conversationGeneration;
 				const serviceB = new FakeConversationService();
-				serviceB.readProjectionResult = {
-					conversation: makeConversation({ threadId: "thread-B" }),
-					activity: {
-						tasks: [],
-						work: [],
-						usage: {},
-						capabilities: ALL_TRUE_CAPS,
-					},
-					olderCursor: null,
-				};
+				serviceB.readProjectionResult = readResult(makeConversation({ threadId: "thread-B" }), { olderCursor: null });
 				const sinkB = createFakeSink();
 				await store.getState().rehydrate(serviceB, sinkB);
 
@@ -18238,16 +17860,9 @@ describe("ConversationStore", () => {
 		it("a page ask_user item renders as its tool row, other items/order/cursor retained, askPending unchanged", async () => {
 			const service = new FakeConversationService();
 			const store = createConversationStore();
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1", askPending: false }),
-				activity: {
-					tasks: [],
-					work: [],
-					usage: {},
-					capabilities: ALL_TRUE_CAPS,
-				},
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1", askPending: false }), {
 				olderCursor: "cursor-1",
-			};
+			});
 			await store.getState().openProjected(service, createFakeSink(), "ref-1");
 			expect(store.getState().conversation?.askPending).toBe(false);
 
@@ -18344,11 +17959,10 @@ describe("ConversationStore", () => {
 				usage: { totalTokens: 100 },
 				capabilities: ALL_TRUE_CAPS,
 			};
-			service.readProjectionResult = {
-				conversation: makeConversation({ threadId: "thread-1" }),
+			service.readProjectionResult = readResult(makeConversation({ threadId: "thread-1" }), {
 				activity: activityView,
 				olderCursor: null,
-			};
+			});
 			const sink = wrapActivityStoreAsSink(activityStore);
 			await store.getState().openProjected(service, sink, "ref-1");
 			expect(activityStore.getState().view).not.toBeNull();
