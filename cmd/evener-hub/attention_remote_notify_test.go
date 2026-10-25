@@ -33,9 +33,7 @@ func TestWatchHubAttentionNotifiesForRemoteSessionApproval(t *testing.T) {
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	poke := make(chan struct{})

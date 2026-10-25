@@ -86,9 +86,7 @@ func TestLaunchPreviewRPCExistingMalformedGitErrorClassification(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.PluginPreview(context.Background(), appwire.PluginPreviewParams{CWD: cwd})
 	assertWireCode(t, err, appwire.CodeInvalidParams)
 	var previewErr appwire.WireError

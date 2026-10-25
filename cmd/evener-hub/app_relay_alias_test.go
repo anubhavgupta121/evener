@@ -178,9 +178,7 @@ func TestHubRelayRealWireReadUnsubscribeAliases(t *testing.T) {
 	appServer := newHubAppServer(hubcore.WebConfig{HubStateRoot: t.TempDir(), Past: hubcore.NewPastIndex("")}, sources)
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadRead(t.Context(), appwire.ThreadReadParams{Ref: "local:root-thread"}); err != nil {
 		t.Fatalf("ref-only subscribe read: %v", err)
 	}

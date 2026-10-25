@@ -40,9 +40,7 @@ func TestHubRPCTranscriptTargetsUseEvenerParentRefs(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.ThreadTranscriptList(context.Background(), appwire.ThreadTranscriptListParams{
 		Ref: appwire.Ref{SourceID: "local", ThreadID: parentID}.String(),

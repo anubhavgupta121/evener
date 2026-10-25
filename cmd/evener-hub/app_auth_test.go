@@ -99,9 +99,7 @@ func TestHubRPCAuthStatusPrefersStoredOAuthOverEnv(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, stateRootAuthConfig(t, stateRoot, map[string]string{"OPENAI_API_KEY": "env-token"}))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {
@@ -132,9 +130,7 @@ func TestHubRPCAuthStatusIgnoresAPIKeyForTheCodexInstance(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, stateRootAuthConfig(t, stateRoot, map[string]string{"OPENAI_API_KEY": "env-token"}))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {
@@ -369,9 +365,7 @@ func TestHubRPCAuthLogoutRemovesUserScopedOpenAIAuth(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, stateRootAuthConfig(t, stateRoot, nil))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.AuthLogout(context.Background(), appwire.AuthLogoutParams{Provider: "openai-codex"})
 	if err != nil {
@@ -533,9 +527,7 @@ func TestHubRPCAuthStoresOAuthWhereTheRegistryReads(t *testing.T) {
 		CredsStore:   store,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {

@@ -90,9 +90,7 @@ func TestHubRPCThreadForkAsideUnavailableForNonLocal(t *testing.T) {
 	}
 	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, srv)
 	err := client.Request(context.Background(), appwire.MethodThreadFork, appwire.ThreadForkParams{
 		Ref:   "remote:th_aside",
 		Aside: true,

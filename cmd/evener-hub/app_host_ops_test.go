@@ -195,9 +195,7 @@ func TestHostPlanMintsThroughTheRealServer(t *testing.T) {
 	if web.hostManage == nil {
 		t.Fatal("the real server construction did not install the host-management surface")
 	}
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	var result appwire.HostPlanResult
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostPlan, appwire.HostPlanParams{Name: "m4"}, &result); err != nil {

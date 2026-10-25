@@ -623,9 +623,7 @@ func TestHubRestartRPCIsRegistered(t *testing.T) {
 	}, appsource.NewRegistry())
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.HubRestartResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerHubRestart, appwire.HubRestartParams{}, &resp); err != nil {

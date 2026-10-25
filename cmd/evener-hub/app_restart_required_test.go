@@ -1147,9 +1147,7 @@ func TestHubRPCListShowsIncompatibleDaemonWithoutPastIndex(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.ThreadList(t.Context(), appwire.ThreadListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -1190,9 +1188,7 @@ func TestHubRPCListDeduplicatesIncompatibleWorkspaceAlias(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.ThreadList(t.Context(), appwire.ThreadListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -1274,9 +1270,7 @@ func TestHubRejectsMutationForPreviousPIDIdentity(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster, StateDir: t.TempDir()})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	var response appwire.EmptyResponse
 	err := client.Request(t.Context(), appwire.MethodThreadCompactStart, appwire.ThreadCompactStartParams{Ref: "local:before"}, &response)
 	if err == nil || mutations.Load() != 0 {
@@ -1608,9 +1602,7 @@ func TestHubColdReadFindsIncompatibleDaemonByStableThreadID(t *testing.T) {
 	roster := liveClaimRoster(runDir, &hubcore.StatusProber{})
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	// The owner appears after hub initialization. Its current session differs
 	// from the stable workspace, and no past index can supply an alias row.
 	entry := rendezvous.Entry{PID: os.Getpid(), Protocol: "evener-appwire-v4", Endpoint: protocolMismatchPeer(t), SourceID: "local", ThreadID: "current", SessionID: "current", WorkspaceRef: "local:stable"}

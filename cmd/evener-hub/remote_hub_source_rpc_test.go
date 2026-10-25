@@ -254,9 +254,7 @@ func TestHubRPCThreadReadServesRemoteHubSource(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, srv)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "h1:t1", IncludeTurns: true})
 	if err != nil {
@@ -300,9 +298,7 @@ func TestHubRPCThreadShutdownForwardsToRemoteHost(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	if err := rpc.ThreadShutdown(context.Background(), appwire.ThreadShutdownParams{Ref: "h1:t1"}); err != nil {
 		t.Fatalf("ThreadShutdown on remote ref: %v", err)
@@ -363,9 +359,7 @@ func TestHubRPCThreadReadSubscribeServesRemoteSnapshot(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, srv)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:          "h1:t1",
@@ -419,9 +413,7 @@ func TestHubRPCThreadReadSubscribeStartsRemoteRelay(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, srv)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       "h1:t1",
@@ -482,9 +474,7 @@ func TestHubRPCThreadReadSubscribeDeliversMaskedRemoteStatus(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       "h1:t1",
 		Subscribe: true,
@@ -613,9 +603,7 @@ func TestHubRPCThreadReadPagesSizeTruncatedCompleteRemotePage(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	read, err := rpc.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "h1:t1", IncludeTurns: true, ItemsView: "fragment"})
 	if err != nil {
@@ -692,9 +680,7 @@ func TestHubRPCThreadReadDoesNotEnrichRemoteFilesAsLocal(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "h1:t1", IncludeTurns: true, ItemsView: "fragment"})
 	if err != nil {
@@ -754,9 +740,7 @@ func TestHubRPCThreadReadDoesNotStampRemoteImageURLs(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "h1:t1", IncludeTurns: true, ItemsView: "fragment"})
 	if err != nil {
@@ -842,9 +826,7 @@ func TestHubRPCThreadReadRewritesRemoteImageRoutes(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "h1:t1", IncludeTurns: true, ItemsView: "fragment"})
 	if err != nil {
@@ -933,9 +915,7 @@ func TestHubRPCSubagentPreviewRewritesRemoteImageRoutes(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	var preview appwire.EvenerSubagentPreviewResponse
 	if err := rpc.Request(context.Background(), appwire.MethodEvenerSubagentPreview, appwire.EvenerSubagentPreviewParams{Ref: "h1:t1"}, &preview); err != nil {
@@ -996,9 +976,7 @@ func TestHubRPCThreadListKeepsRemoteProjectIdentity(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadList(context.Background(), appwire.ThreadListParams{})
 	if err != nil {
@@ -1053,9 +1031,7 @@ func TestHubRPCThreadReadBoundsRemoteItemPage(t *testing.T) {
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:          "h1:t1",

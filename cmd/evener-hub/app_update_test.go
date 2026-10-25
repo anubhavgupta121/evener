@@ -548,9 +548,7 @@ func TestHubUpdateApplyRestartsAfterTheResponseIsWritten(t *testing.T) {
 	}, appsource.NewRegistry())
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.UpdateApply(t.Context(), appwire.UpdateApplyParams{Channel: "snapshot"})
 	if err != nil {

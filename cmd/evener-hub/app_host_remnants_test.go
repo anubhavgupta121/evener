@@ -1082,9 +1082,7 @@ presence_epoch = 1
 	cfg, _, _ := hostManageWiringConfig(t, configPath, []hostreg.Host{{Name: "m4", SSH: "m4.example"}}, &dialRecordingRunner{})
 	hub, _ := newHubRPCTestServerWithWeb(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	err := client.Request(context.Background(), appwire.MethodEvenerHostAttach, appwire.HostAttachParams{Host: "m4"}, nil)
 	if err == nil {

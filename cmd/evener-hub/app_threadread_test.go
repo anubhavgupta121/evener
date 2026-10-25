@@ -2158,9 +2158,7 @@ func TestThreadReadPastSessionSkipsFullTurnProjection(t *testing.T) {
 
 	wire := httptest.NewServer(http.HandlerFunc(server.ServeWebSocket))
 	defer wire.Close()
-	client := dialHubRPC(t, wire)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, wire)
 	read, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref: ref, IncludeTurns: true, ItemsView: "full", ItemLimit: 40,
 	})

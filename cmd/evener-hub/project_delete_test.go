@@ -1728,9 +1728,7 @@ func TestProjectDeleteReportsFavoriteStoreFailureAfterArtifactRemoval(t *testing
 	})
 	defer hub.Close()
 	past.SetOnChange(func() { web.navigation.Invalidate(navigationChangeHint{}) })
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	_, err = client.ProjectDelete(context.Background(), appwire.ProjectDeleteParams{
 		Key:        project.ID,
@@ -1870,9 +1868,7 @@ func TestProjectDeleteDoesNotBroadcastWhenNothingRemoved(t *testing.T) {
 	hub, web := newHubRPCTestServerWithWeb(t, hubcore.WebConfig{Past: past, Roster: hubcore.NewRosterWithEntries()})
 	defer hub.Close()
 	past.SetOnChange(func() { web.navigation.Invalidate(navigationChangeHint{}) })
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	// Force the project's one session to be skipped (becomes live mid-request)
 	// rather than actually removed — same technique as

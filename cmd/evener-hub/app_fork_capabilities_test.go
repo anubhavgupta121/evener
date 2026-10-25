@@ -284,9 +284,7 @@ func TestHubRPCPersistedSubagentCanForkAfterStop(t *testing.T) {
 	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.ThreadList(t.Context(), appwire.ThreadListParams{IncludeSubagents: true})
 	if err != nil {
 		t.Fatal(err)

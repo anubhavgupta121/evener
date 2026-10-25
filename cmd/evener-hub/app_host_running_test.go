@@ -325,9 +325,7 @@ func TestHostRunningThroughTheRealServer(t *testing.T) {
 	// assertion. The refusal/admission halves do not depend on the health flag.
 	params := appwire.HostRunningParams{FencingEpoch: appwire.FencingEpoch{BootID: "boot-1", OpSeq: 1}}
 
-	local := dialHubRPC(t, server)
-	defer local.Close()
-	mustInitializeHubClient(t, local)
+	local := dialHubRPCInitialized(t, server)
 	var refused appwire.HostRunningResponse
 	assertWireCode(t, local.Request(context.Background(), appwire.MethodEvenerHostRunning, params, &refused), appwire.CodeUnavailable)
 

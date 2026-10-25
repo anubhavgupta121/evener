@@ -268,9 +268,7 @@ func TestDaemonActionRefusesStaleRenderedIdentity(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: locks, Roster: roster, DaemonProcesses: controller, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	listRows := func() []appwire.DaemonResident {
 		t.Helper()
 		response, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
@@ -405,9 +403,7 @@ func TestRetireDaemonRefusesDeletedSiblingAlias(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), DeletionStore: store, Roster: roster, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	_, err = client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity})
 	var wire appwire.WireError
 	if err == nil || !errors.As(err, &wire) || wire.Code != appwire.CodeUnavailable || !wireErrorInfoIs(wire.Data, appwire.ErrorActionUnavailable) {
@@ -516,9 +512,7 @@ func TestDaemonResidentInventoryRows(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), Roster: roster, Past: past, Archive: archive, DaemonProcesses: controller, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	probesBefore := probes.Load()
 	var response appwire.DaemonListResponse
@@ -801,9 +795,7 @@ func TestDaemonActionRetireReturnsFreshBlockers(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), Roster: roster, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -1117,9 +1109,7 @@ func TestDaemonArchivedRowDisablesRetire(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), Roster: roster, Archive: archive, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatalf("DaemonList: %v", err)
@@ -1169,9 +1159,7 @@ func TestDaemonActionRetireRefusesIncompatiblePeer(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), Roster: roster, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -1221,9 +1209,7 @@ func TestDaemonActionDiscoveryReadFailure(t *testing.T) {
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: locks, DaemonProcesses: controller, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	identity := daemonIdentity(entry)
 	if _, err := client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity}); err != nil {
 		var wire appwire.WireError
@@ -1286,9 +1272,7 @@ func TestDaemonActionRetireResolvesExactIdentityAmongSameRefResidents(t *testing
 	cfg := hubcore.WebConfig{RunDir: runDir, ResumeLocks: hubcore.NewResumeLocks(), DaemonProcesses: controller, DaemonIdleTimeout: time.Hour}
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	identity := daemonIdentity(addressed)
 	retired, err := client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity})
 	if err != nil || !retired.Accepted {

@@ -216,9 +216,7 @@ func TestHubRPCSubscribedPastReadReceivesIndependentResume(t *testing.T) {
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
 	client := dialHubRPCInitialized(t, hub)
-	reader := dialHubRPC(t, hub)
-	defer reader.Close()
-	mustInitializeHubClient(t, reader)
+	reader := dialHubRPCInitialized(t, hub)
 	saved, err := reader.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, Subscribe: true})
 	if err != nil || len(saved.Thread.Turns) != 2 || saved.BootGeneration != appwire.DaemonlessBootGeneration {
 		t.Fatalf("saved history=%+v err=%v", saved, err)
@@ -280,9 +278,7 @@ func TestHubRPCRetainedReadKeepsCapturedCandidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	reader := dialHubRPC(t, hub)
-	defer reader.Close()
-	mustInitializeHubClient(t, reader)
+	reader := dialHubRPCInitialized(t, hub)
 	response, err := reader.ThreadRead(t.Context(), appwire.ThreadReadParams{Ref: "local:" + id, Subscribe: true, IncludeTurns: true})
 	if err != nil {
 		t.Fatal(err)
@@ -301,9 +297,7 @@ func TestHubRPCUnknownRetainedTargetDoesNotSubscribe(t *testing.T) {
 	server := newHubAppServer(hubcore.WebConfig{HubStateRoot: t.TempDir()}, registry)
 	hub := httptest.NewServer(http.HandlerFunc(server.ServeWebSocket))
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadRead(t.Context(), appwire.ThreadReadParams{Ref: "local:missing", Subscribe: true})
 	if err == nil || !strings.Contains(err.Error(), "missing source session") {
 		t.Fatalf("unknown target error=%v", err)

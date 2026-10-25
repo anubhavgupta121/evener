@@ -99,9 +99,7 @@ func requestSessionImage(t *testing.T, srv *httptest.Server, params appwire.Sess
 // request for method, returning its typed response or the hub's refusal.
 func requestHubMethod[R any](t *testing.T, srv *httptest.Server, method string, params any) (R, error) {
 	t.Helper()
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 	var resp R
 	err := rpc.Request(context.Background(), method, params, &resp)
 	return resp, err

@@ -52,9 +52,7 @@ func TestHubRPCThreadListServesRemoteHostWhoseAttachOutlastsLocalBudget(t *testi
 
 	srv := newWebSourceTestServer(t, source)
 
-	rpc := dialHubRPC(t, srv)
-	defer rpc.Close()
-	mustInitializeHubClient(t, rpc)
+	rpc := dialHubRPCInitialized(t, srv)
 
 	resp, err := rpc.ThreadList(context.Background(), appwire.ThreadListParams{})
 	if err != nil {

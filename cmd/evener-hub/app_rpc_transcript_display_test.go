@@ -141,9 +141,7 @@ func TestHubRPCTranscriptDisplayPatchPostApplyErrorStillBroadcasts(t *testing.T)
 func TestHubRPCTranscriptDisplayPatchRawUnknownFieldRejectedWithoutNotification(t *testing.T) {
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{HubStateRoot: t.TempDir()})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	config := appwire.TranscriptDisplayShippedDefaults().Desktop.Config
 	raw, err := json.Marshal(map[string]any{

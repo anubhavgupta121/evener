@@ -35,9 +35,7 @@ func TestHubRPCStartTurnPreservesImageAttachment(t *testing.T) {
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	mustInitializeHubClient(t, client)
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.TurnStart(context.Background(), appwire.TurnStartParams{
 		Ref:                "local:" + sessionID,
