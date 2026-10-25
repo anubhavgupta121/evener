@@ -2386,16 +2386,24 @@ async function convergesAfterMissedLookups(misses: number): Promise<void> {
   expect(bodies()).toEqual([]);
 
   withheldWindowReads = misses;
-  await threadsStore.getState().ensureThread(ref);
-  // The foreground acquisition returns with the display still body-suppressed;
-  // its bounded recovery must then converge the recorded window, no matter
-  // how many times the deadline missed while the pane stayed held, exposing
-  // local demand exactly as an ordinary 200-row local opening does.
-  await settleEntryTranscriptForTests(ref);
-  expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
-  expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
-  threadsStore.getState().releaseThread(ref);
-  await lease.release();
+  // The recovery's attempts race the stalled-open window, so pin it to the
+  // lookup deadline's cadence: each withheld read misses as fast here as the
+  // acquisition's own opens do.
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    // The foreground acquisition returns with the display still body-suppressed;
+    // its bounded recovery must then converge the recorded window, no matter
+    // how many times the deadline missed while the pane stayed held, exposing
+    // local demand exactly as an ordinary 200-row local opening does.
+    await settleEntryTranscriptForTests(ref);
+    expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+    expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
 }
 
 it("a foreground opening that misses its bounded lookup twice still converges the recorded display", () =>
@@ -2403,6 +2411,63 @@ it("a foreground opening that misses its bounded lookup twice still converges th
 
 it("a foreground opening that misses its bounded lookup three times still converges the recorded display", () =>
   convergesAfterMissedLookups(3));
+
+it("a foreground opening whose cache reads answer slowly but successfully still converges the recorded display", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // From here every window read answers AFTER the 250ms lookup deadline but
+  // well inside the recovery's stall window: a slow-but-healthy cache, not a
+  // stalled one. The foreground open loses its lookup race; the recovery's
+  // own attempt must let the slow read finish and promote the recorded
+  // window instead of re-racing the deadline it can only keep losing.
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 300);
+    }).then(() => realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>))) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  setSessionCacheStalledOpenForTests(2000);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    // Without the recovery outlasting the lookup deadline the chain re-races
+    // 250ms against a 300ms read forever; the bounded race keeps a red honest
+    // instead of hanging on the never-settling chain.
+    await Promise.race([
+      settleEntryTranscriptForTests(ref),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 2000);
+      }),
+    ]);
+    expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+    expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
 
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();

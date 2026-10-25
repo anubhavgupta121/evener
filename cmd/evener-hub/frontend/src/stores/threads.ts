@@ -961,7 +961,7 @@ function holdsCompleteForegroundWindow(model: ThreadModel | undefined): boolean 
   );
 }
 
-async function openEntryTranscript(ref: string): Promise<boolean> {
+async function openEntryTranscript(ref: string, recovery = false): Promise<boolean> {
   const fixture = entryTranscriptRoute(ref);
   if (!fixture || fixture.ref !== ref || !fixture.repository) return true;
   const repository = fixture.repository;
@@ -1009,11 +1009,18 @@ async function openEntryTranscript(ref: string): Promise<boolean> {
       : await Promise.race([
           reader.openLocal(200),
           new Promise<undefined>((resolve) => {
-            timer = setTimeout(() => {
-              reader.dispose();
-              if (fixture.reader === reader) fixture.reader = undefined;
-              resolve(undefined);
-            }, SESSION_CACHE_LOOKUP_DEADLINE_MS);
+            timer = setTimeout(
+              () => {
+                reader.dispose();
+                if (fixture.reader === reader) fixture.reader = undefined;
+                resolve(undefined);
+                // A recovery attempt outlasts the lookup deadline on purpose:
+                // a read that answers slower than the deadline but successfully
+                // must be allowed to finish, or a consistently slow cache
+                // strands the pane behind a race it can only keep losing.
+              },
+              recovery ? sessionCacheStalledOpenMs : SESSION_CACHE_LOOKUP_DEADLINE_MS,
+            );
           }),
         ]);
     if (!result) {
@@ -1239,8 +1246,10 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
 // open reads the same slow cache and can miss the same deadline again, so a
 // fixed number of attempts just strands the pane one attempt later (the
 // whole-suite third-miss failure this re-arm closes). Each attempt is bounded
-// by the same lookup deadline, and only an attempt's completion decides the
-// next one — an event-completion chain, not a timer loop — so it stops at the
+// by the stalled-open window rather than the lookup deadline (a read that
+// answers slowly but successfully must still finish), and only an attempt's
+// completion decides the next one — an event-completion chain, not a timer
+// loop — so it stops at the
 // first successful open, when the foreground holder releases, or when the
 // route retires; a fast recovery-needed refusal (usable display) never
 // re-arms. One tracked chain covers every attempt, deduplicated per live
@@ -1266,7 +1275,7 @@ function scheduleEntryOpeningRecovery(ref: string): void {
   pendingOpeningRecoveries.set(ref, route);
   const recovery = (async () => {
     for (;;) {
-      const opened = await openEntryTranscript(ref);
+      const opened = await openEntryTranscript(ref, true);
       if (opened) return;
       if (entryTranscriptRoute(ref) !== route) return; // a retired route's recovery must not outlive it
       if ((refCounts.get(ref) ?? 0) <= 0) return; // holder released: nothing left to recover for
