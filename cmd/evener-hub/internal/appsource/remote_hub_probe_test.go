@@ -220,10 +220,7 @@ func TestRemoteHubSourceHostCapabilitiesMapsWireError(t *testing.T) {
 	if err == nil {
 		t.Fatal("HostCapabilities succeeded despite a wire error")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInvalidParams {
-		t.Fatalf("error = %T %v, want InvalidParams WireError", err, err)
-	}
+	wire := requireWireError(t, err, appwire.CodeInvalidParams)
 }
 
 func TestRemoteHubSourceHostCapabilitiesClosedTransport(t *testing.T) {
@@ -287,10 +284,7 @@ func TestRemoteHubSourceHostCapabilitiesPreservesFactsWireError(t *testing.T) {
 	if err == nil {
 		t.Fatal("HostCapabilities succeeded despite a facts wire error")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInvalidParams {
-		t.Fatalf("error = %T %v, want InvalidParams WireError", err, err)
-	}
+	requireWireError(t, err, appwire.CodeInvalidParams)
 }
 
 // TestRemoteHubSourceSetHostFactsSynchronizesWithProbe pins that SetHostFacts
@@ -445,10 +439,7 @@ func TestRemoteHubSourceHostCapabilitiesInstanceErrorStillAborts(t *testing.T) {
 	if err == nil {
 		t.Fatal("HostCapabilities succeeded despite a non-MethodNotFound instance error")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInvalidParams {
-		t.Fatalf("error = %T %v, want InvalidParams WireError", err, err)
-	}
+	requireWireError(t, err, appwire.CodeInvalidParams)
 }
 
 // richCapabilityReply scripts the five probe methods with a value in every
@@ -961,8 +952,5 @@ func TestRemoteHubSourceHostCapabilitiesResolveErrorStillAborts(t *testing.T) {
 	if err == nil {
 		t.Fatal("HostCapabilities succeeded despite a non-InvalidParams resolve failure")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInternalError {
-		t.Fatalf("error = %T %v, want InternalError WireError", err, err)
-	}
+	requireWireError(t, err, appwire.CodeInternalError)
 }

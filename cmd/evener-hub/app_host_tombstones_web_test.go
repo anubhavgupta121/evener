@@ -32,9 +32,7 @@ func TestHostTombstoneTreeMergeAndManifest(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, nil); err != nil {
 		t.Fatalf("evener/host/add: %v", err)
 	}
@@ -200,9 +198,7 @@ func TestHostTombstoneMergeDoesNotShadowLiveRows(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, nil); err != nil {
 		t.Fatalf("evener/host/add: %v", err)
 	}

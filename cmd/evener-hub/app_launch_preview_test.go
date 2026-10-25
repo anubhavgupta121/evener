@@ -88,9 +88,7 @@ func TestLaunchPreviewRPCExistingMalformedGitErrorClassification(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	_, err := client.PluginPreview(context.Background(), appwire.PluginPreviewParams{CWD: cwd})
 	assertWireCode(t, err, appwire.CodeInvalidParams)
 	var previewErr appwire.WireError

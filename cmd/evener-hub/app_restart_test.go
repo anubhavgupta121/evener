@@ -625,9 +625,7 @@ func TestHubRestartRPCIsRegistered(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	var resp appwire.HubRestartResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerHubRestart, appwire.HubRestartParams{}, &resp); err != nil {

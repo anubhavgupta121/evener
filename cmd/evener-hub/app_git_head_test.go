@@ -275,9 +275,7 @@ func TestHubRPCGitHeadUsesCanonicalDirectory(t *testing.T) {
 
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	resp, err := client.GitHead(context.Background(), appwire.GitHeadParams{CWD: link})
 	if err != nil {

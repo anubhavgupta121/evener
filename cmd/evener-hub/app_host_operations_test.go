@@ -88,9 +88,7 @@ func TestHostOperationsReadsThroughTheRealServer(t *testing.T) {
 	}
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	var page appwire.HostOperationsResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostOperations, appwire.HostOperationsParams{Limit: 1}, &page); err != nil {

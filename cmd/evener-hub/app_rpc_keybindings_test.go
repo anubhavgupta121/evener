@@ -112,10 +112,7 @@ func TestHubRPCKeybindingsPatchPostRenameErrorStillBroadcasts(t *testing.T) {
 	}
 	// The error must carry the APPLIED canonical state so the requesting
 	// client reconciles from it rather than treating its write as rejected.
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInternalError {
-		t.Fatalf("error = %T %v, want wire code %d", err, err, appwire.CodeInternalError)
-	}
+	wire := requireWireError(t, err, appwire.CodeInternalError)
 	dataJSON, merr := json.Marshal(wire.Data)
 	if merr != nil {
 		t.Fatal(merr)
@@ -143,9 +140,7 @@ func TestHubRPCKeybindingsPatchRawUnknownFieldRejectedWithoutNotification(t *tes
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 
 	raw, err := json.Marshal(map[string]any{
 		"expectedRevision": 0,
@@ -275,9 +270,7 @@ func TestHubRPCKeybindingsPatchPersistsAcrossRestart(t *testing.T) {
 	root := t.TempDir()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{HubStateRoot: root})
 	client := dialHubRPC(t, hub)
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	config := appwire.KeybindingsConfig{Version: 1, Rules: []appwire.KeybindingsRule{
 		{Action: "thread.new", Chord: new("ctrl+n")},
 		{Action: "thread.close", Chord: nil},
@@ -295,9 +288,7 @@ func TestHubRPCKeybindingsPatchPersistsAcrossRestart(t *testing.T) {
 	defer hub.Close()
 	client = dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	var got appwire.KeybindingsOverrides
 	if err := client.Request(context.Background(), appwire.MethodEvenerSettingsKeybindingsGet, appwire.EmptyParams{}, &got); err != nil {
 		t.Fatalf("GET after restart: %v", err)
@@ -391,10 +382,7 @@ func assertNoKeybindingsNotification(t *testing.T, client *appwire.Client) {
 
 func assertKeybindingsWireCode(t *testing.T, err error, code int) {
 	t.Helper()
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != code {
-		t.Fatalf("error = %T %v, want wire code %d", err, err, code)
-	}
+	requireWireError(t, err, code)
 }
 
 func equalKeybindingsOverrides(a, b appwire.KeybindingsOverrides) bool {

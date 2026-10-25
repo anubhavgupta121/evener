@@ -86,10 +86,7 @@ func seedSessionImageSession(t *testing.T, cwd string, image []byte, storedMedia
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	return past
 }
 
@@ -104,9 +101,7 @@ func requestHubMethod[R any](t *testing.T, srv *httptest.Server, method string, 
 	t.Helper()
 	rpc := dialHubRPC(t, srv)
 	defer rpc.Close()
-	if _, err := rpc.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, rpc)
 	var resp R
 	err := rpc.Request(context.Background(), method, params, &resp)
 	return resp, err

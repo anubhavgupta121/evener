@@ -75,9 +75,7 @@ func TestHostManageConfiguredHostThroughRealServer(t *testing.T) {
 	}
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	// host/list shows the configured hub.toml host with its origin and entry
 	// fields, rendered offline because nothing dialed.
@@ -155,9 +153,7 @@ func TestHostManageUIAddedHostThroughRealServer(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	// Add through the real server: the result is the mutation-result union
 	// (registry spec 08 §11), and the row renders the one origin + offline.
@@ -277,9 +273,7 @@ func TestHostManageNilRegistryAddAttachThroughRealServer(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	var addedResult appwire.HostMutationResult
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, &addedResult); err != nil {
@@ -347,9 +341,7 @@ func TestHostManageHubTOMLRowWithoutAttachedLookupStaysOffline(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	var list appwire.HostListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostList, appwire.EmptyParams{}, &list); err != nil {
 		t.Fatalf("evener/host/list: %v", err)
@@ -382,9 +374,7 @@ func TestHostManageRuntimeHostClassifiedRemoteThroughRealServer(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	var added appwire.HostRow
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, &added); err != nil {
 		t.Fatalf("evener/host/add: %v", err)
@@ -475,9 +465,7 @@ func TestHostManageManagerWithoutRegistrySharesTheManagers(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	// The fallback the constructor built IS the manager's registry: attach,
 	// management, and the admin proxy all validate against the instance the
@@ -549,9 +537,7 @@ func TestHostManageRemovePrunesRemoteThreadCache(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	// A UI-added host, then the cache the background refresher would have
 	// populated for it: one live session row it owns.
@@ -632,9 +618,7 @@ func TestHostManageRemoveBlocksInFlightRefreshRepublish(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	// rowsFor counts the host's presence in the tree inputs.
 	rowsFor := func() (metas, live int) {
@@ -739,9 +723,7 @@ func TestHostManageRemoveDropsLastGoodThreads(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, nil); err != nil {
 		t.Fatalf("evener/host/add: %v", err)
 	}
@@ -788,9 +770,7 @@ func TestHostManageRemoveChurnBoundedLastGoodThreads(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	const churn = 3
 	for i := range churn {
 		name := fmt.Sprintf("churn-%d", i)
@@ -841,9 +821,7 @@ func TestHostManageRemoveDuringInFlightListSkipsLastGoodStore(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if err := client.Request(context.Background(), appwire.MethodEvenerHostAdd, appwire.HostAddParams{Entry: appwire.HostEntry{Name: "web-side", Address: "ws.example"}}, nil); err != nil {
 		t.Fatalf("evener/host/add: %v", err)
 	}
@@ -944,9 +922,7 @@ func TestHostManageRemoveBlocksPostCaptureAddedHostRepublish(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	rowsFor := func() (metas, live int) {
 		t.Helper()
@@ -1029,9 +1005,7 @@ func TestHostManageRemoveReAddStillBlocksPostCaptureAddedHostRepublish(t *testin
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	rowsFor := func() (metas, live int) {
 		t.Helper()
@@ -1117,9 +1091,7 @@ func TestHostManageStillLiveHostAddedMidWalkPublishes(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	// The host registers mid-walk; the walk enumerates it and captures its
 	// generation immediately before reading its row — the read-time capture
 	// the background walk has performed since round 10.

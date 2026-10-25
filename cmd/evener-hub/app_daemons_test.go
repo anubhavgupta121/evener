@@ -270,9 +270,7 @@ func TestDaemonActionRefusesStaleRenderedIdentity(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	listRows := func() []appwire.DaemonResident {
 		t.Helper()
 		response, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
@@ -330,10 +328,7 @@ func TestDaemonActionRefusesStaleRenderedIdentity(t *testing.T) {
 	if err == nil {
 		t.Fatal("stale force-stop identity was accepted")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeConflict {
-		t.Fatalf("stale force stop err=%v, want conflict", err)
-	}
+	requireWireError(t, err, appwire.CodeConflict)
 	if len(events) != 0 {
 		t.Fatalf("stale force stop touched the replacement process: %v", events)
 	}
@@ -412,9 +407,7 @@ func TestRetireDaemonRefusesDeletedSiblingAlias(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	_, err = client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity})
 	var wire appwire.WireError
 	if err == nil || !errors.As(err, &wire) || wire.Code != appwire.CodeUnavailable || !wireErrorInfoIs(wire.Data, appwire.ErrorActionUnavailable) {
@@ -525,9 +518,7 @@ func TestDaemonResidentInventoryRows(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 
 	probesBefore := probes.Load()
 	var response appwire.DaemonListResponse
@@ -812,9 +803,7 @@ func TestDaemonActionRetireReturnsFreshBlockers(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -872,9 +861,7 @@ func TestDaemonRetireInFlightHoldsNoSessionLock(t *testing.T) {
 	// Deferred last so it runs first: a failed check still answers the
 	// daemon before the hub and client close.
 	defer answerRetire()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil || len(list.Daemons) != 1 {
 		t.Fatalf("daemon list = %+v, %v", list, err)
@@ -953,9 +940,7 @@ func TestDaemonRetireDoesNotHoldALaterRequestOnItsConnection(t *testing.T) {
 	// Deferred last so it runs first: a failed check still answers the daemon
 	// before the hub and client close.
 	defer answerRetire()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil || len(list.Daemons) != 1 {
 		t.Fatalf("daemon list = %+v, %v", list, err)
@@ -1072,9 +1057,7 @@ func TestDaemonRetireCheckedBeforeAnOverlappingArchive(t *testing.T) {
 	// Deferred last so it runs first: a failed check still answers the daemon
 	// before the hub and client close.
 	defer answerRetire()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil || len(list.Daemons) != 1 {
 		t.Fatalf("daemon list = %+v, %v", list, err)
@@ -1136,9 +1119,7 @@ func TestDaemonArchivedRowDisablesRetire(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatalf("DaemonList: %v", err)
@@ -1157,10 +1138,7 @@ func TestDaemonArchivedRowDisablesRetire(t *testing.T) {
 	if err == nil {
 		t.Fatal("retire of an archived daemon was accepted")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeConflict {
-		t.Fatalf("archived retire err=%v, want conflict", err)
-	}
+	requireWireError(t, err, appwire.CodeConflict)
 	if retireCalls != 0 {
 		t.Fatalf("archived retire reached the daemon %d times, want 0", retireCalls)
 	}
@@ -1193,9 +1171,7 @@ func TestDaemonActionRetireRefusesIncompatiblePeer(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	list, err := client.DaemonList(t.Context(), appwire.DaemonListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -1207,10 +1183,7 @@ func TestDaemonActionRetireRefusesIncompatiblePeer(t *testing.T) {
 	if err == nil {
 		t.Fatal("retire against an incompatible peer was accepted")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeUnavailable {
-		t.Fatalf("incompatible retire err=%v, want unavailable", err)
-	}
+	requireWireError(t, err, appwire.CodeUnavailable)
 	if retireCalls != 0 {
 		t.Fatalf("incompatible peer received %d retire RPCs", retireCalls)
 	}
@@ -1250,9 +1223,7 @@ func TestDaemonActionDiscoveryReadFailure(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	identity := daemonIdentity(entry)
 	if _, err := client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity}); err != nil {
 		var wire appwire.WireError
@@ -1317,9 +1288,7 @@ func TestDaemonActionRetireResolvesExactIdentityAmongSameRefResidents(t *testing
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	identity := daemonIdentity(addressed)
 	retired, err := client.DaemonRetire(t.Context(), appwire.DaemonRetireParams{Identity: identity})
 	if err != nil || !retired.Accepted {

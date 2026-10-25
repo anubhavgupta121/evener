@@ -101,9 +101,7 @@ func TestHubRPCAuthStatusPrefersStoredOAuthOverEnv(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {
@@ -136,9 +134,7 @@ func TestHubRPCAuthStatusIgnoresAPIKeyForTheCodexInstance(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {
@@ -375,9 +371,7 @@ func TestHubRPCAuthLogoutRemovesUserScopedOpenAIAuth(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	resp, err := client.AuthLogout(context.Background(), appwire.AuthLogoutParams{Provider: "openai-codex"})
 	if err != nil {
@@ -541,9 +535,7 @@ func TestHubRPCAuthStoresOAuthWhereTheRegistryReads(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	status, err := client.AuthStatus(context.Background(), appwire.AuthStatusParams{Provider: "openai-codex"})
 	if err != nil {

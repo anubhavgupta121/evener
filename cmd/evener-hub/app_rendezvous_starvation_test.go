@@ -99,10 +99,7 @@ func TestResumeRendezvousSurvivesAReadStorm(t *testing.T) {
 		t.Fatal("storm session's sidecar did not build")
 	}
 	buildRPCSessionWithWorkingDir(t, stateDir, resumeID, workDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	// --- repair accounting ---------------------------------------------------
 	// The cleanup below joins the storm's detached repairs by counting them:

@@ -56,9 +56,7 @@ func TestHubAtomicRejoinUsesRelaySessionRead(t *testing.T) {
 
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       thread.Evener.Ref,
 		Subscribe: true,
@@ -208,9 +206,7 @@ func TestHubRelayCanonicalEndsWithItsServer(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: rootRef, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -571,9 +567,7 @@ func TestHubRelayPublicationGuardTimeoutBroadcastsResync(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: ref, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -1061,9 +1055,7 @@ func TestHubAtomicRejoinFansOutAndAcknowledgesAfterResponse(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       thread.Evener.Ref,
@@ -1141,9 +1133,7 @@ func TestHubAtomicRejoinWritesResponseBeforePostCutNotification(t *testing.T) {
 	client.Start(context.Background())
 	defer client.Close()
 
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if frame := <-frames; frame.err != nil || frame.message.Response == nil {
 		t.Fatalf("initialize frame = %+v, want response", frame)
 	}
@@ -1232,9 +1222,7 @@ func TestHubAtomicRejoinDoesNotConfirmSnapshotWhenLiveHandoffCannotPrepare(t *te
 
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       thread.Evener.Ref,
 		Subscribe: true,
@@ -1872,9 +1860,7 @@ func TestHubRelayRemapFencesOldFanoutBeforeBroadcast(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(t.Context(), appwire.ThreadReadParams{Ref: downstreamRef, Subscribe: true}); err != nil {
 		t.Fatalf("initial ThreadRead: %v", err)
 	}
@@ -2600,9 +2586,7 @@ func TestHubRelayRemapRetainsAuthoritativeRouteDuringReplacementRead(t *testing.
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: downstreamRef, Subscribe: true}); err != nil {
 		t.Fatalf("initial ThreadRead: %v", err)
 	}
@@ -2873,9 +2857,7 @@ func TestHubRelayRemapMovesDownstreamAndTargetRouteOwnership(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: downstreamRef, Subscribe: true}); err != nil {
 		t.Fatalf("old ThreadRead: %v", err)
 	}
@@ -3050,9 +3032,7 @@ func TestHubAtomicRejoinExcludesDeletionAtHandoffPrepareBoundary(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	_, readErr := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       ref,
@@ -3105,9 +3085,7 @@ func TestHubAtomicRelayPublicationStopsAfterDeletionWins(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       ref,
 		Subscribe: true,
@@ -3183,9 +3161,7 @@ func TestHubRelayPublicationWaitsForHeldTargetAlias(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:       ref,
 		Subscribe: true,
@@ -3584,9 +3560,7 @@ func TestHubRelayPendingFrameWakesOnARoutePublishItRaced(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: downstreamRef, Subscribe: true}); err != nil {
 		t.Fatalf("initial ThreadRead: %v", err)
 	}

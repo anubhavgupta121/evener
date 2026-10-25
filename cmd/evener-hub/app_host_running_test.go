@@ -327,9 +327,7 @@ func TestHostRunningThroughTheRealServer(t *testing.T) {
 
 	local := dialHubRPC(t, server)
 	defer local.Close()
-	if _, err := local.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, local)
 	var refused appwire.HostRunningResponse
 	assertWireCode(t, local.Request(context.Background(), appwire.MethodEvenerHostRunning, params, &refused), appwire.CodeUnavailable)
 

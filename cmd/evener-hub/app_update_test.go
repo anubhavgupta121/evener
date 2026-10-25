@@ -550,9 +550,7 @@ func TestHubUpdateApplyRestartsAfterTheResponseIsWritten(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	resp, err := client.UpdateApply(t.Context(), appwire.UpdateApplyParams{Channel: "snapshot"})
 	if err != nil {

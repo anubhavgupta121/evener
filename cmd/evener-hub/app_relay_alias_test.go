@@ -180,9 +180,7 @@ func TestHubRelayRealWireReadUnsubscribeAliases(t *testing.T) {
 	defer hub.Close()
 	client := dialHubRPC(t, hub)
 	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(t.Context(), appwire.ThreadReadParams{Ref: "local:root-thread"}); err != nil {
 		t.Fatalf("ref-only subscribe read: %v", err)
 	}
