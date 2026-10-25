@@ -51,9 +51,7 @@ func newAuthOriginTestClient(t *testing.T) *appwire.Client {
 	client := dialHubRPC(t, hub)
 	t.Cleanup(func() { client.Close() })
 
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	return client
 }
 

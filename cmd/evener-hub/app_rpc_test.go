@@ -339,11 +339,7 @@ func TestHubRPCInitialItemReadRejectsCompleteLegacyV3Metadata(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref: routeRef, ThreadID: sessionID, IncludeTurns: true, ItemsView: string(appwire.TurnItemsViewFull), ItemLimit: 3,
@@ -898,11 +894,7 @@ func testHubSteersSurvivingDaemon(t *testing.T, cleared bool) {
 		}},
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(t.Context(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resumed, err := client.ThreadResume(t.Context(), appwire.ThreadResumeParams{Ref: "local:" + resumeID})
 	if err != nil {
 		t.Fatalf("ThreadResume: %v", err)
@@ -989,10 +981,7 @@ func TestDeletionFenceDoesNotFallBackToPastThread(t *testing.T) {
 	}
 	stateDir := filepath.Join(root, "projects", project.ID)
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	store, err := hubcore.NewDeletionStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -1035,10 +1024,7 @@ func TestDeletionFenceRejectsResumeBeforeSpawner(t *testing.T) {
 	}
 	stateDir := filepath.Join(root, "projects", project.ID)
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	store, err := hubcore.NewDeletionStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -1698,14 +1684,11 @@ func TestAppItemsFromReplayTurnCarriesToolStateRaw(t *testing.T) {
 }
 
 func TestAppItemsFromReplayTurnProjectsThinking(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"ASSISTANT","message":{"role":"assistant","content":[` +
 		`{"kind":"thinking","thinking":{"text":"Let me plan this out."}},` +
 		`{"kind":"text","text":"The answer is 42."}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_1", 1, entry.Turn, apptranscript.NewToolCallRegistry())
 
 	if len(items) != 2 {
@@ -1720,14 +1703,11 @@ func TestAppItemsFromReplayTurnProjectsThinking(t *testing.T) {
 }
 
 func TestAppItemsFromReplayTurnProjectsRedactedThinking(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"ASSISTANT","message":{"role":"assistant","content":[` +
 		`{"kind":"redacted_thinking","thinking":{"redacted":true,"encrypted_content":"xyz"}},` +
 		`{"kind":"text","text":"ok"}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_1", 1, entry.Turn, apptranscript.NewToolCallRegistry())
 
 	if len(items) != 2 {
@@ -1739,13 +1719,10 @@ func TestAppItemsFromReplayTurnProjectsRedactedThinking(t *testing.T) {
 }
 
 func TestAppItemsFromReplayTurnProjectsWebSearch(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"ASSISTANT","message":{"role":"assistant","content":[` +
 		`{"kind":"web_search","web_search":{"query":"go context","raw":{"type":"web_search_tool_result","content":[{"type":"web_search_result","url":"https://go.dev/ctx","title":"Context"}]}}}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_1", 1, entry.Turn, apptranscript.NewToolCallRegistry())
 	if len(items) != 1 || items[0].Type != "commandExecution" || items[0].ToolName != "web_search" {
 		t.Fatalf("web_search items=%+v", items)
@@ -1763,16 +1740,13 @@ func TestAppItemsFromReplayTurnProjectsWebSearch(t *testing.T) {
 // reach Images no more than they reach the live EventUserInput payload, which
 // has no field for them at all.
 func TestAppItemsFromReplayTurnKeepsNonImagePartsOutOfImages(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"USER_INPUT","message":{"role":"user","content":[` +
 		`{"kind":"text","text":"summarize"},` +
 		`{"kind":"document","document":{"file_name":"report.pdf","media_type":"application/pdf"}},` +
 		`{"kind":"audio","audio":{"media_type":"audio/wav"}},` +
 		`{"kind":"image","image":{"media_type":"image/png","data":"cG5n"}}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_1", 1, entry.Turn, apptranscript.NewToolCallRegistry())
 	if len(items) != 1 || items[0].Type != "userMessage" {
 		t.Fatalf("expected userMessage, got %+v", items)
@@ -1860,13 +1834,10 @@ func TestAppItemsFromReplayTurnSteeringCarriesImageMetadata(t *testing.T) {
 // exactly like a prompt (issue #24), and an empty Source is stripped by
 // omitempty, leaving the client no source at all rather than a wrong one.
 func TestAppItemsFromReplayTurnSteeringCarriesUserSource(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"STEERING","steering_source":"user","message":{"role":"user","content":[` +
 		`{"kind":"text","text":"new worktree"}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_3", 3, entry.Turn, apptranscript.NewToolCallRegistry())
 
 	if len(items) != 1 {
@@ -1880,13 +1851,10 @@ func TestAppItemsFromReplayTurnSteeringCarriesUserSource(t *testing.T) {
 // Daemon nudges carry no steering_source on disk, and must stay anonymous:
 // they render as the quiet collapsible divider, never as user speech.
 func TestAppItemsFromReplayTurnSteeringWithoutSourceStaysAnonymous(t *testing.T) {
-	var entry transcript.Entry
 	raw := []byte(`{"turn":{"kind":"STEERING","message":{"role":"user","content":[` +
 		`{"kind":"text","text":"<SYSTEM-REMINDER>nudge</SYSTEM-REMINDER>"}` +
 		`]}}}`)
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal replay entry: %v", err)
-	}
+	entry := unmarshalReplayEntry(t, raw)
 	items := appItemsFromReplayTurn("turn_4", 4, entry.Turn, apptranscript.NewToolCallRegistry())
 
 	if len(items) != 1 {
@@ -1941,12 +1909,7 @@ func TestHubRPCThreadListUsesRosterStatusAndSessionID(t *testing.T) {
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadList(context.Background(), appwire.ThreadListParams{})
 	if err != nil {
 		t.Fatalf("ThreadList: %v", err)
@@ -1967,18 +1930,10 @@ func TestHubRPCThreadListIncludesPastThreads(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadList(context.Background(), appwire.ThreadListParams{SearchTerm: "second task"})
 	if err != nil {
 		t.Fatalf("ThreadList: %v", err)
@@ -2051,12 +2006,7 @@ func TestHubRPCThreadListOrdersLiveThreadsDeterministically(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadList(context.Background(), appwire.ThreadListParams{})
 	if err != nil {
 		t.Fatalf("ThreadList: %v", err)
@@ -2175,10 +2125,7 @@ func TestHubThreadListOrdersPastSearchByUpdatedCreatedTitleAndID(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	sources := appsource.NewRegistry()
 
 	resp, err := hubThreadList(context.Background(), hubcore.WebConfig{Past: past}, sources, appwire.ThreadListParams{SearchTerm: "task"})
@@ -2261,10 +2208,7 @@ func TestHubThreadListOrdersLiveThreadsUsingPastTimestamps(t *testing.T) {
 		SessionID: "02wMz5Txv9yYdSRJat13MZ",
 		StartedAt: liveStarted,
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	sources := newHubSourceRegistry(hubcore.WebConfig{Roster: hubcore.NewRosterWithEntries(hubcore.LiveEntry{Entry: live, SessionID: live.SessionID})})
 
 	resp, err := hubThreadList(context.Background(), hubcore.WebConfig{Past: past}, sources, appwire.ThreadListParams{})
@@ -2311,20 +2255,7 @@ func TestHubRPCThreadReadRoutesToDaemon(t *testing.T) {
 		}
 		return appwire.ThreadReadResponse{Thread: appwire.Thread{ID: "th_1", SessionID: "sess_1", Evener: appwire.EvenerThread{Ref: "local:th_1"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       102,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 102, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{
 		RunDir: runDir,
@@ -2333,12 +2264,7 @@ func TestHubRPCThreadReadRoutesToDaemon(t *testing.T) {
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:th_1"})
 	if err != nil {
 		t.Fatalf("ThreadRead: %v", err)
@@ -2375,11 +2301,7 @@ func TestHubRPCThreadReadRoutesReachableErroredDaemon(t *testing.T) {
 	})
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID})
 	if err != nil {
@@ -2394,18 +2316,10 @@ func TestHubRPCThreadReadReturnsPastTranscript(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, ItemsView: "full"})
 	if err != nil {
 		t.Fatalf("ThreadRead: %v", err)
@@ -2430,10 +2344,7 @@ func TestHubRPCSubscribedReadReturnsPastForCrashMarker(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-crashed-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	roster := hubcore.NewRosterWithEntries(hubcore.LiveEntry{
 		Entry: rendezvous.Entry{
 			PID:       104,
@@ -2449,11 +2360,7 @@ func TestHubRPCSubscribedReadReturnsPastForCrashMarker(t *testing.T) {
 	})
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Roster: roster, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:          "local:" + sessionID,
@@ -2476,10 +2383,7 @@ func TestHubRPCSubscribedAtomicFailuresDoNotFallBackToPastAndCanRetry(t *testing
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-atomic-retry-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	thread := appwire.Thread{
 		ID:        sessionID,
@@ -2523,11 +2427,7 @@ func TestHubRPCSubscribedAtomicFailuresDoNotFallBackToPastAndCanRetry(t *testing
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	params := appwire.ThreadReadParams{
 		Ref:          thread.Evener.Ref,
 		IncludeTurns: true,
@@ -2564,10 +2464,7 @@ func TestHubRPCNonSubscribedAtomicReadFailureCanReturnPastTranscript(t *testing.
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-nonsubscribed-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	thread := appwire.Thread{
 		ID:        sessionID,
@@ -2591,11 +2488,7 @@ func TestHubRPCNonSubscribedAtomicReadFailureCanReturnPastTranscript(t *testing.
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:          thread.Evener.Ref,
 		IncludeTurns: true,
@@ -2613,10 +2506,7 @@ func TestHubRPCSubscribedNonAtomicReadFailureCanReturnPastTranscript(t *testing.
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-non-atomic-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	thread := appwire.Thread{
 		ID:        sessionID,
@@ -2636,11 +2526,7 @@ func TestHubRPCSubscribedNonAtomicReadFailureCanReturnPastTranscript(t *testing.
 	hub := httptest.NewServer(http.HandlerFunc(appServer.ServeWebSocket))
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	response, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{
 		Ref:          thread.Evener.Ref,
 		IncludeTurns: true,
@@ -2724,17 +2610,10 @@ func TestHubRPCThreadReadEnrichesReplayToolOutputImagesFromFiles(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, ItemsView: "full"})
 	if err != nil {
@@ -2806,11 +2685,7 @@ func TestHubRPCThreadReadEnrichesLiveToolOutputImagesFromFiles(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, ItemsView: "full"})
 	if err != nil {
@@ -2868,11 +2743,7 @@ func TestHubRPCThreadReadStampsTheSHARouteOnLiveDaemonTurns(t *testing.T) {
 	roster.Refresh()
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, ItemsView: "full"})
 	if err != nil {
@@ -2891,10 +2762,7 @@ func TestHubRPCThreadReadMergesPastTurnsForLiveDaemon(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -2906,29 +2774,11 @@ func TestHubRPCThreadReadMergesPastTurnsForLiveDaemon(t *testing.T) {
 			Evener:    appwire.EvenerThread{Ref: params.Ref},
 		}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       103,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  sessionID,
-		SessionID: sessionID,
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 103, sessionID, sessionID)
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true, ItemsView: "full"})
 	if err != nil {
 		t.Fatalf("ThreadRead: %v", err)
@@ -2948,19 +2798,11 @@ func TestHubRPCThreadReadDoesNotReturnLocalPastForNonLocalMissingSource(t *testi
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-local-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + sessionID, IncludeTurns: true})
 	if err == nil {
 		t.Fatalf("ThreadRead returned local past for codex ref: %+v", resp.Thread)
@@ -2971,10 +2813,7 @@ func TestHubRPCThreadReadDoesNotMergeLocalPastIntoNonLocalLiveThread(t *testing.
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-local-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	source := &relayBroadcastSource{
 		thread: appwire.Thread{
@@ -2995,11 +2834,7 @@ func TestHubRPCThreadReadDoesNotMergeLocalPastIntoNonLocalLiveThread(t *testing.
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	resp, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + sessionID, IncludeTurns: true})
 	if err != nil {
 		t.Fatalf("ThreadRead: %v", err)
@@ -3235,20 +3070,7 @@ func TestHubRPCThreadReadRelaysDaemonNotifications(t *testing.T) {
 		appserver.Subscribe(ctx, "th_1")
 		return appwire.ThreadReadResponse{Thread: appwire.Thread{ID: "th_1", SessionID: "sess_1", Evener: appwire.EvenerThread{Ref: "local:th_1"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       103,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 103, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{
 		RunDir: runDir,
@@ -3257,12 +3079,7 @@ func TestHubRPCThreadReadRelaysDaemonNotifications(t *testing.T) {
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:th_1"}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3310,11 +3127,7 @@ func TestHubRPCThreadReadRelaysEnrichedOutputImageNotification(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:th_img"}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3356,28 +3169,11 @@ func TestHubRPCRelaysSHARoutedToolResultImageFromARealDaemon(t *testing.T) {
 			Evener: appwire.EvenerThread{Ref: params.Ref},
 		}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       21 * 1000,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  sessionID,
-		SessionID: sessionID,
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 21*1000, sessionID, sessionID)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3438,18 +3234,9 @@ func TestHubRPCThreadReadRelaysSHARoutedToolResultImage(t *testing.T) {
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:th_shot"}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3497,13 +3284,7 @@ func TestHubRPCThreadReadRelaysNotificationsBySourceQualifiedThread(t *testing.T
 		notifications: make(chan appwire.Notification, 4),
 		canceled:      make(chan struct{}, 2),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(sourceA)
-	web.sources.Add(sourceB)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, sourceA, sourceB)
 
 	clientA := dialHubRPC(t, srv)
 	defer clientA.Close()
@@ -3568,29 +3349,15 @@ func TestHubRPCThreadReadRelaysNotificationsBySourceQualifiedThread(t *testing.T
 func TestHubRPCThreadReadSubscribeOverridesSourceReadRelayPolicy(t *testing.T) {
 	threadID := "th_codex_live"
 	source := &readRelayDisabledSource{
-		id: "codex",
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		id:            "codex",
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification, 4),
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3622,13 +3389,8 @@ func TestHubRPCThreadReadSubscribeOverridesSourceReadRelayPolicy(t *testing.T) {
 func TestHubRPCThreadUnsubscribeDropsDownstreamSubscription(t *testing.T) {
 	const threadID = "th_unsub"
 	source := &relayBroadcastSource{
-		id: "codex",
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		id:            "codex",
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification, 4),
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
@@ -3640,11 +3402,7 @@ func TestHubRPCThreadUnsubscribeDropsDownstreamSubscription(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3696,11 +3454,7 @@ func TestHubRPCThreadUnsubscribeUnresolvedSourceIsQuiet(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	// A ref whose source never existed: quiet success, no error.
 	if _, err := client.ThreadUnsubscribe(context.Background(), appwire.ThreadUnsubscribeParams{Ref: "codex:th_missing"}); err != nil {
 		t.Fatalf("ThreadUnsubscribe for unresolvable source: %v", err)
@@ -3716,27 +3470,13 @@ func TestHubRPCThreadReadRecoversEstablishedRelayAfterSourceClose(t *testing.T) 
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 
 	readErr := make(chan error, 1)
 	go func() {
@@ -3773,12 +3513,7 @@ func TestHubRelayRecoveryEmitsThreadResyncBeforeReplacementNotifications(t *test
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -3791,11 +3526,7 @@ func TestHubRelayRecoveryEmitsThreadResyncBeforeReplacementNotifications(t *test
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 
 	readErr := make(chan error, 1)
 	go func() {
@@ -3844,12 +3575,7 @@ func TestHubRelayRecoveryDoesNotDuplicateSourceResync(t *testing.T) {
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -3861,11 +3587,7 @@ func TestHubRelayRecoveryDoesNotDuplicateSourceResync(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 
 	readErr := make(chan error, 1)
 	go func() {
@@ -3931,11 +3653,7 @@ func TestHubRPCThreadUnsubscribeDropsStableRefRelay(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: stableRef, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -3995,11 +3713,7 @@ func TestHubRPCThreadUnsubscribeDropsStableRefRelayWhenReadAlsoNamedThreadID(t *
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: stableRef, ThreadID: "current", Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -4064,11 +3778,7 @@ func TestHubRelayRecoveryUsesAuthoritativeRefNotStaleThreadID(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 
 	readErr := make(chan error, 1)
 	go func() {
@@ -4144,12 +3854,7 @@ func TestHubRPCThreadReadRelayRecoveryBackoffAndReset(t *testing.T) {
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4162,11 +3867,7 @@ func TestHubRPCThreadReadRelayRecoveryBackoffAndReset(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4330,12 +4031,7 @@ func TestHubRelayGivesUpOnARunningTurnAfterRepeatedRedialFailures(t *testing.T) 
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4350,11 +4046,7 @@ func TestHubRelayGivesUpOnARunningTurnAfterRepeatedRedialFailures(t *testing.T) 
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4455,12 +4147,7 @@ func TestHubRelayGivesUpAnchorsAtHistoryStartWhenNothingWasForwarded(t *testing.
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4475,11 +4162,7 @@ func TestHubRelayGivesUpAnchorsAtHistoryStartWhenNothingWasForwarded(t *testing.
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4541,12 +4224,7 @@ func TestHubRelayNoSyntheticFailureWithoutActiveTurn(t *testing.T) {
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4559,11 +4237,7 @@ func TestHubRelayNoSyntheticFailureWithoutActiveTurn(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4605,12 +4279,7 @@ func TestHubRPCThreadReadRecoveryBacksOffUnusableChannelsWithoutDroppingFirstNot
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4623,11 +4292,7 @@ func TestHubRPCThreadReadRecoveryBacksOffUnusableChannelsWithoutDroppingFirstNot
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4675,12 +4340,7 @@ func TestHubRPCThreadReadClientCloseCancelsRelayRecoveryWait(t *testing.T) {
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4708,9 +4368,7 @@ func TestHubRPCThreadReadClientCloseCancelsRelayRecoveryWait(t *testing.T) {
 	defer srv.Close()
 
 	client := dialHubRPC(t, srv)
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -4787,12 +4445,7 @@ func TestHubRPCThreadReadClientCloseCancelsBlockingRecoverySubscribe(t *testing.
 	established := make(chan appwire.Notification)
 	replacementResults := make(chan relaySubscribeResult)
 	source := &blockingRecoveryRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:             codexRelayThread(threadID),
 		established:        established,
 		recoveryStarted:    make(chan struct{}),
 		recoveryCanceled:   make(chan struct{}),
@@ -4823,9 +4476,7 @@ func TestHubRPCThreadReadClientCloseCancelsBlockingRecoverySubscribe(t *testing.
 	defer srv.Close()
 
 	client := dialHubRPC(t, srv)
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -4892,12 +4543,7 @@ func TestHubRPCThreadReadRereadJoinsRelayRecovery(t *testing.T) {
 	subscribeCalls := make(chan struct{})
 	retryClock := newScriptedRelayRetryClock()
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -4910,11 +4556,7 @@ func TestHubRPCThreadReadRereadJoinsRelayRecovery(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:" + threadID, Subscribe: true})
@@ -5007,11 +4649,7 @@ func TestHubRPCThreadReadReplacementStopsOldRelayRecovery(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex-a:" + oldThreadID, Subscribe: true, ReplaceSubscription: true})
@@ -5067,12 +4705,7 @@ func TestHubRelayCanceledRecoveryDoesNotSubscribeAgain(t *testing.T) {
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -5094,12 +4727,7 @@ func TestHubRelayStopDuringInitializationCancelsSharedHandleAndAllowsFreshStart(
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -6253,12 +5881,7 @@ func TestHubRelayInitiatingRequestCancellationStopsInitialSubscribeAndAllowsFres
 	initialRelease := make(chan struct{})
 	var releaseInitial sync.Once
 	source := &initialRequestCancelRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:             codexRelayThread(threadID),
 		initialStarted:     make(chan struct{}),
 		initialCanceled:    make(chan struct{}),
 		initialRelease:     initialRelease,
@@ -6390,12 +6013,7 @@ func TestHubRelaySurvivesInitiatingRequestCancellationAfterAttachment(t *testing
 	const threadID = "th_request_canceled_established"
 	notifications := make(chan appwire.Notification)
 	source := &relayBroadcastSource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: notifications,
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
@@ -6434,12 +6052,7 @@ func TestHubRelayStoppedInitializerRejectsSuccessfulSubscribeAndLeavesReplacemen
 	oldNotifications := make(chan appwire.Notification)
 	freshNotifications := make(chan appwire.Notification)
 	source := &successfulAfterCancelRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:             codexRelayThread(threadID),
 		initialStarted:     make(chan struct{}),
 		initialCanceled:    make(chan struct{}),
 		releaseInitial:     make(chan struct{}),
@@ -6540,12 +6153,7 @@ func TestHubRelayStopImmediatelyAfterReadinessAllowsFreshStart(t *testing.T) {
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -6622,12 +6230,7 @@ func TestHubRelayStopBeforeLaunchCommitPreventsSupervisorAndAllowsFreshStart(t *
 	results := make(chan relaySubscribeResult)
 	subscribeCalls := make(chan struct{})
 	source := &scriptedRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:         codexRelayThread(threadID),
 		results:        results,
 		subscribeCalls: subscribeCalls,
 	}
@@ -6713,12 +6316,7 @@ func TestHubRelayStopBeforeLaunchCommitPreventsSupervisorAndAllowsFreshStart(t *
 func TestHubRelayInitialRegistrationFailureCancelsAndAllowsFreshStart(t *testing.T) {
 	const threadID = "th_registration_initial"
 	source := &relayBroadcastSource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification),
 		subscribed:    make(chan struct{}, 2),
 		canceled:      make(chan struct{}, 2),
@@ -6752,12 +6350,7 @@ func TestHubRelayInitialRegistrationFailureCancelsAndAllowsFreshStart(t *testing
 func TestHubRelayExistingRegistrationFailureDoesNotReportAttachment(t *testing.T) {
 	const threadID = "th_registration_existing"
 	source := &relayBroadcastSource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification),
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
@@ -6806,19 +6399,9 @@ func TestHubRPCThreadReadReplaceSubscriptionDropsPreviousRelaySubscriber(t *test
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(sourceA)
-	web.sources.Add(sourceB)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, sourceA, sourceB)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex-a:th_a", Subscribe: true, ReplaceSubscription: true}); err != nil {
 		t.Fatalf("ThreadRead sourceA: %v", err)
 	}
@@ -6894,19 +6477,9 @@ func TestHubRPCThreadReadAdditiveSubscriptionsReceiveBothRelays(t *testing.T) {
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(sourceA)
-	web.sources.Add(sourceB)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, sourceA, sourceB)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex-a:th_a", Subscribe: true}); err != nil {
 		t.Fatalf("ThreadRead sourceA: %v", err)
 	}
@@ -7048,9 +6621,7 @@ func TestHubRPCThreadReadRetiresRelayWhenClientDisconnects(t *testing.T) {
 	defer srv.Close()
 
 	client := dialHubRPC(t, srv)
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "codex:th_1"}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -7146,12 +6717,7 @@ func TestHubRPCThreadReadKeepsRelayWhenSubscriberArrivesDuringIdleRetirement(t *
 func TestHubRPCThreadReadSerializesRereadRegistrationAgainstIdleRetirement(t *testing.T) {
 	const threadID = "th_join_idle"
 	source := &relayBroadcastSource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification, 1),
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
@@ -7236,12 +6802,7 @@ func TestHubRPCThreadReadSerializesRereadRegistrationAgainstIdleRetirement(t *te
 func TestHubRPCThreadReadKeepsReplacementRelayTrackedAfterIdleCleanup(t *testing.T) {
 	const threadID = "th_cleanup"
 	source := &relayBroadcastSource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification, 4),
 		subscribed:    make(chan struct{}, 4),
 		canceled:      make(chan struct{}, 2),
@@ -7388,21 +6949,11 @@ func TestHubRPCThreadReadPropagatesInFlightRelaySubscribeFailure(t *testing.T) {
 func TestHubRPCThreadReadSubscribeFailureDoesNotLeaveClientSubscribed(t *testing.T) {
 	threadID := "th_retry_subscribe"
 	source := &failFirstRelaySource{
-		thread: appwire.Thread{
-			ID:        threadID,
-			SessionID: threadID,
-			Source:    "codex",
-			Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
-		},
+		thread:        codexRelayThread(threadID),
 		notifications: make(chan appwire.Notification, 4),
 		canceled:      make(chan struct{}, 2),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
 	failedClient := dialHubRPC(t, srv)
 	defer failedClient.Close()
@@ -7466,10 +7017,7 @@ func TestHubThreadListKeepsLocalPastWhenNonLocalLiveIDCollides(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-local-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	sources := appsource.NewRegistry()
 	sources.Add(&relayBroadcastSource{
 		thread: appwire.Thread{
@@ -8318,29 +7866,11 @@ func TestHubRPCThreadActionsRouteToDaemon(t *testing.T) {
 		goalObjective = params.Objective
 		return appwire.GoalSetResponse{Started: true}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       104,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 104, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadCompactStart(context.Background(), appwire.ThreadCompactStartParams{Ref: "local:th_1"}); err != nil {
 		t.Fatalf("ThreadCompactStart: %v", err)
 	}
@@ -8455,11 +7985,7 @@ func TestHubRPCTurnMutationsForwardWithoutDynamicCapabilityGates(t *testing.T) {
 		Past:   hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	tests := []struct {
 		name   string
@@ -8548,11 +8074,7 @@ func TestHubRPCTurnSteerMissingLocalSessionReturnsTerminalRejection(t *testing.T
 	})
 	defer hub.Close()
 
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	params := appwire.TurnSteerParams{
 		Ref:                "local:missing",
@@ -8581,10 +8103,7 @@ func TestHubRPCThreadCompactStartResumesPastThread(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -8632,12 +8151,7 @@ func TestHubRPCThreadCompactStartResumesPastThread(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadCompactStart(context.Background(), appwire.ThreadCompactStartParams{Ref: "local:" + sessionID}); err != nil {
 		t.Fatalf("ThreadCompactStart: %v", err)
 	}
@@ -8657,10 +8171,7 @@ func TestHubRPCThreadModelSetResumesPastThread(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -8709,12 +8220,7 @@ func TestHubRPCThreadModelSetResumesPastThread(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadModelSet(context.Background(), appwire.ThreadModelSetParams{
 		Ref:           "local:" + sessionID,
 		ModelProvider: "openai",
@@ -8735,10 +8241,7 @@ func TestHubRPCThreadVisionModelSetResumesPastThread(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -8787,12 +8290,7 @@ func TestHubRPCThreadVisionModelSetResumesPastThread(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadVisionModelSet(context.Background(), appwire.ThreadVisionModelSetParams{
 		Ref:         "local:" + sessionID,
 		VisionModel: "off",
@@ -8830,29 +8328,11 @@ func TestHubRPCUnsupportedThreadActionReturnsStructuredUnavailable(t *testing.T)
 		shutdownCalled = true
 		return appwire.EmptyResponse{}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       105,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 105, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	err := client.ThreadShutdown(context.Background(), appwire.ThreadShutdownParams{Ref: "local:th_1"})
 	if err == nil {
 		t.Fatal("ThreadShutdown succeeded for unsupported action")
@@ -8894,29 +8374,11 @@ func TestHubRPCGoalSetGatedByCapability(t *testing.T) {
 		goalReached = true
 		return appwire.GoalSetResponse{Started: true}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       106,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 106, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.GoalSet(context.Background(), appwire.GoalSetParams{Ref: "local:th_1", Objective: "do it"})
 	if err == nil {
 		t.Fatal("GoalSet succeeded despite missing Goal capability")
@@ -8999,20 +8461,7 @@ func TestHubRPCModelListUsesEvenerLaunchContractWhenDaemonFails(t *testing.T) {
 	appserver.HandleTyped(daemon.Router(), appwire.MethodModelList, func(context.Context, appwire.ModelListParams) (appwire.ModelListResponse, error) {
 		return appwire.ModelListResponse{}, appwire.InternalError("provider unavailable")
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       104,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "th_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 104, "th_1", "th_1")
 
 	spawner := &fakeRPCSpawner{
 		launchModels: func(context.Context) ([]appwire.ModelDescriptor, error) {
@@ -9025,12 +8474,7 @@ func TestHubRPCModelListUsesEvenerLaunchContractWhenDaemonFails(t *testing.T) {
 		Spawner: spawner,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9045,29 +8489,11 @@ func TestHubRPCModelListFallsBackToLocalDaemonWithoutLaunchContract(t *testing.T
 	appserver.HandleTyped(daemon.Router(), appwire.MethodModelList, func(context.Context, appwire.ModelListParams) (appwire.ModelListResponse, error) {
 		return appwire.ModelListResponse{Data: []appwire.ModelDescriptor{{Provider: "openai", Model: "gpt-daemon"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       105,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "th_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 105, "th_1", "th_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9082,20 +8508,7 @@ func TestHubRPCModelListPrefersEvenerLaunchContract(t *testing.T) {
 	appserver.HandleTyped(daemon.Router(), appwire.MethodModelList, func(context.Context, appwire.ModelListParams) (appwire.ModelListResponse, error) {
 		return appwire.ModelListResponse{Data: []appwire.ModelDescriptor{{Provider: "openai", Model: "gpt-stale"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       105,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "th_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 105, "th_1", "th_1")
 
 	spawner := &fakeRPCSpawner{
 		launchModels: func(context.Context) ([]appwire.ModelDescriptor, error) {
@@ -9104,12 +8517,7 @@ func TestHubRPCModelListPrefersEvenerLaunchContract(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9129,12 +8537,7 @@ func TestHubRPCModelListCachesLaunchContract(t *testing.T) {
 	}}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Spawner: spawner})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	for range 2 {
 		resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 		if err != nil {
@@ -9165,12 +8568,7 @@ func TestHubRPCModelListUsesWorkingDirForEvenerLaunchContract(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Spawner: spawner})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{CWD: "/tmp/project-with-oauth"})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9185,20 +8583,7 @@ func TestHubRPCModelListDoesNotUseLocalDaemonWhenLaunchContractIsEmpty(t *testin
 	appserver.HandleTyped(daemon.Router(), appwire.MethodModelList, func(context.Context, appwire.ModelListParams) (appwire.ModelListResponse, error) {
 		return appwire.ModelListResponse{Data: []appwire.ModelDescriptor{{Provider: "openai", Model: "gpt-daemon"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       105,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "th_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 105, "th_1", "th_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{
 		RunDir:  runDir,
@@ -9206,12 +8591,7 @@ func TestHubRPCModelListDoesNotUseLocalDaemonWhenLaunchContractIsEmpty(t *testin
 		Spawner: &fakeRPCModelContractSpawner{contract: appwire.ModelListResponse{}},
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9226,20 +8606,7 @@ func TestHubRPCModelListDoesNotUseLocalDaemonWhenLaunchContractHasOnlyDiagnostic
 	appserver.HandleTyped(daemon.Router(), appwire.MethodModelList, func(context.Context, appwire.ModelListParams) (appwire.ModelListResponse, error) {
 		return appwire.ModelListResponse{Data: []appwire.ModelDescriptor{{Provider: "openai", Model: "gpt-daemon"}}}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       105,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "th_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 105, "th_1", "th_1")
 
 	spawner := &fakeRPCModelContractSpawner{
 		contract: appwire.ModelListResponse{
@@ -9253,12 +8620,7 @@ func TestHubRPCModelListDoesNotUseLocalDaemonWhenLaunchContractHasOnlyDiagnostic
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ModelList(context.Background(), appwire.ModelListParams{})
 	if err != nil {
 		t.Fatalf("ModelList: %v", err)
@@ -9290,12 +8652,7 @@ exit 2
 		Past:    hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	var resp struct {
 		Data []struct {
 			Provider string `json:"provider"`
@@ -9336,12 +8693,7 @@ func TestHubRPCThreadStartKeepsProviderForModelIDsWithSlashes(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "openrouter",
 		Model:         "deepseek/deepseek-v4-flash",
@@ -9516,12 +8868,7 @@ func TestHubRPCThreadStartPassesExplicitNonInteractive(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	nonInteractive := true
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		Model:          "openai/gpt-5.2",
@@ -9552,12 +8899,7 @@ func TestHubRPCThreadStartPassesNonInteractiveLaunchOverride(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	nonInteractive := true
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		Model: "openai/gpt-5.2",
@@ -9588,12 +8930,7 @@ func TestHubRPCThreadStartPropagatesSpawnerStderrAsHubLaunchError(t *testing.T) 
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "openai",
 		Model:         "gpt-5",
@@ -9665,12 +9002,7 @@ func TestHubRPCThreadStartRejectsModelOutsideEvenerLaunchContractBeforeSpawn(t *
 		Past:    hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "openai",
 		Model:         "gpt-stale",
@@ -9708,12 +9040,7 @@ func TestHubRPCThreadStartAllowsModelWhenProviderDoesNotEnumerateLaunchModels(t 
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "openai",
 		Model:         "gpt-5.5",
@@ -9751,12 +9078,7 @@ func TestHubRPCThreadStartAllowsModelWhenProviderHasLaunchDiagnostic(t *testing.
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "openai",
 		Model:         "gpt-5.5",
@@ -9789,12 +9111,7 @@ func TestHubRPCThreadStartRejectsProviderMissingFromDegradedLaunchContract(t *te
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "anthropic",
 		Model:         "claude-test",
@@ -9834,12 +9151,7 @@ func TestHubRPCThreadStartAllowsIntentionallySkippedLaunchProvider(t *testing.T)
 	}, credsStore)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex(""), Registry: reg, CredsStore: credsStore})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		ModelProvider: "orclaude",
 		Model:         "anthropic/claude-3-5-sonnet",
@@ -9871,12 +9183,7 @@ func TestHubRPCThreadStartRejectsMalformedModelBeforeSpawn(t *testing.T) {
 		Past:    hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		Model: "openrouter",
 		CWD:   "/tmp",
@@ -9919,12 +9226,7 @@ func TestThreadStart_LaunchOverridesApplied(t *testing.T) {
 		Past:         hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		Model: "openai/gpt-5",
 		CWD:   "/tmp",
@@ -9991,12 +9293,7 @@ func TestHubRPCThreadStartUsesGlobalLaunchDefaultModel(t *testing.T) {
 		Past:             hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		CWD: cwd,
 	}); err != nil {
@@ -10024,10 +9321,7 @@ func makeResumeSession(t *testing.T, root, sessionID, profileID, model string) (
 	}); err != nil {
 		t.Fatal(err)
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	return stateDir, past
 }
 
@@ -10157,10 +9451,7 @@ func TestResumeRequestForConfigUsesRestoreRootWhenWorktreeActive(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	req, err := resumeRequestForConfig(hubcore.WebConfig{Past: past}, sessionID)
 	if err != nil {
@@ -10214,12 +9505,7 @@ func TestHubRPCThreadResumeSpawnsAndReadsDaemon(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Spawner: spawner, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadResume(context.Background(), appwire.ThreadResumeParams{Session: "sess_old"})
 	if err != nil {
 		t.Fatalf("ThreadResume: %v", err)
@@ -10333,10 +9619,7 @@ func TestHubRPCCachedRouteRefreshesTypedProtocolMismatch(t *testing.T) {
 func testHubSubscribedReadReplacedOwner(t *testing.T, sameEndpoint bool, method string, replacement http.HandlerFunc) {
 	root := t.TempDir()
 	sessionID := buildRPCParentSession(t, filepath.Join(root, "projects", "upgrade-0000000000"))
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadList, func(context.Context, appwire.ThreadListParams) (appwire.ThreadListResponse, error) {
 		return appwire.ThreadListResponse{Data: []appwire.Thread{{ID: sessionID, SessionID: sessionID, Status: appwire.ThreadStatus{Type: appwire.ThreadStatusIdle}}}}, nil
@@ -10363,11 +9646,7 @@ func testHubSubscribedReadReplacedOwner(t *testing.T, sameEndpoint bool, method 
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatal(err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	entry.Protocol = "evener-appwire-v4"
 	if sameEndpoint {
 		handlerMu.Lock()
@@ -10540,12 +9819,7 @@ func TestHubRPCThreadResumeReplacesIncompatibleRosterDaemon(t *testing.T) {
 		ResumeLocks: hubcore.NewResumeLocks(),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadResume(context.Background(), appwire.ThreadResumeParams{Session: sessionID})
 	if err != nil {
 		t.Fatalf("ThreadResume: %v", err)
@@ -10681,18 +9955,9 @@ func TestHubRPCThreadStartRelaysReturnedSourceThread(t *testing.T) {
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	// Source, not Harness, names the host source: a harness naming a registered
 	// source is now refused (TestHubThreadStartRefusesHarnessNamingHostSource).
 	resp, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{Source: "codex", CWD: "/work", Input: []appwire.InputItem{{Type: "text", Text: "hello"}}})
@@ -10732,18 +9997,9 @@ func TestHubRPCThreadStartReturnsThreadWhenPostStartRelayFails(t *testing.T) {
 			Evener:    appwire.EvenerThread{Ref: "codex:th_start_relay_fail", Capabilities: appwire.ThreadCapabilities{Send: true}},
 		},
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	// Source, not Harness, names the host source: a harness naming a registered
 	// source is now refused (TestHubThreadStartRefusesHarnessNamingHostSource).
 	resp, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{Source: "codex", CWD: "/work", Input: []appwire.InputItem{{Type: "text", Text: "hello"}}})
@@ -10779,18 +10035,9 @@ func TestHubRPCThreadResumeRelaysReturnedSourceThread(t *testing.T) {
 		subscribed:    make(chan struct{}, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	resp, err := client.ThreadResume(context.Background(), appwire.ThreadResumeParams{Ref: "codex:th_resume_relay"})
 	if err != nil {
 		t.Fatalf("ThreadResume: %v", err)
@@ -10904,10 +10151,7 @@ func TestHubRPCTurnStartResumesPastThread(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -10943,12 +10187,7 @@ func TestHubRPCTurnStartResumesPastThread(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.TurnStart(context.Background(), appwire.TurnStartParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: "local:" + sessionID, Input: []appwire.InputItem{{Type: "text", Text: "resume work"}}}); err != nil {
 		t.Fatalf("TurnStart: %v", err)
 	}
@@ -10962,10 +10201,7 @@ func TestHubRPCTurnStartResumesPastThreadAfterRelaySubscribeUnavailable(t *testi
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	source := &resumeAfterSubscribeUnavailableSource{
 		thread: appwire.Thread{
@@ -10996,12 +10232,7 @@ func TestHubRPCTurnStartResumesPastThreadAfterRelaySubscribeUnavailable(t *testi
 	srv.Config.Handler = web.Handler()
 	srv.Start()
 	defer srv.Close()
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	if _, err := client.TurnStart(context.Background(), appwire.TurnStartParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: "local:" + sessionID, Input: []appwire.InputItem{{Type: "text", Text: "resume after relay"}}}); err != nil {
 		t.Fatalf("TurnStart: %v", err)
 	}
@@ -11017,10 +10248,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnLiveStartError(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(ctx context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -11030,20 +10258,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnLiveStartError(t *testing.T) {
 	appserver.HandleTyped(daemon.Router(), appwire.MethodTurnStart, func(context.Context, appwire.TurnStartParams) (appwire.TurnStartResponse, error) {
 		return appwire.TurnStartResponse{}, appwire.Unavailable("session is processing")
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       107,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  sessionID,
-		SessionID: sessionID,
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 107, sessionID, sessionID)
 	resumeCalled := false
 	spawner := &fakeRPCSpawner{
 		resume: func(context.Context, hubcore.ResumeRequest) (rendezvous.Entry, error) {
@@ -11053,12 +10268,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnLiveStartError(t *testing.T) {
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.TurnStart(context.Background(), appwire.TurnStartParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: "local:" + sessionID, Input: []appwire.InputItem{{Type: "text", Text: "resume work"}}})
 	if err == nil || !strings.Contains(err.Error(), "session is processing") {
 		t.Fatalf("TurnStart err=%v, want live start error", err)
@@ -11072,10 +10282,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnGenericSubstringError(t *testin
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(ctx context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -11085,20 +10292,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnGenericSubstringError(t *testin
 	appserver.HandleTyped(daemon.Router(), appwire.MethodTurnStart, func(context.Context, appwire.TurnStartParams) (appwire.TurnStartResponse, error) {
 		return appwire.TurnStartResponse{}, appwire.InternalError("tool output included connection refused")
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       108,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  sessionID,
-		SessionID: sessionID,
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 108, sessionID, sessionID)
 	resumeCalled := false
 	spawner := &fakeRPCSpawner{
 		resume: func(context.Context, hubcore.ResumeRequest) (rendezvous.Entry, error) {
@@ -11108,12 +10302,7 @@ func TestHubRPCTurnStartDoesNotResumePastThreadOnGenericSubstringError(t *testin
 	}
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.TurnStart(context.Background(), appwire.TurnStartParams{ClientMutationID: "test-mutation", ExpectedInstanceID: sessionID, Ref: "local:" + sessionID, Input: []appwire.InputItem{{Type: "text", Text: "resume work"}}})
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("TurnStart err=%v, want live start error", err)
@@ -11128,10 +10317,7 @@ func TestHubRPCTurnStartResumesPastThreadAndRelaysNotifications(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(ctx context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {
@@ -11166,12 +10352,7 @@ func TestHubRPCTurnStartResumesPastThreadAndRelaysNotifications(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadRead(context.Background(), appwire.ThreadReadParams{Ref: "local:" + sessionID, IncludeTurns: true}); err != nil {
 		t.Fatalf("ThreadRead: %v", err)
 	}
@@ -11369,12 +10550,7 @@ func TestHubRPCTurnStartDoesNotResumeUnknownNonLocalRef(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	_, err := client.TurnStart(context.Background(), appwire.TurnStartParams{ClientMutationID: "test-mutation",
 		ExpectedInstanceID: "th_unknown",
 		Ref:                "remote:th_unknown",
@@ -11419,12 +10595,7 @@ func TestHubRPCPathsCompleteReturnsMatchingDirectories(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.PathsComplete(context.Background(), appwire.PathsCompleteParams{Prefix: filepath.Join(root, "alph")})
 	if err != nil {
 		t.Fatalf("PathsComplete: %v", err)
@@ -11490,12 +10661,7 @@ func TestHubRPCProjectsRecentReturnsMostRecentDirs(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ProjectsRecent(context.Background(), appwire.ProjectsRecentParams{})
 	if err != nil {
 		t.Fatalf("ProjectsRecent: %v", err)
@@ -11568,18 +10734,9 @@ func TestHubRPCThreadForkRoutesNonLocalCapableSource(t *testing.T) {
 			Evener:    appwire.EvenerThread{Ref: "codex:th_child"},
 		}},
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
 		Ref:           "codex:th_fork",
 		SourceItemKey: "codex-turn-1",
@@ -11617,18 +10774,9 @@ func TestHubRPCThreadForkRoutesNonLocalWholeThreadForkWithoutTurnForkCapability(
 			Evener:    appwire.EvenerThread{Ref: "codex:th_whole_child"},
 		}},
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{Ref: "codex:th_whole_fork"})
 	if err != nil {
 		t.Fatalf("ThreadFork: %v", err)
@@ -11656,18 +10804,9 @@ func TestHubRPCThreadForkReturnsUnavailableWhenNonLocalSourceCannotFork(t *testi
 		notifications: make(chan appwire.Notification, 1),
 		canceled:      make(chan struct{}, 1),
 	}
-	srv := httptest.NewUnstartedServer(nil)
-	web := NewWebServer(hubcore.WebConfig{HubAddr: srv.Listener.Addr().String(), Past: hubcore.NewPastIndex("")})
-	web.sources.Add(source)
-	srv.Config.Handler = web.Handler()
-	srv.Start()
-	defer srv.Close()
+	srv := newWebSourceTestServer(t, source)
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	err := client.Request(context.Background(), appwire.MethodThreadFork, appwire.ThreadForkParams{
 		Ref:           "codex:th_no_fork",
 		SourceItemKey: "codex-turn-1",
@@ -11691,19 +10830,11 @@ func TestHubRPCThreadForkCreatesForkedThread(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-fork-0000000000")
 	parentID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
 		Ref:           "local:" + parentID,
 		SourceItemKey: "apptranscript-item-v2:turn_3:2:0",
@@ -11734,19 +10865,11 @@ func TestHubRPCThreadForkDeferInput(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-fork-0000000000")
 	parentID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
 		Ref:           "local:" + parentID,
 		SourceItemKey: "apptranscript-item-v2:turn_3:2:0",
@@ -11786,19 +10909,11 @@ func TestHubRPCThreadForkDeferInputRejectsEditedInput(t *testing.T) {
 	root := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-fork-0000000000")
 	parentID := buildRPCParentSession(t, stateDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	err := client.Request(context.Background(), appwire.MethodThreadFork, appwire.ThreadForkParams{
 		Ref:           "local:" + parentID,
 		SourceItemKey: "apptranscript-item-v2:turn_3:2:0",
@@ -11808,10 +10923,7 @@ func TestHubRPCThreadForkDeferInputRejectsEditedInput(t *testing.T) {
 	if err == nil {
 		t.Fatal("ThreadFork with both editedInput and deferInput should fail")
 	}
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInvalidParams {
-		t.Fatalf("error=%v, want InvalidParams", err)
-	}
+	requireWireError(t, err, appwire.CodeInvalidParams)
 }
 
 type fakeRPCSpawner struct {
@@ -11990,12 +11102,7 @@ func TestHubRPCInstanceListRoutesToController(t *testing.T) {
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceList, appwire.EmptyParams{}, &resp); err != nil {
 		t.Fatalf("evener/instance/list: %v", err)
@@ -12045,12 +11152,7 @@ func TestHubRPCInstanceCreateBroadcastsAuthUpdated(t *testing.T) {
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceCreate, appwire.InstanceCreateParams{Base: "anthropic", Name: "mywork"}, &resp); err != nil {
@@ -12123,9 +11225,7 @@ func TestHubRPCInstanceCreateAnswersWithItsOwnState(t *testing.T) {
 	// the create is still in flight while the edit must reach the hub.
 	editClient := dialHubRPC(t, hub)
 	defer editClient.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	if _, err := editClient.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
 		t.Fatalf("Initialize(edit client): %v", err)
 	}
@@ -12276,9 +11376,7 @@ func TestHubRPCInstanceRefreshModelsBroadcastEchoesOriginClientId(t *testing.T) 
 	client := dialHubRPC(t, hub)
 	t.Cleanup(func() { client.Close() })
 
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceRefreshModels,
@@ -12322,12 +11420,7 @@ func TestHubRPCInstanceEditBroadcastsAuthUpdated(t *testing.T) {
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceEdit, appwire.InstanceEditParams{Name: "base", BaseURL: "https://example.test"}, &resp); err != nil {
@@ -12370,12 +11463,7 @@ func TestHubRPCInstanceEditRenameBroadcastsWhenTheCredentialMoveFails(t *testing
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	err := client.Request(context.Background(), appwire.MethodEvenerInstanceEdit, appwire.InstanceEditParams{Name: "base", NewName: "personal", OriginClientId: "tab-a"}, &resp)
@@ -12389,10 +11477,7 @@ func TestHubRPCInstanceEditRenameBroadcastsWhenTheCredentialMoveFails(t *testing
 	// The discriminator the web sheet keys on: the message alone is identical
 	// whether or not the error is wrapped in the evenerErrorInfo payload, so
 	// decode the wire data the client reads and pin it here.
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInternalError {
-		t.Fatalf("error = %T %v, want wire code %d", err, err, appwire.CodeInternalError)
-	}
+	wire := requireWireError(t, err, appwire.CodeInternalError)
 	dataJSON, merr := json.Marshal(wire.Data)
 	if merr != nil {
 		t.Fatal(merr)
@@ -12453,12 +11538,7 @@ func TestHubRPCInstanceEditRenameBroadcastsWhenTheFinalReloadFails(t *testing.T)
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	err := client.Request(context.Background(), appwire.MethodEvenerInstanceEdit, appwire.InstanceEditParams{Name: "base", NewName: "personal"}, &resp)
@@ -12468,10 +11548,7 @@ func TestHubRPCInstanceEditRenameBroadcastsWhenTheFinalReloadFails(t *testing.T)
 	// Same discriminator as the credential-move sibling, on the reload-failed
 	// half: the rename stood, so the client is told so through the wire data,
 	// not inferred from a message it shares with a plain failure.
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInternalError {
-		t.Fatalf("error = %T %v, want wire code %d", err, err, appwire.CodeInternalError)
-	}
+	wire := requireWireError(t, err, appwire.CodeInternalError)
 	dataJSON, merr := json.Marshal(wire.Data)
 	if merr != nil {
 		t.Fatal(merr)
@@ -12512,9 +11589,7 @@ func TestHubRPCInstanceEditRenamePersistsWhenTheInitialReloadAndRollbackFail(t *
 	f := newInstanceRollbackFixture(t)
 	client := dialHubRPC(t, f.hub)
 	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	f.failReload.Store(true)
 
 	var resp appwire.InstanceListResponse
@@ -12525,10 +11600,7 @@ func TestHubRPCInstanceEditRenamePersistsWhenTheInitialReloadAndRollbackFail(t *
 	}
 	// The rename stood in providers.toml, so the client gets the discriminator
 	// rather than a plain failed save it would present as nothing happened.
-	var wire appwire.WireError
-	if !errors.As(err, &wire) || wire.Code != appwire.CodeInternalError {
-		t.Fatalf("error = %T %v, want wire code %d", err, err, appwire.CodeInternalError)
-	}
+	wire := requireWireError(t, err, appwire.CodeInternalError)
 	dataJSON, merr := json.Marshal(wire.Data)
 	if merr != nil {
 		t.Fatal(merr)
@@ -12566,12 +11638,7 @@ func TestHubRPCInstanceRemoveBroadcastsAuthUpdated(t *testing.T) {
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceRemove, appwire.InstanceRemoveParams{Name: "base"}, &resp); err != nil {
@@ -12606,12 +11673,7 @@ func TestHubRPCInstanceSetDefaultBroadcastsAuthUpdated(t *testing.T) {
 		CredsStore:          credsStore,
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	var resp appwire.InstanceListResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerInstanceSetDefault, appwire.InstanceSetDefaultParams{Name: "base"}, &resp); err != nil {
@@ -12637,6 +11699,51 @@ func dialHubRPC(t *testing.T, hub *httptest.Server) *appwire.Client {
 	client := appwire.NewClient(transport)
 	client.Start(context.Background())
 	return client
+}
+
+// unmarshalReplayEntry decodes a replay transcript entry from its raw JSON,
+// failing the test on malformed input.
+func unmarshalReplayEntry(t *testing.T, raw []byte) transcript.Entry {
+	t.Helper()
+	var entry transcript.Entry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal replay entry: %v", err)
+	}
+	return entry
+}
+
+// codexRelayThread returns the relay-source thread fixture the codex
+// subscription scenarios key on: ID and session pinned to threadID, send
+// capability on the codex ref.
+func codexRelayThread(threadID string) appwire.Thread {
+	return appwire.Thread{
+		ID:        threadID,
+		SessionID: threadID,
+		Source:    "codex",
+		Evener:    appwire.EvenerThread{Ref: "codex:" + threadID, Capabilities: appwire.ThreadCapabilities{Send: true}},
+	}
+}
+
+// startDaemonRoster serves a test daemon app server over WebSocket, registers
+// it as the local source's live rendezvous entry in a fresh run directory,
+// and returns the daemon's HTTP server, the roster refreshed over that
+// directory, and the directory itself. The HTTP server closes at test end.
+func startDaemonRoster(t *testing.T, daemon *appserver.Server, pid int, threadID, sessionID string) (*httptest.Server, *hubcore.Roster, string) {
+	t.Helper()
+	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
+	t.Cleanup(daemonHTTP.Close)
+	runDir := t.TempDir()
+	writeRendezvous(t, runDir, rendezvous.Entry{
+		PID:       pid,
+		Protocol:  appwire.ProtocolVersion,
+		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
+		SourceID:  "local",
+		ThreadID:  threadID,
+		SessionID: sessionID,
+	})
+	roster := hubcore.NewRoster(runDir, nil)
+	roster.Refresh()
+	return daemonHTTP, roster, runDir
 }
 
 func newHubRPCTestServer(t *testing.T, cfg hubcore.WebConfig) *httptest.Server {
@@ -12937,11 +12044,7 @@ func TestHubRPCTestServerRegistryIgnoresTheProcessCredentialsFile(t *testing.T) 
 		t.Fatalf("registry reload: %v; the fixture registry is still reading the process credentials file", err)
 	}
 
-	client := dialHubRPC(t, srv)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, srv)
 	var status appwire.AuthStatusResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerAuthStatus,
 		appwire.AuthStatusParams{Provider: "anthropic"}, &status); err != nil {
@@ -12993,12 +12096,7 @@ func TestHubRPCRegistersExpectedHandlerSet(t *testing.T) {
 		},
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 
 	expected := []string{
 		appwire.MethodThreadList,
@@ -13229,12 +12327,7 @@ func TestHubRPCThreadStartEnvModelSatisfiesRequiredGate(t *testing.T) {
 		Past:             hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		CWD: t.TempDir(),
 	}); err != nil {
@@ -13267,12 +12360,7 @@ func TestHubRPCThreadStartEmptyModelRejected(t *testing.T) {
 		Past:             hubcore.NewPastIndex(""),
 	})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.ThreadStart(context.Background(), appwire.ThreadStartParams{
 		CWD: t.TempDir(),
 	})
@@ -13337,29 +12425,11 @@ func TestHubRPCNotesHumanSetGatedByCapability(t *testing.T) {
 		notesReached = true
 		return appwire.NotesHumanSetResponse{Note: "x"}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       106,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 106, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.NotesHumanSet(context.Background(), appwire.NotesHumanSetParams{Ref: "local:th_1", ClientMutationID: "m1", ExpectedInstanceID: "sess_1", Note: "hi"})
 	if err == nil {
 		t.Fatal("NotesHumanSet succeeded despite missing SharedNotes capability")
@@ -13395,29 +12465,11 @@ func TestHubRPCUrlsRemoveGatedByCapability(t *testing.T) {
 		removeReached = true
 		return appwire.UrlsRemoveResponse{}, nil
 	})
-	daemonHTTP := httptest.NewServer(http.HandlerFunc(daemon.ServeWebSocket))
-	defer daemonHTTP.Close()
-
-	runDir := t.TempDir()
-	writeRendezvous(t, runDir, rendezvous.Entry{
-		PID:       106,
-		Protocol:  appwire.ProtocolVersion,
-		Endpoint:  "ws" + daemonHTTP.URL[len("http"):],
-		SourceID:  "local",
-		ThreadID:  "th_1",
-		SessionID: "sess_1",
-	})
-	roster := hubcore.NewRoster(runDir, nil)
-	roster.Refresh()
+	_, roster, runDir := startDaemonRoster(t, daemon, 106, "th_1", "sess_1")
 
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Past: hubcore.NewPastIndex("")})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	_, err := client.UrlsRemove(context.Background(), appwire.UrlsRemoveParams{Ref: "local:th_1", ClientMutationID: "m1", ExpectedInstanceID: "sess_1", ID: "u1"})
 	if err == nil {
 		t.Fatal("UrlsRemove succeeded despite missing SharedNotes capability")

@@ -32,10 +32,7 @@ func parityResumeFixture(t *testing.T, register func(daemon *appserver.Server)) 
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID = buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	register(daemon)
@@ -98,11 +95,7 @@ func TestHubRPCThreadClearResumesPastThread(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	response, err := client.ThreadClear(context.Background(), appwire.ThreadClearParams{Ref: "local:" + sessionID, ClientMutationID: "clear-past", ExpectedInstanceID: sessionID})
 	if err != nil {
 		t.Fatalf("ThreadClear: %v", err)
@@ -147,11 +140,7 @@ func TestHubRPCThreadNameSetEditsPastThreadWithoutResume(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadNameSet(context.Background(), appwire.ThreadNameSetParams{Ref: "local:" + sessionID, Name: "renamed"}); err != nil {
 		t.Fatalf("ThreadNameSet: %v", err)
 	}
@@ -205,11 +194,7 @@ func TestHubRPCGoalSetResumesPastThread(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.GoalSet(context.Background(), appwire.GoalSetParams{Ref: "local:" + sessionID, Objective: "ship it"})
 	if err != nil {
 		t.Fatalf("GoalSet: %v", err)
@@ -256,11 +241,7 @@ func TestHubRPCNotesHumanSetResumesPastThread(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.NotesHumanSet(context.Background(), appwire.NotesHumanSetParams{Ref: "local:" + sessionID, ClientMutationID: "note-past", ExpectedInstanceID: sessionID, Note: "whiteboard note"})
 	if err != nil {
 		t.Fatalf("NotesHumanSet: %v", err)
@@ -307,11 +288,7 @@ func TestHubRPCUrlsRemoveResumesPastThread(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if _, err := client.UrlsRemove(context.Background(), appwire.UrlsRemoveParams{Ref: "local:" + sessionID, ClientMutationID: "url-rm-past", ExpectedInstanceID: sessionID, ID: "u1"}); err != nil {
 		t.Fatalf("UrlsRemove: %v", err)
 	}
@@ -331,10 +308,7 @@ func TestHubRPCThreadShutdownExitedSessionIsNoOpSuccess(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	runDir := t.TempDir()
 	resumeCalled := false
 	spawner := &fakeRPCSpawner{
@@ -346,11 +320,7 @@ func TestHubRPCThreadShutdownExitedSessionIsNoOpSuccess(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	if err := client.ThreadShutdown(context.Background(), appwire.ThreadShutdownParams{Ref: "local:" + sessionID}); err != nil {
 		t.Fatalf("ThreadShutdown on exited session: %v, want no-op success", err)
 	}
@@ -368,10 +338,7 @@ func TestHubRPCThreadForkExitedSessionSucceeds(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	runDir := t.TempDir()
 	resumeCalled := false
 	spawner := &fakeRPCSpawner{
@@ -383,11 +350,7 @@ func TestHubRPCThreadForkExitedSessionSucceeds(t *testing.T) {
 	roster := hubcore.NewRoster(runDir, nil)
 	hub := newHubRPCTestServer(t, hubcore.WebConfig{RunDir: runDir, Roster: roster, Spawner: spawner, Past: past})
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	resp, err := client.ThreadFork(context.Background(), appwire.ThreadForkParams{
 		Ref:           "local:" + sessionID,
 		SourceItemKey: "apptranscript-item-v2:t_1:0:0",
@@ -465,10 +428,7 @@ func newExitedSessionHub(t *testing.T) (*appwire.Client, *bool) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 	runDir := t.TempDir()
 	resumeCalled := false
 	spawner := &fakeRPCSpawner{
@@ -482,9 +442,7 @@ func newExitedSessionHub(t *testing.T) (*appwire.Client, *bool) {
 	t.Cleanup(hub.Close)
 	client := dialHubRPC(t, hub)
 	t.Cleanup(func() { _ = client.Close() })
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	mustInitializeHubClient(t, client)
 	return client, &resumeCalled
 }
 
@@ -521,10 +479,7 @@ func TestHubRPCConcurrentMutationsResumeExitedSessionOnce(t *testing.T) {
 	workingDir := t.TempDir()
 	stateDir := filepath.Join(root, "projects", "project-past-0000000000")
 	sessionID := buildRPCParentSessionWithWorkingDir(t, stateDir, workingDir)
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	daemon := appserver.NewServer(appserver.ServerConfig{ServerName: "daemon", SourceID: "local"})
 	appserver.HandleTyped(daemon.Router(), appwire.MethodThreadRead, func(_ context.Context, params appwire.ThreadReadParams) (appwire.ThreadReadResponse, error) {

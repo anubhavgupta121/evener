@@ -404,9 +404,7 @@ func TestRestartBareRecoversPidArgvAndLog(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -473,9 +471,7 @@ func TestRestartBarePSInvocationSuppressesHeader(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -534,9 +530,7 @@ func TestRestartBareStripsLeadingPSHeader(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -590,9 +584,7 @@ func TestRestartBareQuotesRecoveredLogPath(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -651,9 +643,7 @@ func TestWaitPortClearSurfacesProbeFailure(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected remote command: %v", argv)
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.waitPortClear(context.Background(), host, port); !errors.Is(err, ErrRestart) {
 		t.Fatalf("err = %v, want ErrRestart (a transport failure is not a clear port)", err)
@@ -859,9 +849,7 @@ func TestHostAddrDrivesRestartAndHealthProbes(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -921,9 +909,7 @@ func TestRestartBareRefusesForeignProcessOnHubPort(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -967,9 +953,7 @@ func TestRestartBareRefusesListenerOwnedByAnotherUser(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1020,9 +1004,7 @@ func TestRestartBareRefusesWhenListenerOwnerIsNotTheProbedLoginUser(t *testing.T
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1081,9 +1063,7 @@ func TestRestartBareRestartsAListenerOwnedByTheEffectiveUser(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v (a hub owned by the effective user must restart)", err)
@@ -1157,9 +1137,7 @@ func TestRestartBareRefusesCompoundCommandLine(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1193,9 +1171,7 @@ func TestRestartBareRefusesAddrMismatch(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1227,9 +1203,7 @@ func TestRestartBareRefusesSamePortDifferentHost(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1266,9 +1240,7 @@ func TestRestartBareRefusesDefaultAddrAtNonDefaultEndpoint(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -1327,9 +1299,7 @@ func TestRestartBareInspectsListenerAddress(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v (a listener owning the configured endpoint must restart)", err)
@@ -1364,9 +1334,7 @@ func TestRestartBareListenerAddressBeatsRecoveredAddr(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -2842,9 +2810,7 @@ func TestRestartBarePrefersNullDelimitedArgv(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -2892,9 +2858,7 @@ func TestRestartBareRefusesAmbiguousSplitValue(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
@@ -3247,9 +3211,7 @@ func TestRestartBareRecordsRelaunchBeforePortClearFails(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); !errors.Is(err, ErrRestart) {
 		t.Fatalf("restartBare err = %v, want ErrRestart (the port stayed held)", err)
@@ -3751,9 +3713,7 @@ func TestRestartBareFailsClosedOnUnusableProcArgv(t *testing.T) {
 			return nil, fmt.Errorf("unexpected remote command: %v", argv)
 		}
 	}}
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {

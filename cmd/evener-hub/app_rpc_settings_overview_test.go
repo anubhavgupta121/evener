@@ -20,12 +20,7 @@ func requestSettingsOverview(t *testing.T, hubCfg hubcore.WebConfig) appwire.Set
 	t.Helper()
 	hub := newHubRPCTestServer(t, hubCfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	var resp appwire.SettingsOverviewResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerSettingsOverview, appwire.EmptyParams{}, &resp); err != nil {
 		t.Fatalf("evener/settings/overview: %v", err)
@@ -73,11 +68,7 @@ func TestHubRPCSettingsOverview_HubAndStorage(t *testing.T) {
 
 	hub := newHubRPCTestServer(t, cfg)
 	defer hub.Close()
-	client := dialHubRPC(t, hub)
-	defer client.Close()
-	if _, err := client.Initialize(context.Background(), appwire.InitializeParams{ProtocolVersion: appwire.ProtocolVersion}); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	client := dialHubRPCInitialized(t, hub)
 	var resp appwire.SettingsOverviewResponse
 	if err := client.Request(context.Background(), appwire.MethodEvenerSettingsOverview, appwire.EmptyParams{}, &resp); err != nil {
 		t.Fatalf("evener/settings/overview: %v", err)
