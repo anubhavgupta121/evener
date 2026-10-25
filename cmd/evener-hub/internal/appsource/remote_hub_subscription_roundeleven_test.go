@@ -2,7 +2,6 @@ package appsource
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"testing"

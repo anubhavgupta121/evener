@@ -388,7 +388,7 @@ func TestRemoteHubSourceNestedNonLocalRefRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReadThread accepted a nested non-local ref")
 	}
-	wire := requireWireError(t, err, appwire.CodeInternalError)
+	requireWireError(t, err, appwire.CodeInternalError)
 }
 
 func TestRemoteHubSourceEOFBecomesSessionUnavailable(t *testing.T) {

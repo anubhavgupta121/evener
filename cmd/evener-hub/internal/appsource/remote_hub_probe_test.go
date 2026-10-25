@@ -220,7 +220,7 @@ func TestRemoteHubSourceHostCapabilitiesMapsWireError(t *testing.T) {
 	if err == nil {
 		t.Fatal("HostCapabilities succeeded despite a wire error")
 	}
-	wire := requireWireError(t, err, appwire.CodeInvalidParams)
+	requireWireError(t, err, appwire.CodeInvalidParams)
 }
 
 func TestRemoteHubSourceHostCapabilitiesClosedTransport(t *testing.T) {
