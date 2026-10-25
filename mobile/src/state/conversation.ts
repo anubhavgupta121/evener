@@ -96,13 +96,25 @@ import type {
 	LiveConversationService,
 } from "../services/conversation";
 import type { ActivityIdentity, NotificationOutcome } from "./activity";
-import type {
-	ConversationMutationContext,
-	ConversationMutationPendingPort,
-	ConversationMutationSubmitter,
+import {
+	type ConversationMutationAdmission,
+	type ConversationMutationContext,
+	type ConversationMutationPendingPort,
+	type ConversationMutationSubmitter,
+	MutationNotSentError,
 } from "./conversationMutation";
 
 export type ConversationStatus = "idle" | "opening" | "open" | "error" | "closed";
+
+// Store-owned canonical-read validity. `unknown` means no accepted
+// latest-window read currently backs the model (before the first read, after an
+// invalidation, or after a read was discarded); `reading` means one is
+// required/in flight; `ready` means the published model is the accepted current
+// latest window; `error` means the required read failed. Only an accepted
+// current latest-window publication sets `ready` — a returned promise, paging,
+// display reprojection, pending emptiness or a discarded/superseded read must
+// not. Display rows stay readable in every state.
+export type LatestReadState = "unknown" | "reading" | "ready" | "error";
 
 // The wire's nil/non-nil-empty/non-empty rule (reducer.ts's own
 // ITEM_OMISSION_TOLERANT_FIELDS, mirrored here for the mobile-only merges
@@ -171,6 +183,35 @@ export interface ConversationMutationState {
 	generation: number;
 	/** @internal — monotonic token for stale-check; not for external consumption. */
 	mutationId: number;
+	/** @internal — the durable row's clientMutationId once the submitter
+	 * admitted it. Absent while an attempt owns only its local token and on a
+	 * submitter that returned no admission. */
+	admittedMutationId?: string;
+}
+
+/** The any-mutation click-to-commit window: present from a Send, Queue or Stop
+ * press until that attempt settles. Screens read this one fact so every guard
+ * — not only Stop's — refuses while any mutation is in flight. The admitted id
+ * is recorded once the durable submitter returns one. */
+export interface ConversationPendingSubmission {
+	readonly kind: ConversationMutationState["kind"];
+	/** @internal — the durable row's clientMutationId once admitted. */
+	readonly admittedMutationId?: string;
+}
+
+/** The retained terminal failure: derived from the failed pending record, so
+ * it is non-null exactly while that record is failed and survives or ends
+ * with it. Failed-retention readers — the rehydrate error guard — read this
+ * marker rather than the legacy record's status. The error text itself stays
+ * in `error` and the draft restore in `draft`; the marker carries only the
+ * failed attempt's identity, plus the durable row's id when the attempt was
+ * admitted. */
+export interface ConversationFailedSubmission {
+	readonly kind: ConversationMutationState["kind"];
+	/** @internal — the failed attempt's own monotonic id. */
+	readonly mutationId: number;
+	/** @internal — the durable row's clientMutationId once admitted. */
+	readonly admittedMutationId?: string;
 }
 
 /** Display-safe local acknowledgement of a completed production mutation. A
@@ -387,15 +428,34 @@ export interface ConversationState {
 	readonly loadingOlder: boolean;
 	readonly status: ConversationStatus;
 	readonly error: string | null;
+	// Canonical read validity owned by this store (see LatestReadState).
+	readonly latestReadState: LatestReadState;
 
 	readonly draft: string;
-	readonly pendingSend: string | null;
 	readonly pendingMutation?: ConversationMutationState | null;
+	/** The in-flight mutation's click-to-commit marker: non-null from the
+	 * Send/Queue/Stop press until the attempt settles. */
+	readonly pendingSubmission: ConversationPendingSubmission | null;
+	/** The retained terminal-failure marker, derived at the set chokepoint
+	 * from the pending record: non-null exactly while that record is failed,
+	 * surviving a rebind with it and ending at the next admission or any
+	 * state that clears the record. */
+	readonly failedSubmission: ConversationFailedSubmission | null;
 	// Slice 7a: the durable pending rows a host's bound seam projects. Null until
 	// a seam is bound (LiveConversationState.bindPendingMutations); never a
 	// per-process memory fact, so it survives a cold reopen.
 	readonly pendingMutations?: readonly PendingTurnEntry[] | null;
+	// Whether `pendingMutations` is the verified current durable projection.
+	// False before the first durable read, after a target storage notification
+	// (synchronously, before its read starts), and after a failed read. Rows may
+	// still be displayed while false; they are never a verified snapshot then.
+	readonly pendingMutationsReady: boolean;
 	readonly lastAcceptedMutation?: AcceptedConversationMutation | null;
+
+	// The canonical session model, returned only while this store holds an
+	// accepted current latest-window publication. Read-only: it derives from
+	// latestReadState and the display model, and never restores validity.
+	canonicalSession(): MobileConversation | null;
 
 	// The non-projected compatibility surface, kept for screen test mocks; no
 	// production screen calls it (they open through openProjected /
@@ -404,8 +464,18 @@ export interface ConversationState {
 	open(service: ConversationService, ref: string): Promise<void>;
 	loadOlder(service: ConversationService): Promise<LoadOlderResult>;
 	setDraft(text: string): void;
-	send(service: ConversationService, input: InputItem[], context?: ConversationMutationContext): Promise<void>;
-	queue(service: ConversationService, input: InputItem[], context?: ConversationMutationContext): Promise<void>;
+	send(
+		service: ConversationService,
+		input: InputItem[],
+		context?: ConversationMutationContext,
+		precondition?: () => boolean,
+	): Promise<void>;
+	queue(
+		service: ConversationService,
+		input: InputItem[],
+		context?: ConversationMutationContext,
+		precondition?: () => boolean,
+	): Promise<void>;
 	interrupt(service: ConversationService): Promise<void>;
 	close(): void;
 	applyNotification(n: AnyNotification): void;
@@ -443,6 +513,15 @@ export interface LiveConversationState extends ConversationState {
 	// suspend/rehydrate generation bump that did not retire the seam leaves the
 	// live subscription untouched. Returns null when a seam is already bound.
 	bindPendingMutationsIfUnbound(port: ConversationMutationPendingPort): (() => void) | null;
+	// Requests the store's one authoritative latest-window read through the
+	// existing drain scheduler and resolves when that request settles (or
+	// immediately when there is no live binding). Resolving proves the request
+	// ran, never that the read was accepted; only publication sets `ready`.
+	ensureLatest(): Promise<void>;
+	// Demands a fresh current durable pending read and resolves when it settles.
+	// Readiness is false synchronously before the read starts and stays false if
+	// it fails. Retirement resolves the wait without undoing a commit.
+	refreshPendingMutations(): Promise<void>;
 	openProjected(
 		service: LiveConversationService,
 		activitySink: LiveActivitySink,
@@ -473,6 +552,16 @@ export interface LiveConversationState extends ConversationState {
 // pattern used by isHubLaunchError.
 function isActionUnavailableError(err: unknown): boolean {
 	return err instanceof WireError && err.evenerErrorInfo === "actionUnavailable";
+}
+
+// Whether a model's held history can back canonical latest-turn authority. An
+// invalidated history is awaiting a newer incarnation, and a failed one carries
+// a read diagnostic; neither is an accepted current latest-window publication.
+// A model with no versioned history at all (a legacy hydrate) has no such
+// marker and stays eligible — the read that published it was still accepted.
+function historySupportsCanonicalRead(conversation: MobileConversation | null | undefined): boolean {
+	const history = conversation?.history;
+	return history === undefined || (history.invalidatedAtGeneration === undefined && history.failed === undefined);
 }
 
 // A mutation's precondition, re-evaluated at the mutation boundary rather than
@@ -544,17 +633,18 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	const mutationSubmitter = options.mutationSubmitter;
 
 	// The durable path for one conversation mutation: the intent is admitted
-	// through the host's runtime at the enqueue boundary and returns no wire
-	// receipt, so the caller settles on admission rather than on a daemon answer.
-	// The target ref and instance fence come from the operation binding the
-	// caller already captured and rechecks after the await.
+	// through the host's runtime at the enqueue boundary and returns the durable
+	// row's id with no wire receipt, so the caller settles on admission rather
+	// than on a daemon answer. The target ref and instance fence come from the
+	// operation binding the caller already captured and rechecks after the await.
 	function submitMutation(
 		kind: ConversationMutationState["kind"],
 		opBinding: RequestBinding,
 		conversation: MobileConversation,
 		input: InputItem[],
 		context?: ConversationMutationContext,
-	): Promise<MutationReceipt | undefined> {
+		precondition?: () => boolean,
+	): Promise<ConversationMutationAdmission | undefined> {
 		return mutationSubmitter!.submit({
 			kind,
 			hubId: mutationHubId,
@@ -563,12 +653,16 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			instanceId: conversation.instanceId ?? conversation.threadId,
 			input,
 			...context,
+			...(precondition === undefined ? {} : { precondition }),
 		});
 	}
 
 	// One mutation's transport: admitted durably through the submitter when the
-	// host wired one, otherwise the service's own method. Keeping the choice here
-	// means each action declares only its kind, binding and input.
+	// host wired one, otherwise the service's own method. The service path wraps
+	// its acknowledgement as a local admission, so both paths give the caller
+	// one shape (a receipt only where the service actually returned one).
+	// Keeping the choice here means each action declares only its kind, binding
+	// and input.
 	function dispatchMutation(
 		service: ConversationService,
 		kind: ConversationMutationState["kind"],
@@ -576,17 +670,34 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 		conversation: MobileConversation,
 		input: InputItem[],
 		context?: ConversationMutationContext,
-	): Promise<MutationReceipt | undefined> {
-		if (mutationSubmitter !== undefined) return submitMutation(kind, opBinding, conversation, input, context);
+		precondition?: () => boolean,
+	): Promise<ConversationMutationAdmission | undefined> {
+		if (mutationSubmitter !== undefined)
+			return submitMutation(kind, opBinding, conversation, input, context, precondition);
+		const withReceipt = (receipt: MutationReceipt): ConversationMutationAdmission => ({
+			clientMutationId: receipt.clientMutationId,
+			receipt,
+		});
 		switch (kind) {
 			case "send":
-				return service.send(input);
+				return service.send(input).then(withReceipt);
 			case "queue":
-				return service.queue(input);
+				return service.queue(input).then(withReceipt);
 			case "interrupt":
-				return service.interrupt();
+				return service.interrupt().then(withReceipt);
 		}
 	}
+
+	// What the store reports for a settled mutation. The durable path has no
+	// wire receipt to carry, so the receipt rides along only when the transport
+	// actually returned one (the service path).
+	function acceptedMutation(
+		kind: ConversationMutationState["kind"],
+		admission: ConversationMutationAdmission | undefined,
+	): AcceptedConversationMutation {
+		return { kind, receipt: admission?.receipt };
+	}
+
 	let conversationGen = 0;
 	let mutationIdCounter = 0;
 	// Draft revision: a monotonically increasing counter incremented on every
@@ -1323,6 +1434,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	// Late-bound store getter — assigned inside create() so requestRehydrate
 	// (called from applyNotification) can access get().rehydrate.
 	let storeGet: (() => LiveConversationState) | null = null;
+	// Late-bound canonical-read invalidation — assigned inside create() so a
+	// request made here (a frame's resync/gap, a page's invalidation) drops
+	// live-tail authority synchronously, before the scheduler's effect starts.
+	let markLatestReadState: ((state: LatestReadState) => void) | null = null;
 
 	// I1: Capture the current binding snapshot at request time. The effect
 	// verifies ALL fields (epoch+ref+generation+service+sink object identities)
@@ -1401,6 +1516,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			return;
 		}
 		if (service === null || sink === null) return;
+		// A read request invalidates live-tail authority at once: the model on
+		// screen stays readable, but it is no longer the verified canonical
+		// session until this read (or a newer accepted one) publishes.
+		markLatestReadState?.("reading");
 		scheduler.request(ref, async () => {
 			// I1: Suppress stale work BEFORE any read — if the binding changed,
 			// do not call rehydrate (serviceA must never be called with refB).
@@ -1557,6 +1676,26 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	let pendingPort: ConversationMutationPendingPort | null = null;
 	let pendingUnsubscribe: (() => void) | null = null;
 	let pendingGeneration = 0;
+	// The bound seam's "demand a fresh current read" operation and the waiters
+	// an awaitable refresh is holding. Retirement resolves those waiters (it
+	// cancels the wait, never the commit) so no caller is left awaiting a read
+	// from a seam that no longer exists.
+	let pendingDemandRead: (() => Promise<void>) | null = null;
+	const pendingRefreshWaiters = new Set<() => void>();
+	function settlePendingRefreshes(): void {
+		const waiters = [...pendingRefreshWaiters];
+		pendingRefreshWaiters.clear();
+		for (const waiter of waiters) waiter();
+	}
+	// Demand a fresh read of the bound durable projection for an explicit
+	// lifecycle event (a connection recovery or a canonical read demand), not a
+	// storage notification. No timer and no loop: a failure leaves readiness false
+	// and the next explicit event tries again.
+	function demandBoundPendingRead(): void {
+		const demand = pendingDemandRead;
+		if (demand === null) return;
+		void demand();
+	}
 	// Advanced only by forgetPendingProvenance (close/reset). A read's provenance
 	// write is fenced on THIS, not on pendingGeneration: a read in flight across a
 	// same-target rebind or a thread open still observed a durable record of this
@@ -1633,6 +1772,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	// same-target rebind keeps it and a still-authoritative entry stays honest.
 	function detachPendingRows(): void {
 		++pendingGeneration;
+		pendingDemandRead = null;
+		settlePendingRefreshes();
 		pendingUnsubscribe?.();
 		pendingUnsubscribe = null;
 		pendingPort = null;
@@ -1657,6 +1798,15 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 		const set = (partial: Partial<ConversationState>) => {
 			if ("pendingMutation" in partial) mutationOwnerRev += 1;
 			if ("error" in partial) errorOwnerRev += 1;
+			// Stage C: the retained-failure marker is a projection of the pending
+			// record, never a second hand-maintained fact. Deriving it at this
+			// chokepoint makes "marker non-null exactly while the record is
+			// failed" hold by construction for every writer, including the ones
+			// that only clear.
+			let out = partial;
+			if ("pendingMutation" in partial) {
+				out = { ...partial, failedSubmission: failedSubmissionFor(partial.pendingMutation ?? null) };
+			}
 			// A conversation write is the one model change the reconciliation has to
 			// see: re-project the durable rows against the model being committed, so a
 			// mutation the model now reflects drops out with no storage round-trip.
@@ -1665,26 +1815,55 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			// mutation, pendingMutations still holds its stale row). A partial that
 			// publishes its own pendingMutations (open/close/reset/unbind) owns that
 			// field and is written as-is.
-			if (
-				"conversation" in partial &&
-				!("pendingMutations" in partial) &&
-				pendingPort !== null &&
-				pendingSnapshot !== null
-			) {
-				const next = reconcilePendingMutations(partial.conversation);
+			if ("conversation" in out && !("pendingMutations" in out) && pendingPort !== null && pendingSnapshot !== null) {
+				const next = reconcilePendingMutations(out.conversation);
 				if (!samePendingRows(get().pendingMutations, next)) {
-					rawSet({ ...partial, pendingMutations: next });
+					rawSet({ ...out, pendingMutations: next });
 					return;
 				}
 			}
-			rawSet(partial);
+			rawSet(out);
+		};
+		// Record the durable row's identity on the attempt's pending record once
+		// the submitter admits it. Only the attempt that still owns the record
+		// writes: a newer mutation may have replaced it while the admission was
+		// in flight, and that record must survive untouched.
+		const recordAdmittedMutation = (
+			admission: ConversationMutationAdmission | undefined,
+			mutationId: number,
+			mutation: ConversationMutationState,
+		) => {
+			if (admission === undefined || get().pendingMutation?.mutationId !== mutationId) return;
+			set({
+				pendingMutation: { ...mutation, admittedMutationId: admission.clientMutationId },
+				pendingSubmission: { kind: mutation.kind, admittedMutationId: admission.clientMutationId },
+			});
 		};
 		storeGet = get;
+		// The one chokepoint for canonical-read validity transitions. Guarded so
+		// a repeated request does not churn subscribers.
+		const markLatest = (next: LatestReadState) => {
+			if (get().latestReadState !== next) set({ latestReadState: next });
+		};
+		markLatestReadState = markLatest;
 		// Re-projects the durable rows against the current model and publishes
 		// them only when they changed, so subscribers keep a stable reference.
-		const republishPendingRows = () => {
+		// `ready`, when supplied, rides the same write: a read that certifies the
+		// projection publishes its rows and readiness atomically.
+		const republishPendingRows = (ready?: boolean) => {
 			const next = reconcilePendingMutations();
-			if (!samePendingRows(get().pendingMutations, next)) set({ pendingMutations: next });
+			const current = get();
+			const readyChanged = ready !== undefined && current.pendingMutationsReady !== ready;
+			const rowsChanged = !samePendingRows(current.pendingMutations, next);
+			if (rowsChanged || readyChanged) {
+				set({
+					// A readiness-only change reuses the published rows array, so the
+					// stability contract (an unchanged projection keeps its reference)
+					// holds across a re-served read.
+					...(rowsChanged ? { pendingMutations: next } : {}),
+					...(ready === undefined ? {} : { pendingMutationsReady: ready }),
+				});
+			}
 		};
 		// What a publish records when its cap trimmed rows from the top. An older
 		// page in flight asked from above rows the trim just dropped: merged, it
@@ -1711,12 +1890,22 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			loadingOlder: false,
 			status: "idle",
 			error: null,
+			latestReadState: "unknown",
 
 			draft: "",
-			pendingSend: null,
 			pendingMutation: null,
+			pendingSubmission: null,
+			failedSubmission: null,
 			pendingMutations: null,
+			pendingMutationsReady: false,
 			lastAcceptedMutation: null,
+
+			canonicalSession() {
+				const current = get();
+				return current.latestReadState === "ready" && historySupportsCanonicalRead(current.conversation)
+					? current.conversation
+					: null;
+			},
 
 			setDisplayConfig(config) {
 				const current = get();
@@ -1815,6 +2004,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					status: "opening",
 					ref,
 					error: null,
+					latestReadState: "reading",
 					conversation: null,
 					olderCursor: null,
 					trimmedAbove: false,
@@ -1822,9 +2012,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					hasLaterItems: false,
 					loadingOlder: false,
 					draft: "",
-					pendingSend: null,
 					pendingMutation: null,
+					pendingSubmission: null,
 					pendingMutations: null,
+					pendingMutationsReady: false,
 					lastAcceptedMutation: null,
 					conversationGeneration: gen,
 				});
@@ -1839,6 +2030,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						...trimmedState(trimmed),
 						status: "open",
 						olderCursor: null,
+						latestReadState: historySupportsCanonicalRead(bounded) ? "ready" : "unknown",
 					});
 					// C1: Track the plain-open service as boundService with a null
 					// sink so loadOlder/mutations validate exact service
@@ -1854,6 +2046,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					set({
 						status: "error",
 						error: err instanceof Error ? err.message : String(err),
+						latestReadState: "error",
 					});
 				}
 			},
@@ -1885,14 +2078,16 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					status: "opening",
 					ref,
 					error: null,
+					latestReadState: "reading",
 					conversation: null,
 					olderCursor: null,
 					trimmedAbove: false,
 					loadingOlder: false,
 					draft: "",
-					pendingSend: null,
 					pendingMutation: null,
+					pendingSubmission: null,
 					pendingMutations: null,
+					pendingMutationsReady: false,
 					lastAcceptedMutation: null,
 					conversationGeneration: gen,
 				});
@@ -1920,7 +2115,12 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// do not commit the conversation projection — the two stores stay
 					// atomically consistent under the same exact identity tuple.
 					const accepted = sink.setLiveView(activity, identity);
-					if (!accepted) return;
+					if (!accepted) {
+						// Nothing was committed as this generation's canonical
+						// projection; no read backs the display.
+						markLatest("unknown");
+						return;
+					}
 					adoptRead(conversation);
 					const { conversation: bounded, trimmed } = capAndTruncate(conversation);
 					set({
@@ -1930,6 +2130,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						olderCursor,
 						hasEarlierItems: hasEarlierItems ?? false,
 						hasLaterItems: hasLaterItems ?? false,
+						latestReadState: historySupportsCanonicalRead(bounded) ? "ready" : "unknown",
 					});
 					liveHandler = (n) => {
 						if (gen !== conversationGen) return;
@@ -1940,6 +2141,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					set({
 						status: "error",
 						error: err instanceof Error ? err.message : String(err),
+						latestReadState: "error",
 					});
 				} finally {
 					if (!liveHandler) {
@@ -1963,8 +2165,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				set({
 					status: "opening",
 					error: null,
+					latestReadState: "unknown",
 					pendingMutation: null,
-					pendingSend: null,
+					pendingSubmission: null,
 					loadingOlder: false,
 					conversationGeneration: conversationGen,
 				});
@@ -1981,6 +2184,11 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					await get().openProjected(service, sink, ref);
 					return;
 				}
+				// Connection recovery is an explicit freshness event for the retained
+				// durable projection too. The bound port survives a suspend, so its
+				// idempotent rebind performs no read; without this, one transient
+				// pending-read failure would strand Retry until a full remount.
+				demandBoundPendingRead();
 				const gen = ++conversationGen;
 				bindingEpoch += 1;
 				loadOlderToken += 1;
@@ -1991,8 +2199,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				set({
 					status: "opening",
 					error: null,
+					latestReadState: "reading",
 					pendingMutation: null,
-					pendingSend: null,
+					pendingSubmission: null,
 					loadingOlder: false,
 					conversationGeneration: gen,
 				});
@@ -2021,6 +2230,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						set({
 							status: "error",
 							error: current.error ?? "Could not load the session. Try again.",
+							latestReadState: "error",
 						});
 						return;
 					}
@@ -2063,6 +2273,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				const state = get();
 				if (state.ref === null) return;
 				acceptedRehydrate = null;
+				// A read is now required: the model on screen stops being canonical
+				// authority until this read publishes an accepted latest window.
+				markLatest("reading");
 				const ref = state.ref;
 				const gen = state.conversationGeneration;
 				// I1: If the service or sink objects differ from the current binding,
@@ -2088,7 +2301,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						// Settle the old pending mutation — it belongs to A's binding.
 						// Do NOT write error (a newer error owner may own it). Just
 						// clear the pending state so it's not permanently stuck.
-						set({ pendingMutation: null, pendingSend: null });
+						set({ pendingMutation: null, pendingSubmission: null });
 					}
 					// I5: Settle held loadingOlder from the old binding.
 					if (get().loadingOlder) {
@@ -2143,6 +2356,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						}
 						// Preserve current draft only — do not publish projection.
 						set({ draft: currentSnapshot.draft });
+						// This read's answer predates the newer mutation owner, so it
+						// certifies nothing; the trailing reread will.
+						markLatest("unknown");
 						return;
 					}
 					// The snapshot is authoritative for every row it carries (the
@@ -2209,6 +2425,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 							generation: gen,
 						});
 						if (discardAccepted) acceptedRehydrate = { generation: gen, sink };
+						// The wire answered but this model declined the read by its own
+						// identity rules: a discarded read never restores canonical
+						// authority.
+						markLatest("unknown");
 						return;
 					}
 					// A fresh read can reissue a paged/retained item under a DIFFERENT
@@ -2290,7 +2510,15 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// Strict activity sink: call setLiveView BEFORE committing the paired
 					// conversation projection. If it returns false, do not commit.
 					const accepted = sink.setLiveView(activity, identity);
-					if (!accepted) return;
+					if (!accepted) {
+						// The sink rejected this publication, so nothing committed and it
+						// is not canonical authority. Settle into the recoverable failure
+						// state rather than leaving "reading": the entry read actor retries
+						// "error", while the screen's demand only handles "unknown". The
+						// displayed model stays readable.
+						markLatest("error");
+						return;
+					}
 					acceptedRehydrate = { generation: gen, sink };
 					adoptRead(conversation);
 					// R1: Success preserves any newer error owner. Only clear error if
@@ -2299,7 +2527,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// subsequent mutation or open clears it.
 					const currentState = get();
 					const errorUnchanged = entryErrorRev === errorOwnerRev;
-					const mutationOwnsError = currentState.pendingMutation?.status === "failed";
+					const mutationOwnsError = currentState.failedSubmission !== null;
 					// #1919 follow-up: bound the merged result AFTER the merge, so
 					// turns inside the keep-window keep everything the held history
 					// supplied, and only out-of-window payloads trim. The final
@@ -2373,7 +2601,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 							mergedTurns,
 						),
 					);
-					const commitBase = {
+					const commitBase: Partial<ConversationState> = {
 						conversation: committedConversation,
 						// A read of another instance replaces the window, and with it
 						// any trim above it; the same instance keeps its trim.
@@ -2382,6 +2610,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						hasEarlierItems: hasEarlierItems ?? currentSnapshot.hasEarlierItems,
 						hasLaterItems: hasLaterItems ?? currentSnapshot.hasLaterItems,
 						draft: currentState.draft,
+						// Only this accepted latest-window publication restores canonical
+						// authority — and only if the merged history is not itself
+						// invalidated or failed.
+						latestReadState: historySupportsCanonicalRead(committedConversation) ? "ready" : "unknown",
 					};
 					if (errorUnchanged && !mutationOwnsError && currentState.error !== null) {
 						// I1: Only include error: null when the current error is actually
@@ -2398,18 +2630,27 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// R1: failure may set error only if error/page/mutation owners all
 					// remain unchanged. Check binding epoch, generation, token, page
 					// owner, mutation-owner revision, and error-owner revision.
+					// Latest-read validity is this read's own fact, not a display
+					// owner's: it settles on the binding epoch, generation and
+					// operation token alone. A page that started while this read was
+					// outstanding (or a newer mutation/error owner) may keep its error
+					// text, but leaving "reading" here would strand canonical authority
+					// and the read actor, which observes exactly this state.
 					const currentSnapshot = get();
+					const latestCurrent =
+						entryEpoch === bindingEpoch && currentSnapshot.conversationGeneration === gen && token === rehydrateToken;
+					if (!latestCurrent) return;
 					if (
-						entryEpoch === bindingEpoch &&
-						currentSnapshot.conversationGeneration === gen &&
-						token === rehydrateToken &&
 						entryLoadOlderToken === loadOlderToken &&
 						entryMutationRev === mutationOwnerRev &&
 						entryErrorRev === errorOwnerRev
 					) {
 						set({
 							error: err instanceof Error ? err.message : String(err),
+							latestReadState: "error",
 						});
+					} else {
+						markLatest("error");
 					}
 				}
 			},
@@ -2590,6 +2831,15 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 								heldHistory.pendingIncarnation !== mergedHistory.pendingIncarnation;
 							if (newlyInvalidated) {
 								requestRehydrate(currentConv.ref);
+							} else if (get().latestReadState === "ready") {
+								// An already-invalid thread with no newer signal owes no
+								// scheduled read of its own: no accepted current window
+								// backs the display. Only a ready model loses authority
+								// here: a page is not a latest-window read, so it must not
+								// rewrite "reading" (a read in flight, which a rewrite would
+								// make the Retry surface demand again) or "error" (the entry
+								// read actor's retry demand, which "unknown" would cancel).
+								markLatest("unknown");
 							}
 							return { status: "ignored" };
 						}
@@ -2719,8 +2969,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				detachPendingRows();
 				// Replacing the binding retires the prior target's published rows at
 				// once: they belong to the seam being replaced, and a replacement whose
-				// own first read never lands must not leave them standing.
-				set({ pendingMutations: null });
+				// own first read never lands must not leave them standing. Nothing is
+				// certified for the new seam until its own read answers.
+				set({ pendingMutations: null, pendingMutationsReady: false });
 				const generation = pendingGeneration;
 				pendingPort = port;
 				// Within one binding, only a read newer than the last PUBLISHED one may
@@ -2731,8 +2982,14 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// nothing.
 				let readRequest = 0;
 				let lastPublishedRequest = 0;
+				// Readiness fence, separate from the publish fence above: a read
+				// started at or below this point predates the newest freshness demand
+				// (a target storage notification or an admission handoff) and cannot
+				// certify readiness for it — though it may still publish display rows
+				// when a newer read failed, exactly as before.
+				let readinessFloor = 0;
 
-				const read = () => {
+				const read = (): Promise<void> => {
 					const request = ++readRequest;
 					const provenanceGeneration = pendingProvenanceGeneration;
 					let pending: ReturnType<ConversationMutationPendingPort["read"]>;
@@ -2741,9 +2998,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					} catch {
 						// A synchronous refusal is the read's failure: keep the last
 						// durable projection, exactly as an async rejection does.
-						return;
+						return Promise.resolve();
 					}
-					void pending.then(
+					return Promise.resolve(pending).then(
 						(snapshot) => {
 							let recordedProvenance = false;
 							// The provenance scan is fenced only on a forget (close/reset):
@@ -2785,23 +3042,57 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 							pendingSnapshot = snapshot;
 							// The same stability check the conversation-write path uses: a
 							// storage read that re-serves identical rows must not churn
-							// subscribers with a fresh array.
-							republishPendingRows();
+							// subscribers with a fresh array. Readiness is set only by a
+							// read started after the newest demand; a pre-notification read
+							// answering late leaves it false.
+							republishPendingRows(request > readinessFloor ? true : undefined);
 						},
 						() => {
 							// A failed read leaves the last durable projection standing: the
 							// shared projection fence's own rule, so a storage hiccup never
-							// blanks rows the user is watching. A later read retries.
+							// blanks rows the user is watching, and readiness stays false
+							// until a read answers. A later read retries.
 						},
 					);
 				};
 
-				pendingUnsubscribe = port.subscribe(read);
-				read();
+				// Demand a fresh current read: mark the projection not current
+				// synchronously, then start the read that may certify it. Every read
+				// already in flight predates this demand.
+				const demandFreshRead = (): Promise<void> => {
+					readinessFloor = readRequest;
+					if (get().pendingMutationsReady) set({ pendingMutationsReady: false });
+					return read();
+				};
+				pendingDemandRead = demandFreshRead;
+
+				pendingUnsubscribe = port.subscribe(() => {
+					// A target storage transition: readiness drops before this read
+					// starts (prior rows stay for display, never as a verified empty
+					// snapshot), and canonical authority is fail-closed at once.
+					void demandFreshRead();
+					// Deliberately NOT `ensureLatest()` here. On native that read
+					// takes the runtime's authoritative-read lease, which blocks the
+					// target between the outbox dispatcher's post-mark client recheck
+					// and its request — no turn/start or turn/queue leaves the phone
+					// and the attempted row parks blockedUnknown. Retry authority only
+					// needs to be unavailable until an accepted publication; a
+					// consumer that can afford the read (the Retry surface/entry read
+					// actor) demands it through ensureLatest at a point where no
+					// ordinary dispatch is in flight.
+					// A storage transition invalidates live-tail authority, but it must
+					// not erase an outstanding latest-read failure: the entry read actor
+					// keys its retry on "error", and "unknown" would cancel that retry
+					// (and clear its failure count) without a successful read, leaving
+					// the runtime's dispatch gate blocked. Only an accepted ready
+					// publication (or retirement) clears the failure.
+					if (get().latestReadState !== "error") markLatest("unknown");
+				});
+				void read();
 				return () => {
 					if (generation !== pendingGeneration) return;
 					detachPendingRows();
-					set({ pendingMutations: null });
+					set({ pendingMutations: null, pendingMutationsReady: false });
 				};
 			},
 
@@ -2813,7 +3104,38 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				return get().bindPendingMutations(port);
 			},
 
-			async send(service, input, context) {
+			ensureLatest() {
+				const binding = captureBinding();
+				if (binding === null) return Promise.resolve();
+				// Requested authority is not authority: drop `ready` now, and let only
+				// the accepted publication below restore it.
+				markLatest("reading");
+				// The same explicit demand recovers a pending projection whose read
+				// failed while Retry's consumer (which waits for readiness) could not
+				// ask for one. A storage read, so it never blocks ordinary dispatch.
+				demandBoundPendingRead();
+				return scheduler.request(binding.ref, async () => {
+					if (!isBindingCurrent(binding)) return;
+					if (binding.sink === null) return;
+					await storeGet?.().rehydrate(binding.service, binding.sink);
+				});
+			},
+
+			refreshPendingMutations() {
+				const demand = pendingDemandRead;
+				if (demand === null) return Promise.resolve();
+				const completion = demand();
+				return new Promise<void>((resolve) => {
+					const finish = () => {
+						pendingRefreshWaiters.delete(finish);
+						resolve();
+					};
+					pendingRefreshWaiters.add(finish);
+					void completion.then(finish, finish);
+				});
+			},
+
+			async send(service, input, context, precondition) {
 				const state = get();
 				if (state.conversation === null) return;
 				requireControl(state.conversation, "send", "send");
@@ -2839,8 +3161,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// Fix round 1 I3: atomically clear prior error with new pending mutation.
 				set({
 					draft: "",
-					pendingSend: "pending",
 					pendingMutation: mutation,
+					pendingSubmission: { kind: "send" },
 					lastAcceptedMutation: null,
 					error: null,
 				});
@@ -2852,34 +3174,53 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// it.
 				const entryErrorRev = errorOwnerRev;
 				try {
-					const receipt = await dispatchMutation(service, "send", opBinding, state.conversation, input, context);
+					const admission = await dispatchMutation(
+						service,
+						"send",
+						opBinding,
+						state.conversation,
+						input,
+						context,
+						precondition,
+					);
 					// C1: Recheck the exact operation binding after the await.
 					if (!isBindingCurrent(opBinding)) return;
+					recordAdmittedMutation(admission, mutationId, mutation);
 					// F4: Check mutationId — out-of-order completion cannot clear a
 					// newer mutation's state.
 					if (get().pendingMutation?.mutationId === mutationId) {
+						const accepted = acceptedMutation("send", admission);
 						// I1: Clear pending fields unconditionally (this mutation owns
 						// them), but clear error only if the error-owner revision is
 						// unchanged — revision equality ONLY, no || error === null
 						// shortcut. A newer clear-to-null or ABA-null owns error.
 						if (entryErrorRev === errorOwnerRev) {
 							set({
-								pendingSend: null,
 								pendingMutation: null,
-								lastAcceptedMutation: { kind: "send", receipt },
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 								error: null,
 							});
 						} else {
 							set({
-								pendingSend: null,
 								pendingMutation: null,
-								lastAcceptedMutation: { kind: "send", receipt },
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 							});
 						}
 						// I1: mutation settled (success) — drain deferred trailing reread.
 						drainTrailingReread();
 					}
 				} catch (err) {
+					// A proven local refusal made nothing durable and sent nothing:
+					// hand the outcome back even when this view's binding has since
+					// retired, so the shared document keeps the draft and leaves no
+					// ghost. Only a still-current binding owns the store's marker.
+					if (err instanceof MutationNotSentError) {
+						if (isBindingCurrent(opBinding) && get().pendingMutation?.mutationId === mutationId)
+							set({ pendingMutation: null, pendingSubmission: null });
+						throw err;
+					}
 					// C1: Recheck the exact operation binding after the await.
 					if (!isBindingCurrent(opBinding)) return;
 					handleMutationError(
@@ -2902,7 +3243,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				}
 			},
 
-			async queue(service, input, context) {
+			async queue(service, input, context, precondition) {
 				const state = get();
 				if (state.conversation === null) return;
 				requireQueue(state.conversation, state.pendingMutations);
@@ -2921,40 +3262,56 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					generation: gen,
 					mutationId,
 				};
-				// F10: any new mutation clears legacy pendingSend.
 				// Fix round 1 I3: atomically clear prior error with new pending mutation.
 				set({
 					draft: "",
-					pendingSend: null,
 					pendingMutation: mutation,
+					pendingSubmission: { kind: "queue" },
 					lastAcceptedMutation: null,
 					error: null,
 				});
 				// I1: Capture error-owner revision AFTER installing pending+error-clear.
 				const entryErrorRev = errorOwnerRev;
 				try {
-					const receipt = await dispatchMutation(service, "queue", opBinding, state.conversation, input, context);
+					const admission = await dispatchMutation(
+						service,
+						"queue",
+						opBinding,
+						state.conversation,
+						input,
+						context,
+						precondition,
+					);
 					// C1: Recheck the exact operation binding after the await.
 					if (!isBindingCurrent(opBinding)) return;
+					recordAdmittedMutation(admission, mutationId, mutation);
 					if (get().pendingMutation?.mutationId === mutationId) {
+						const accepted = acceptedMutation("queue", admission);
 						// I1: clear error only if error-owner revision is unchanged —
 						// revision equality ONLY.
 						if (entryErrorRev === errorOwnerRev) {
 							set({
 								pendingMutation: null,
-								lastAcceptedMutation: { kind: "queue", receipt },
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 								error: null,
 							});
 						} else {
 							set({
 								pendingMutation: null,
-								lastAcceptedMutation: { kind: "queue", receipt },
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 							});
 						}
 						// I1: mutation settled (success) — drain deferred trailing reread.
 						drainTrailingReread();
 					}
 				} catch (err) {
+					if (err instanceof MutationNotSentError) {
+						if (isBindingCurrent(opBinding) && get().pendingMutation?.mutationId === mutationId)
+							set({ pendingMutation: null, pendingSubmission: null });
+						throw err;
+					}
 					// C1: Recheck the exact operation binding after the await.
 					if (!isBindingCurrent(opBinding)) return;
 					handleMutationError(
@@ -2997,39 +3354,36 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					mutationId,
 				};
 				// Interrupt does NOT clear the draft.
-				// F10: any new mutation clears legacy pendingSend.
 				// Fix round 1 I3: atomically clear prior error with new pending mutation.
 				set({
-					pendingSend: null,
 					pendingMutation: mutation,
+					pendingSubmission: { kind: "interrupt" },
 					lastAcceptedMutation: null,
 					error: null,
 				});
 				// I1: Capture error-owner revision AFTER installing pending+error-clear.
 				const entryErrorRev = errorOwnerRev;
 				try {
-					const receipt = await dispatchMutation(service, "interrupt", opBinding, state.conversation, []);
+					const admission = await dispatchMutation(service, "interrupt", opBinding, state.conversation, []);
 					// C1: Recheck the exact operation binding after the await.
 					if (!isBindingCurrent(opBinding)) return;
+					recordAdmittedMutation(admission, mutationId, mutation);
 					if (get().pendingMutation?.mutationId === mutationId) {
+						const accepted = acceptedMutation("interrupt", admission);
 						// I1: clear error only if error-owner revision is unchanged —
 						// revision equality ONLY.
 						if (entryErrorRev === errorOwnerRev) {
 							set({
 								pendingMutation: null,
-								lastAcceptedMutation: {
-									kind: "interrupt",
-									receipt,
-								},
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 								error: null,
 							});
 						} else {
 							set({
 								pendingMutation: null,
-								lastAcceptedMutation: {
-									kind: "interrupt",
-									receipt,
-								},
+								pendingSubmission: null,
+								lastAcceptedMutation: accepted,
 							});
 						}
 						// I1: mutation settled (success) — drain deferred trailing reread.
@@ -3082,12 +3436,14 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				boundSink = null;
 				set({
 					status: "closed",
+					latestReadState: "unknown",
 					conversation: null,
 					ref: null,
 					draft: "",
-					pendingSend: null,
 					pendingMutation: null,
+					pendingSubmission: null,
 					pendingMutations: null,
+					pendingMutationsReady: false,
 					lastAcceptedMutation: null,
 					olderCursor: null,
 					trimmedAbove: false,
@@ -3318,10 +3674,12 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					loadingOlder: false,
 					status: "idle",
 					error: null,
+					latestReadState: "unknown",
 					draft: "",
-					pendingSend: null,
 					pendingMutation: null,
+					pendingSubmission: null,
 					pendingMutations: null,
+					pendingMutationsReady: false,
 					lastAcceptedMutation: null,
 					conversationGeneration: conversationGen,
 				});
@@ -3347,6 +3705,19 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			},
 		};
 	});
+}
+
+// Stage C: the retained-failure marker as a pure projection of the pending
+// record — non-null exactly while that record is failed. The set chokepoint
+// derives it from every record write, so no writer can leave the pair out
+// of step; the failure sites write only the record.
+function failedSubmissionFor(record: ConversationMutationState | null): ConversationFailedSubmission | null {
+	if (record === null || record.status !== "failed") return null;
+	return {
+		kind: record.kind,
+		mutationId: record.mutationId,
+		...(record.admittedMutationId !== undefined ? { admittedMutationId: record.admittedMutationId } : {}),
+	};
 }
 
 // Shared mutation error handler. On failure, the failed mutation state
@@ -3401,10 +3772,12 @@ function handleMutationError(
 		// revision during the await.
 		const shouldRestore = draftSnapshot !== null && getDraftRevision() === revisionAtSubmit;
 		const newError = err instanceof Error ? err.message : String(err);
+		// The retained-failure marker is derived from the failed record these
+		// writes install (see failedSubmissionFor at the set chokepoint).
 		if (entryErrorRev === getErrorOwnerRev()) {
 			set({
 				pendingMutation: { ...mutation, status: "failed" },
-				pendingSend: null,
+				pendingSubmission: null,
 				...(shouldRestore ? { draft: draftSnapshot } : {}),
 				error: newError,
 			});
@@ -3414,7 +3787,7 @@ function handleMutationError(
 			// pending/draft restoration.
 			set({
 				pendingMutation: { ...mutation, status: "failed" },
-				pendingSend: null,
+				pendingSubmission: null,
 				...(shouldRestore ? { draft: draftSnapshot } : {}),
 			});
 		}

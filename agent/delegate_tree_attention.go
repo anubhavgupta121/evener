@@ -599,7 +599,9 @@ func (c *delegateTreeController) hasPendingDelegateAttention() bool {
 			continue
 		}
 		aggregate := c.durable[delegateID]
-		if len(state.wakeIDs) != 0 && aggregate != nil && aggregate.Resumable && aggregate.PendingStopSeq == 0 && aggregate.Phase != delegatestore.PhaseClosed {
+		// Resumable alone excludes a closed delegate: every fold transition
+		// into PhaseClosed requires !Resumable.
+		if len(state.wakeIDs) != 0 && aggregate != nil && aggregate.Resumable && aggregate.PendingStopSeq == 0 {
 			return true
 		}
 	}
@@ -866,11 +868,7 @@ func (c *delegateTreeController) holdAttentionRestoreLocked(delegateID string) {
 func (c *delegateTreeController) releaseAttentionRestoreHold(delegateID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.attentionRestoreHolds[delegateID] <= 1 {
-		delete(c.attentionRestoreHolds, delegateID)
-		return
-	}
-	c.attentionRestoreHolds[delegateID]--
+	releaseCountedLocked(c.attentionRestoreHolds, delegateID)
 }
 
 // attentionRestoreHeldLocked reports whether an attention wake pass holds
@@ -944,6 +942,15 @@ func (c *delegateTreeController) idleDelegateRestoreCommit(delegateID string) (d
 		return delegateStartCommit{}, "", errDelegateTargetBusy
 	}
 	aggregate := c.durable[delegateID]
+	if c.laneHandoffCoversLocked(delegateID) {
+		return delegateStartCommit{}, "", errDelegateTargetBusy
+	}
+	// The cold path never runs CommitStart, so it owns the ancestor check the
+	// ordinary start paths get at commit: a closed ancestor must not be revived
+	// into a lane that was already handed off.
+	if blocked, _ := c.ancestorFenceLocked(aggregate.Descriptor.ParentDelegateID); blocked {
+		return delegateStartCommit{}, "", errDelegateTargetBusy
+	}
 	descriptor := cloneDelegateStartDescriptor(aggregate.Descriptor)
 	worktreePath := ""
 	if descriptor.Isolation == "worktree" {
@@ -1013,6 +1020,13 @@ func (c *delegateTreeController) beginIdleRuntimeInstallation(delegateID string)
 	if err != nil {
 		return nil, err
 	}
+	c.mu.Lock()
+	refused := c.closing || c.laneHandoffCoversLocked(delegateID)
+	c.mu.Unlock()
+	if refused {
+		release()
+		return nil, errDelegateTargetBusy
+	}
 	return &delegateIdleRuntimeInstallation{controller: c, delegateID: delegateID, release: release}, nil
 }
 
@@ -1025,6 +1039,9 @@ func (installation *delegateIdleRuntimeInstallation) attach(runtime *Session) er
 	defer c.mu.Unlock()
 	aggregate := c.durable[delegateID]
 	if c.closing || aggregate == nil || aggregate.Phase != delegatestore.PhaseIdle || !aggregate.Resumable || aggregate.PendingStopSeq != 0 || runtime.delegateController != c || runtime.owningDelegateID != delegateID || runtime.ID() != aggregate.Descriptor.ChildSessionID {
+		return errDelegateTargetBusy
+	}
+	if c.laneHandoffCoversLocked(delegateID) {
 		return errDelegateTargetBusy
 	}
 	live := c.live[delegateID]

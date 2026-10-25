@@ -38,6 +38,7 @@ type sessionOpts struct {
 	adapters        []llm.ProviderAdapter
 	steps           []func(req llm.Request) llm.Response
 	profile         *provider.Profile
+	env             execenv.ExecutionEnvironment
 	dir             string
 	cfg             SessionConfig
 	cfgSet          bool
@@ -56,6 +57,21 @@ func withImmediateRest() sessionOpt { return func(o *sessionOpts) { o.immediateR
 // dropped, for tests that build a SessionConfig literal.
 func immediateRestConfig() testConfig {
 	return testConfig{needsResponseQuietPeriod: new(time.Duration)}
+}
+
+// minimalTestSessionConfig is newTestSession's fixture configuration: the
+// smallest deterministic session that still runs the real init path.
+func minimalTestSessionConfig(t *testing.T) SessionConfig {
+	t.Helper()
+	return SessionConfig{
+		MaxSubagentDepth: 1,
+		testOnly: testConfig{
+			skipGitSnapshot:     true,
+			minimalSystemPrompt: true,
+			noSyncJobStore:      true,
+			sandboxProber:       bwrapCapableProber(t.TempDir()),
+		},
+	}
 }
 
 // withClock runs the session on c, keeping newSession's default config.
@@ -78,7 +94,10 @@ func withAdapter(a llm.ProviderAdapter) sessionOpt {
 }
 
 func withProfile(p *provider.Profile) sessionOpt { return func(o *sessionOpts) { o.profile = p } }
-func withDir(dir string) sessionOpt              { return func(o *sessionOpts) { o.dir = dir } }
+func withEnv(env execenv.ExecutionEnvironment) sessionOpt {
+	return func(o *sessionOpts) { o.env = env }
+}
+func withDir(dir string) sessionOpt { return func(o *sessionOpts) { o.dir = dir } }
 func withConfig(cfg SessionConfig) sessionOpt {
 	return func(o *sessionOpts) { o.cfg = cfg; o.cfgSet = true }
 }
@@ -142,7 +161,11 @@ func newSession(t *testing.T, opts ...sessionOpt) *Session {
 	if o.clock != nil {
 		cfg.clock = o.clock
 	}
-	sess, err := NewSession(o.client, profile, execenv.NewLocalExecutionEnvironment(o.dir), cfg)
+	env := o.env
+	if env == nil {
+		env = execenv.NewLocalExecutionEnvironment(o.dir)
+	}
+	sess, err := NewSession(o.client, profile, env, cfg)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}

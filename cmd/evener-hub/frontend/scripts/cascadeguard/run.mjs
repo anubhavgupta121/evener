@@ -5,6 +5,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Driver } from "../skillguard/run.mjs";
 import { evaluate, navigateTo, queryAccessibilityTree, REFUSED_BUTTON_SELECTOR } from "../browserGuardCdp.mjs";
+import { revealControlStep } from "./revealControl.mjs";
+import { attentionJourney } from "./attention.mjs";
 
 const fixture = JSON.parse(readFileSync(0, "utf8"));
 const driver = new Driver(fixture);
@@ -1552,25 +1554,13 @@ async function reveal(edge, container) {
   await wait(`document.querySelector(${q(selector)}) !== null || [...document.querySelectorAll(${q(`${container} button`)})].some(b => b.textContent.trim().startsWith('Inactive subagents ('))`, "real direct delegate collection");
   for (let boundary = 0; boundary < 10; boundary++) {
     if (await read(`document.querySelector(${q(selector)}) !== null`)) return selector;
-    const visible = await read(`document.querySelectorAll(${q(`${container} [data-activity-anchor]`)}).length`);
-    // The control is found and activated in one page turn. Scrolling a Show or
-    // Load more control into view can make the page boundary under it load the
-    // next page by itself; when that page lands it removes the boundary and the
-    // list shifts, so a press measured before it can land on a neighbouring
-    // delegate row and drill into it (#3804). The click still requires the
-    // control to be the topmost element at its center, as a real press would.
-    const step = await wait(`(() => {
-      if (document.querySelector(${q(selector)})) return { revealed: true };
-      const buttons = [...document.querySelectorAll(${q(`${container} button`)})];
-      const b = buttons.find(n => !n.matches(${q(REFUSED_BUTTON_SELECTOR)}) && (${visible} === 0 ? n.textContent.trim().startsWith('Inactive subagents (') : n.textContent.trim().startsWith('Show ') || n.textContent.trim() === 'Load more subagents'));
-      if (!b) return null;
-      b.scrollIntoView({ block: 'center' });
-      const r = b.getBoundingClientRect();
-      if (!b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))) return null;
-      const before = document.querySelector(${q(container)}).textContent;
-      b.click();
-      return { before };
-    })()`, "real disclosure or direct page boundary");
+    // The control is found and activated in one page turn (see
+    // revealControlStep). Scrolling a Show or Load more control into view can
+    // make the page boundary under it load the next page by itself; when that
+    // page lands it removes the boundary and the list shifts, so a press
+    // measured before it can land on a neighbouring delegate row and drill into
+    // it (#3804).
+    const step = await wait(revealControlStep(selector, container, REFUSED_BUTTON_SELECTOR), "real disclosure or direct page boundary");
     if (step.revealed) return selector;
     await wait(`document.querySelector(${q(selector)}) !== null || document.querySelector(${q(container)}).textContent !== ${q(step.before)}`, "direct collection progresses");
   }
@@ -1615,17 +1605,28 @@ async function reloadDocument() {
 const sent = (after = 0) => frames.slice(after).filter(f => f.direction === "Network.webSocketFrameSent");
 const answered = (request) => frames.some(f => f.direction === "Network.webSocketFrameReceived" && f.id === request.id && Object.hasOwn(f, "result") && !f.error);
 
-async function reconnect() {
+// expectRefs is the scene's own set of conversation owners. The cascade calls
+// omit it and keep the strict seven-ref cascade requirement; a later journey
+// whose panes have been replaced or closed passes the owners actually mounted,
+// because a closed or parked reader has no subscription to recover.
+async function reconnect({ expectRefs } = {}) {
   const after = frames.length;
+  const expected = expectRefs ?? fixture.refs;
   const sockets = await read(`(() => {
     const sockets = window.__cascadeSockets.filter(s => s.readyState === WebSocket.OPEN && new URL(s.url).pathname === '/rpc');
     for (const socket of sockets) socket.close(4000, 'cascade guard transport boundary');
     return sockets.length;
   })()`);
   assert.equal(sockets, 1, "one actual shared hub socket is closed");
-  await waitFrames(() => fixture.refs.every(ref => sent(after).some(f => f.method === "thread/read" && f.params.ref === ref && f.params.subscribe && answered(f))), "all seven real subscription owners recover");
+  await waitFrames(() => expected.every(ref => sent(after).some(f => f.method === "thread/read" && f.params.ref === ref && f.params.subscribe && answered(f))), expectRefs ? `${expected.length} mounted subscription owners recover` : "all seven real subscription owners recover")
+    .catch((error) => {
+      const subscriptions = sent(after).filter((f) => f.method === "thread/read" && f.params.subscribe);
+      const observed = [...new Set(subscriptions.map((f) => f.params.ref))];
+      const missing = expected.filter((ref) => !subscriptions.some((f) => f.params.ref === ref && answered(f)));
+      throw new Error(`${error.message}; missing owners ${JSON.stringify(missing)}; observed ${observed.length} subscriptions ${JSON.stringify(observed)}`);
+    });
   const subscriptions = sent(after).filter(f => f.method === "thread/read" && f.params.subscribe);
-  assert.ok(subscriptions.length >= 7);
+  assert.ok(subscriptions.length >= expected.length);
   assert.ok(subscriptions.every(f => f.params.replaceSubscription === false), "every admitted thread membership is additive");
   return after;
 }
@@ -1934,10 +1935,13 @@ try {
   // reached through its own pane's footer: the shared sidebar scoped to the
   // source. The paging delegate rows there still keyboard-truncate the
   // inspector's selected branch.
-  const beforeSidebar = frames.length;
   await driver.click(sourceAgents);
   const branchRow = await reveal(fixture.branch, '[data-testid="activity-sidebar"]');
-  const paging = sent(beforeSidebar).filter(f => f.method === 'evener/thread/delegates/list' && f.params.ref === fixture.rootRef && f.params.cursor);
+  // A retained page may complete before the sidebar opens, so the observed
+  // direct history includes it. Any request still in flight gets its reply.
+  const directPageRequests = () => sent(0).filter(f => f.method === 'evener/thread/delegates/list' && f.params.ref === fixture.rootRef && f.params.cursor);
+  await waitFrames(() => directPageRequests().length > 0 && directPageRequests().every(answered), "the observed root collection advances the real direct-page cursor");
+  const paging = directPageRequests();
   assert.ok(paging.length > 0 && paging.every(answered), "the observed root collection advances the real direct-page cursor");
   await read(`document.querySelector(${q(branchRow)}).focus()`);
   await wait(`document.activeElement === document.querySelector(${q(branchRow)})`, "real sidebar row owns keyboard focus");
@@ -2022,6 +2026,14 @@ try {
   await nativePositioningInterruption("wheel");
   await nativePositioningInterruption("pill");
   await reloadAndMobileJourney();
+  // The attention tier stays empty until this driver releases it, so every
+  // assertion above runs against exactly the baseline it ran against before
+  // the control existed. From here the real needs_you queue, the floating
+  // control and its hops own the browser.
+  await attentionJourney({
+    driver, fixture, read, wait, capture, key, frames, sent, answered, reconnect,
+    drill, upload, holdCanvasCompletion, sourcePortExpr, settledReadingPoint, assertReadingContinuity,
+  });
   assert.deepEqual(errors, [], "unexpected browser errors or warnings");
 } catch (error) {
   failed = true;

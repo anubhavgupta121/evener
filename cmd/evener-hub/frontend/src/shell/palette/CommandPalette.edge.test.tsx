@@ -21,6 +21,7 @@ import { useCommandCatalog } from "../../stores/commandCatalog";
 import { connectionStore } from "../../stores/connection";
 import { resetNavigationStoreForTests } from "../../stores/navigation/store";
 import { resetThreadsStoreForTests, threadsStore } from "../../stores/threads";
+import { NeedsYouProvider } from "../NeedsYouProvider";
 import { captureNewTabs, NEW_TAB_POLICY, openedNewTab } from "../openInNewTab.testSupport";
 import { resetWorkspaceStoreForTests, workspaceStore } from "../workspace";
 import { CommandPalette, commandErrorMessage } from "./CommandPalette";
@@ -145,7 +146,11 @@ describe("remote search results", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     scriptSearchFailure();
 
-    render(<CommandPalette />);
+    render(
+      <NeedsYouProvider>
+        <CommandPalette />
+      </NeedsYouProvider>,
+    );
     act(() => openPalette());
     await user.type(screen.getByRole("combobox"), "query");
 
@@ -164,7 +169,11 @@ describe("remote search results", () => {
       past: [],
     });
 
-    render(<CommandPalette />);
+    render(
+      <NeedsYouProvider>
+        <CommandPalette />
+      </NeedsYouProvider>,
+    );
     act(() => openPalette());
     await user.type(screen.getByRole("combobox"), "live");
 
@@ -190,7 +199,11 @@ describe("remote search results", () => {
       past: [{ id: "past1", ref: "local:past1", title: "old session", project: "p", state: "ended", age: "2h" }],
     });
 
-    render(<CommandPalette />);
+    render(
+      <NeedsYouProvider>
+        <CommandPalette />
+      </NeedsYouProvider>,
+    );
     act(() => openPalette());
     await user.type(screen.getByRole("combobox"), "old");
 
@@ -210,7 +223,11 @@ test("Shift+Enter on an in-session search result closes the palette without navi
   scriptSearch({ live: [], past: [] });
   focusSession("ref_a", { turns: [turn([item("i1", "search term found here")])] });
 
-  render(<CommandPalette />);
+  render(
+    <NeedsYouProvider>
+      <CommandPalette />
+    </NeedsYouProvider>,
+  );
   act(() => openPalette());
   await user.type(screen.getByRole("combobox"), "search");
 
@@ -228,7 +245,11 @@ test("arrow-down then Enter on the handoff row hands off to the composer", async
   const user = userEvent.setup();
   focusSession("ref_a");
 
-  render(<CommandPalette />);
+  render(
+    <NeedsYouProvider>
+      <CommandPalette />
+    </NeedsYouProvider>,
+  );
   act(() => openPalette("/interrupt"));
 
   // Arrow down to the handoff row (index 0 is the handoff row)
@@ -243,7 +264,11 @@ test("arrow-down then Enter on the handoff row hands off to the composer", async
 
 test("/search command clears to search mode", async () => {
   const user = userEvent.setup();
-  render(<CommandPalette />);
+  render(
+    <NeedsYouProvider>
+      <CommandPalette />
+    </NeedsYouProvider>,
+  );
   act(() => openPalette("/"));
 
   await user.click(screen.getByRole("option", { name: /Search sessions/ }));
@@ -257,7 +282,11 @@ test("/search command clears to search mode", async () => {
 
 test("/help command shows the help panel", async () => {
   const user = userEvent.setup();
-  render(<CommandPalette />);
+  render(
+    <NeedsYouProvider>
+      <CommandPalette />
+    </NeedsYouProvider>,
+  );
   act(() => openPalette("/"));
 
   await user.click(screen.getByRole("option", { name: /Show keyboard shortcuts/ }));
