@@ -86,26 +86,13 @@ func TestCheckpointPredStrategy_PredictiveCheckpoint_FallbackOnError(t *testing.
 	// When no LLM client is available, predictive checkpoint should fall back
 	// to deterministic checkpoint.
 	client := llm.NewClient()
-	profile := testOpenAIProfileWithContextWindow(1000)
-	cm := NewManager(profile, client, cheapmodel.New(client))
-	// Set very low thresholds so compaction fires.
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 2.0 // Disable layer 4.
-	cm.PreserveRecentTurns = 2
+	// Very low thresholds so compaction fires; summarize disabled (layer 4).
+	cm := newCompactionManager(client, 1000, 0.0001, 0.0001, 0.0001, 2.0)
 
 	// No adapter registered = LLM calls will fail.
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug in auth.go")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("what's the status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug in auth.go", "I'll fix it", "also fix tests", "fixing tests", "what's the status", "almost done")
 
 	var layers []string
 	var warnings []events.WarningData
@@ -173,28 +160,13 @@ func TestCheckpointPredStrategy_PredictiveCheckpoint_WithLLM(t *testing.T) {
 	}
 	client.Register(f)
 
-	profile := testOpenAIProfileWithContextWindow(1000)
-	cm := NewManager(profile, client, cheapmodel.New(client))
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 2.0
-	cm.PreserveRecentTurns = 2
+	cm := newCompactionManager(client, 1000, 0.0001, 0.0001, 0.0001, 2.0)
 
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug in auth.go")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("what's the status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug in auth.go", "I'll fix it", "also fix tests", "fixing tests", "what's the status", "almost done")
 
-	emitFn := func(kind events.EventKind, data events.EventData) {}
-
-	err := s.ManageContext(context.Background(), &history, 0, emitFn)
+	err := s.ManageContext(context.Background(), &history, 0, noopEmit)
 	if err != nil {
 		t.Fatalf("ManageContext returned error: %v", err)
 	}
@@ -226,28 +198,13 @@ func TestCheckpointPredStrategy_PredictiveCheckpoint_TurnKind(t *testing.T) {
 	}
 	client.Register(f)
 
-	profile := testOpenAIProfileWithContextWindow(1000)
-	cm := NewManager(profile, client, cheapmodel.New(client))
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 2.0
-	cm.PreserveRecentTurns = 2
+	cm := newCompactionManager(client, 1000, 0.0001, 0.0001, 0.0001, 2.0)
 
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug", "I'll fix it", "also fix tests", "fixing tests", "status", "almost done")
 
-	emitFn := func(kind events.EventKind, data events.EventData) {}
-
-	err := s.ManageContext(context.Background(), &history, 0, emitFn)
+	err := s.ManageContext(context.Background(), &history, 0, noopEmit)
 	if err != nil {
 		t.Fatalf("ManageContext returned error: %v", err)
 	}
@@ -262,13 +219,7 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_FallbackCheckpoint(t *test
 	// When predictiveCheckpoint fails and falls back to deterministic checkpoint,
 	// the callback should fire with the checkpoint turn.
 	client := llm.NewClient()
-	profile := testOpenAIProfileWithContextWindow(1000)
-	cm := NewManager(profile, client, cheapmodel.New(client))
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 2.0
-	cm.PreserveRecentTurns = 2
+	cm := newCompactionManager(client, 1000, 0.0001, 0.0001, 0.0001, 2.0)
 
 	var callbackTurns []schema.Turn
 	cm.OnCompactionTurn = func(t schema.Turn) {
@@ -278,18 +229,9 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_FallbackCheckpoint(t *test
 	// No adapter registered = LLM calls fail → fallback to deterministic checkpoint.
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug", "I'll fix it", "also fix tests", "fixing tests", "status", "almost done")
 
-	emitFn := func(kind events.EventKind, data events.EventData) {}
-
-	err := s.ManageContext(context.Background(), &history, 0, emitFn)
+	err := s.ManageContext(context.Background(), &history, 0, noopEmit)
 	if err != nil {
 		t.Fatalf("ManageContext returned error: %v", err)
 	}
@@ -320,13 +262,7 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_PredictiveCheckpoint(t *te
 	}
 	client.Register(f)
 
-	profile := testOpenAIProfileWithContextWindow(1000)
-	cm := NewManager(profile, client, cheapmodel.New(client))
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 2.0
-	cm.PreserveRecentTurns = 2
+	cm := newCompactionManager(client, 1000, 0.0001, 0.0001, 0.0001, 2.0)
 
 	var callbackTurns []schema.Turn
 	cm.OnCompactionTurn = func(t schema.Turn) {
@@ -335,18 +271,9 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_PredictiveCheckpoint(t *te
 
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug", "I'll fix it", "also fix tests", "fixing tests", "status", "almost done")
 
-	emitFn := func(kind events.EventKind, data events.EventData) {}
-
-	err := s.ManageContext(context.Background(), &history, 0, emitFn)
+	err := s.ManageContext(context.Background(), &history, 0, noopEmit)
 	if err != nil {
 		t.Fatalf("ManageContext returned error: %v", err)
 	}
@@ -392,14 +319,8 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_Summarize(t *testing.T) {
 	}
 	client.Register(f)
 
-	profile := testOpenAIProfileWithContextWindow(minSummarizingWindow)
-	cm := NewManager(profile, client, cheapmodel.New(client))
 	// All thresholds very low so all layers fire.
-	cm.ObservationMaskThreshold = 0.0001
-	cm.ThinkingClearThreshold = 0.0001
-	cm.CheckpointThreshold = 0.0001
-	cm.SummarizeThreshold = 0.0001
-	cm.PreserveRecentTurns = 2
+	cm := newCompactionManager(client, minSummarizingWindow, 0.0001, 0.0001, 0.0001, 0.0001)
 
 	var callbackTurns []schema.Turn
 	cm.OnCompactionTurn = func(t schema.Turn) {
@@ -408,18 +329,9 @@ func TestCheckpointPredStrategy_FiresOnCompactionTurn_Summarize(t *testing.T) {
 
 	s := NewCheckpointPredStrategy(cm)
 
-	history := []schema.Turn{
-		schema.NewTurn(schema.TurnUserInput, llm.User("fix the bug")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("I'll fix it")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("also fix tests")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("fixing tests")),
-		schema.NewTurn(schema.TurnUserInput, llm.User("status")),
-		schema.NewTurn(schema.TurnAssistant, llm.Assistant("almost done")),
-	}
+	history := pingPongHistory("fix the bug", "I'll fix it", "also fix tests", "fixing tests", "status", "almost done")
 
-	emitFn := func(kind events.EventKind, data events.EventData) {}
-
-	err := s.ManageContext(context.Background(), &history, 0, emitFn)
+	err := s.ManageContext(context.Background(), &history, 0, noopEmit)
 	if err != nil {
 		t.Fatalf("ManageContext returned error: %v", err)
 	}
