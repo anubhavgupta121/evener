@@ -3,6 +3,7 @@ import "fake-indexeddb/auto";
 import type {
   AnyNotification,
   ConnectionState,
+  HistoryUpdatedParams,
   Thread,
   ThreadClearResponse,
   ThreadReadResponse,
@@ -155,6 +156,25 @@ function connectFakeClient(state: ConnectionState = "ready"): FakeClient {
   return fake;
 }
 
+// emitHistoryUpdated emits one history/updated notification carrying this
+// file's standard thread identity plus the caller's distinct content — the
+// snapshot, items or turns — and any identity field that differs.
+function emitHistoryUpdated(
+  client: FakeClient,
+  rest: Partial<HistoryUpdatedParams> & Pick<HistoryUpdatedParams, "snapshot">,
+): void {
+  client.emitNotification({
+    method: "history/updated",
+    params: {
+      threadId: "thr_ref_a",
+      ref: "ref_a",
+      bootGeneration: "1",
+      epoch: 1,
+      ...rest,
+    },
+  });
+}
+
 describe("useThreadsStore.ensureThread", () => {
   test("an initial authoritative snapshot supersedes notifications buffered before its response", async () => {
     const fake = connectFakeClient();
@@ -183,32 +203,18 @@ describe("useThreadsStore.ensureThread", () => {
     await flushUntil(() => resolveRead !== null);
     expect(resolveRead).not.toBeNull();
 
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "commandExecution", id: "item_1", turnId: "turn_1", output: "done", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      items: [
+        {
+          ...{ type: "commandExecution", id: "item_1", turnId: "turn_1", output: "done", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     });
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      turns: [{ id: "turn_1", status: "completed", itemsView: "" }],
     });
 
     expect(threadsStore.getState().threads.has("ref_a")).toBe(false);
@@ -244,16 +250,9 @@ describe("useThreadsStore.ensureThread", () => {
     // cast because every notification's params requires `ref` on the wire
     // (ItemLifecycleParams) - the strongest form of the scenario, and still no
     // trace.
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_9", status: "inProgress", itemsView: "", startedAt: 1000 }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      turns: [{ id: "turn_9", status: "inProgress", itemsView: "", startedAt: 1000 }],
     });
     fake.emitNotification({
       method: "history/updated",
@@ -457,44 +456,23 @@ describe("useThreadsStore.ensureThread", () => {
       ),
     );
     await emitAtResponseCut(cut, "ref_a", () => {
-      fake.emitNotification({
-        method: "history/updated",
-        params: {
-          threadId: "thr_ref_a",
-          ref: "ref_a",
-          bootGeneration: "1",
-          epoch: 1,
-          snapshot: { incarnation: "inc-1", length: 1 },
-          turns: [{ id: "turn_7", status: "inProgress", itemsView: "", startedAt: 1000 }],
-        },
+      emitHistoryUpdated(fake, {
+        snapshot: { incarnation: "inc-1", length: 1 },
+        turns: [{ id: "turn_7", status: "inProgress", itemsView: "", startedAt: 1000 }],
       });
-      fake.emitNotification({
-        method: "history/updated",
-        params: {
-          threadId: "thr_ref_a",
-          ref: "ref_a",
-          bootGeneration: "1",
-          epoch: 1,
-          snapshot: { incarnation: "inc-1", length: 1 },
-          items: [
-            {
-              ...{ type: "commandExecution", id: "item_tool_1", turnId: "turn_7", status: "inProgress" },
-              turnId: "turn_7",
-            },
-          ],
-        },
+      emitHistoryUpdated(fake, {
+        snapshot: { incarnation: "inc-1", length: 1 },
+        items: [
+          {
+            ...{ type: "commandExecution", id: "item_tool_1", turnId: "turn_7", status: "inProgress" },
+            turnId: "turn_7",
+          },
+        ],
       });
-      fake.emitNotification({
-        method: "history/updated",
-        params: {
-          threadId: "thr_ref_a",
-          ref: "ref_a",
-          bootGeneration: "1",
-          epoch: 1,
-          snapshot: { incarnation: "inc-1", length: 1 },
-          turns: [{ id: "turn_7", status: "failed", itemsView: "", error: { message: "boom" } }],
-        },
-      } as AnyNotification);
+      emitHistoryUpdated(fake, {
+        snapshot: { incarnation: "inc-1", length: 1 },
+        turns: [{ id: "turn_7", status: "failed", itemsView: "", error: { message: "boom" } }],
+      });
     });
     await ensuring;
 
@@ -591,16 +569,9 @@ describe("useThreadsStore.ensureThread", () => {
     });
 
     await threadsStore.getState().ensureThread("ref_a");
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_m6", status: "inProgress", itemsView: "", startedAt: 1000 }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      turns: [{ id: "turn_m6", status: "inProgress", itemsView: "", startedAt: 1000 }],
     });
     expect(
       threadsStore
@@ -639,38 +610,24 @@ describe("useThreadsStore.ensureThread", () => {
       cut,
       "ref_a",
       () => {
-        fake.emitNotification({
-          method: "history/updated",
-          params: {
-            threadId: "thr_ref_a",
-            ref: "ref_a",
-            bootGeneration: "1",
-            epoch: 1,
-            snapshot: { incarnation: "inc-1", length: 1 },
-            items: [
-              {
-                ...{
-                  type: "agentMessage",
-                  id: "item_assistant_m6",
-                  turnId: "turn_m6",
-                  text: "skillguard turn complete",
-                  status: "completed",
-                },
+        emitHistoryUpdated(fake, {
+          snapshot: { incarnation: "inc-1", length: 1 },
+          items: [
+            {
+              ...{
+                type: "agentMessage",
+                id: "item_assistant_m6",
                 turnId: "turn_m6",
+                text: "skillguard turn complete",
+                status: "completed",
               },
-            ],
-          },
+              turnId: "turn_m6",
+            },
+          ],
         });
-        fake.emitNotification({
-          method: "history/updated",
-          params: {
-            threadId: "thr_ref_a",
-            ref: "ref_a",
-            bootGeneration: "1",
-            epoch: 1,
-            snapshot: { incarnation: "inc-1", length: 1 },
-            turns: [{ id: "turn_m6", status: "completed", itemsView: "" }],
-          },
+        emitHistoryUpdated(fake, {
+          snapshot: { incarnation: "inc-1", length: 1 },
+          turns: [{ id: "turn_m6", status: "completed", itemsView: "" }],
         });
       },
       () => (threadsStore.getState().hydrations.get("ref_a") ?? 0) > baselineHydrations,
@@ -726,16 +683,9 @@ describe("useThreadsStore.ensureThread", () => {
     });
 
     await threadsStore.getState().ensureThread("ref_a");
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 2 },
-        turns: [{ id: "turn_m6", status: "inProgress", itemsView: "", version: 2, startedAt: 1000 }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 2 },
+      turns: [{ id: "turn_m6", status: "inProgress", itemsView: "", version: 2, startedAt: 1000 }],
     });
     // The ordinary route must actually hold the live turn this refresh drops.
     expect(
@@ -885,16 +835,9 @@ describe("useThreadsStore.ensureThread", () => {
       params: { threadId: "thr_ref_a", ref: "ref_a" },
     });
     await flushUntil(() => resolveReplacement !== undefined);
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [{ type: "agentMessage", id: "item_1", turnId: "turn_1", text: "included", status: "inProgress" }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      items: [{ type: "agentMessage", id: "item_1", turnId: "turn_1", text: "included", status: "inProgress" }],
     });
     resolveReplacement?.(replacement);
     await flushUntil(() => threadsStore.getState().threads.get("ref_a")?.turns[0]?.items[0]?.text === "included");
@@ -930,18 +873,9 @@ describe("useThreadsStore.ensureThread", () => {
       params: { threadId: "thr_ref_a", ref: "ref_a" },
     });
     await flushUntil(() => replacementRead.resolve !== null);
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          { ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "inProgress" }, turnId: "turn_1" },
-        ],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      items: [{ ...{ type: "agentMessage", id: "item_1", turnId: "turn_1", status: "inProgress" }, turnId: "turn_1" }],
     });
     replacementRead.resolve?.(
       versionedReadResponse("ref_a", {
@@ -990,17 +924,10 @@ describe("useThreadsStore.ensureThread", () => {
       params: { threadId: "thr_ref_a", ref: "ref_a" },
     });
     await flushUntil(() => replacementRead.resolve !== null);
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_1", status: "inProgress", itemsView: "full", version: 1 }],
-        items: [],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      turns: [{ id: "turn_1", status: "inProgress", itemsView: "full", version: 1 }],
+      items: [],
     });
     replacementRead.resolve?.(
       versionedReadResponse(
@@ -1187,32 +1114,18 @@ describe("useThreadsStore.ensureThread", () => {
     await flushUntil(() => box.resolveRead !== null);
     expect(box.resolveRead).not.toBeNull();
 
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        turns: [{ id: "turn_live", status: "inProgress", itemsView: "" }],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      turns: [{ id: "turn_live", status: "inProgress", itemsView: "" }],
     });
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "agentMessage", id: "item_live", turnId: "turn_live", text: "answer", status: "completed" },
-            turnId: "turn_live",
-          },
-        ],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      items: [
+        {
+          ...{ type: "agentMessage", id: "item_live", turnId: "turn_live", text: "answer", status: "completed" },
+          turnId: "turn_live",
+        },
+      ],
     });
 
     box.resolveRead?.(
@@ -1267,21 +1180,14 @@ describe("useThreadsStore.ensureThread", () => {
       method: "thread/status/changed",
       params: { threadId: "thr_ref_a", ref: "ref_a", status: { type: "active", activeFlags: ["streaming"] } },
     });
-    fake.emitNotification({
-      method: "history/updated",
-      params: {
-        threadId: "thr_ref_a",
-        ref: "ref_a",
-        bootGeneration: "1",
-        epoch: 1,
-        snapshot: { incarnation: "inc-1", length: 1 },
-        items: [
-          {
-            ...{ type: "commandExecution", id: "item_1", turnId: "turn_1", output: "done", status: "completed" },
-            turnId: "turn_1",
-          },
-        ],
-      },
+    emitHistoryUpdated(fake, {
+      snapshot: { incarnation: "inc-1", length: 1 },
+      items: [
+        {
+          ...{ type: "commandExecution", id: "item_1", turnId: "turn_1", output: "done", status: "completed" },
+          turnId: "turn_1",
+        },
+      ],
     });
 
     box.resolveRead?.(
