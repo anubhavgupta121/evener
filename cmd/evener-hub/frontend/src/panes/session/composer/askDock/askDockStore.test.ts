@@ -5,6 +5,7 @@ import { hydrateThread } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, test } from "vitest";
+import { appliedReceipt } from "../../../../mutationReceiptTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import {
   putThreadModel,
@@ -309,12 +310,7 @@ describe("sendBatch", () => {
     const batchId = await setupOneBatch(fake);
     askDockStore.setAnswer("ref_a", "call_1:0", { kind: "skip" });
     fake.on("turn/start", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       turn: { id: "turn_2", status: "inProgress", itemsView: "" },
     }));
 
@@ -332,12 +328,7 @@ describe("sendBatch", () => {
     const fake = connectFakeClient();
     const batchId = await setupOneBatch(fake);
     fake.on("turn/start", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       turn: { id: "turn_2", status: "inProgress", itemsView: "" },
     }));
     await askDockStore.sendBatch("ref_a", batchId);

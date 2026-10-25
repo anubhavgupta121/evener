@@ -1,3 +1,4 @@
+import { appliedReceipt } from "../mutationReceiptTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES, type TestThreadOverrides, testThread } from "../threadTestUtils";
 import "fake-indexeddb/auto";
 import {
@@ -1714,12 +1715,7 @@ describe("useThreadsStore.drainAsSteer", () => {
   test("a queueChanged naming consumed ids settles the matching optimistic queue record", async () => {
     const fake = connectMutationClient();
     fake.on("turn/queue", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thr_ref_a",
-        projectionState: "pending",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thr_ref_a", { projectionState: "pending" }),
     }));
 
     await threadsStore.getState().queue("ref_a", "queued");
@@ -1761,12 +1757,7 @@ describe("useThreadsStore.drainAsSteer", () => {
     setMutationStorageForTests(storage);
     const fake = connectMutationClient();
     fake.on("turn/queue", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thr_ref_a",
-        projectionState: "pending",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thr_ref_a", { projectionState: "pending" }),
     }));
 
     await threadsStore.getState().queue("ref_a", "queued");

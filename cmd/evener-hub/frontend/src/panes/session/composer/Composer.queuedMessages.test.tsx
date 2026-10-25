@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { appliedReceipt } from "../../../mutationReceiptTestUtils";
 import { ClientProvider } from "../../../shell/clientContext";
 import { installLocalStorage, MemoryStorage } from "../../../storageTestUtils";
 import { connectionStore } from "../../../stores/connection";
@@ -347,12 +348,7 @@ test("image encoding survives a literal-marker recovery merge while storage is p
       deliveredInputs.push(params.input ?? []);
       return {
         turn: { id: "image-merge", status: "inProgress", itemsView: "full", items: [] },
-        receipt: {
-          clientMutationId: params.clientMutationId,
-          disposition: "applied",
-          threadId: "thread-a",
-          projectionState: "reflected",
-        },
+        receipt: appliedReceipt(params.clientMutationId, "thread-a"),
       };
     });
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -681,21 +677,11 @@ test.each([false, true])("queuedEditsPreserveDraftAndSendOnce, Stop=%s", async (
     deliveredInputs.push(params.input ?? []);
     return {
       turn: { id: "revision", status: "inProgress", itemsView: "full", items: [] },
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread-a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread-a"),
     };
   });
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread-a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread-a"),
   }));
   fake.on("thread/resume", () => ({ thread }));
   await act(async () => {
@@ -801,12 +787,7 @@ test("two offline edits consolidate one durable owner and preserve typing during
       deliveredInputs.push(params.input ?? []);
       return {
         turn: { id: "combined", status: "inProgress", itemsView: "full", items: [] },
-        receipt: {
-          clientMutationId: params.clientMutationId,
-          disposition: "applied",
-          threadId: "thread-a",
-          projectionState: "reflected",
-        },
+        receipt: appliedReceipt(params.clientMutationId, "thread-a"),
       };
     });
     await act(async () => {
@@ -916,12 +897,7 @@ test("recorded literal survives Edit beside a current image and Send", async () 
     expect(params.clientMutationId).not.toBe(record.clientMutationId);
     return {
       turn: { id: "literal-revision", status: "inProgress", itemsView: "full", items: [] },
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread-a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread-a"),
     };
   });
   await act(async () => {

@@ -10,6 +10,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { useLayoutEffect } from "react";
 import { afterEach, beforeAll, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { MotionProvider } from "../../../motion";
+import { appliedReceipt } from "../../../mutationReceiptTestUtils";
 import { ActivitySidebar } from "../../../shell/activitybar/ActivitySidebar";
 import {
   activitySidebarStore,
@@ -1023,12 +1024,7 @@ test.each([399, 400])("draft Stop remains reachable in the real menu at width %s
   expect(screen.queryByRole("menuitem", { name: "Steer" }) !== null).toBe(width === 399);
   expect(screen.queryByTestId("composer-steer") !== null).toBe(width === 400);
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thr_ref_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
   }));
   await user.click(stop);
   await flushPendingTurnsProjectionForTests();
@@ -1095,12 +1091,7 @@ test.each([399, 400])("a fast Send cannot become an accidental Stop at width %s"
   const fake = await mountComposer("ref_a", { status: { type: "active" } });
   for (const method of ["turn/queue", "turn/interrupt"] as const) {
     fake.on(method, (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thr_ref_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
     }));
   }
   act(() => replaceEditorText(textarea(), "send once"));
@@ -1976,12 +1967,7 @@ test("idle session: submit posts turn/start with the composer text", async () =>
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a", { status: { type: "idle" } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -2083,12 +2069,7 @@ test("active session with queue capability: Send routes to turn/queue", async ()
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 } },
   });
   fake.on("turn/queue", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "qm");
@@ -2122,21 +2103,11 @@ test("a second message composed before the first turn's status frame arrives que
   // pushed, so the thread stays idle with its idle capabilities throughout.
   // That IS the window.
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "pending",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a", { projectionState: "pending" }),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   fake.on("turn/queue", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "pending",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a", { projectionState: "pending" }),
   }));
 
   await user.type(textarea(), "m1");
@@ -2425,12 +2396,7 @@ test("submitting an empty composer fires no request", async () => {
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   expect(submitButton().disabled).toBe(true);
@@ -2446,12 +2412,7 @@ test("Cmd+Enter always submits, regardless of the enterToSend preference", async
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -2466,12 +2427,7 @@ test("bare Enter does not submit when enterToSend is off (default)", async () =>
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -2502,12 +2458,7 @@ test("bare Enter with enterToSend dispatches the message and leaves nothing behi
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -2585,12 +2536,7 @@ test("Shift+Enter with an empty queue steers the draft and leaves nothing behind
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   const editor = textarea();
@@ -2611,12 +2557,7 @@ test("with enterToSend on, Shift+Enter is a literal newline and does not steer",
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   const editor = textarea();
@@ -2657,20 +2598,10 @@ test("clicking steer with an empty textarea and empty queue is a focus-only no-o
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   fake.on("turn/drainAsSteer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.click(steerButton());
@@ -2686,12 +2617,7 @@ test("a successful classic steer also clears the textarea and its draft (contrac
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   const editor = textarea();
@@ -2714,12 +2640,7 @@ test("clicking steer with a non-empty queue routes to drain-as-steer, carrying t
     },
   });
   fake.on("turn/drainAsSteer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "dm");
@@ -2750,12 +2671,7 @@ test("stop and steer both render and both work during the window after status fl
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 } }, // no activeTurnId yet
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -2772,12 +2688,7 @@ test("stop and steer both render and both work during the window after status fl
   // And it is a working button, not a decoration: the request it sends names
   // the ref and nothing else, which is why it needs no id to exist.
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   await user.click(screen.getByRole("button", { name: /session actions/i }));
   await user.click(screen.getByRole("menuitem", { name: "Stop" }));
@@ -2799,20 +2710,10 @@ test("a phone-width draft keeps Send in the row and Stop and Steer in the sessio
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -2888,12 +2789,7 @@ test("Steer pressed after an idle frame folded in the same task is refused on th
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   await user.type(textarea(), "hi");
   const steer = steerButton();
@@ -2911,12 +2807,7 @@ test("Stop pressed after an idle frame folded in the same task is refused on the
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   const stop = stopButton();
   act(() => {
@@ -2936,12 +2827,7 @@ test("submit after an active frame folded in the same task routes to queue on th
   });
   for (const method of ["turn/start", "turn/queue"] as const) {
     fake.on(method, (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
   }
   await user.type(textarea(), "hi");
@@ -3148,12 +3034,7 @@ test("Shift+Enter while active with no active turn id sends the steer", async ()
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 } }, // no activeTurnId
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -3185,12 +3066,7 @@ test("Shift+Enter routing to drain while active with no active turn id sends the
     }, // no activeTurnId
   });
   fake.on("turn/drainAsSteer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -3218,12 +3094,7 @@ test("Shift+Enter on a busy session whose harness advertises no steer sends noth
     },
   });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -3238,12 +3109,7 @@ test("Shift+Enter on an idle session, where no Steer button renders at all, stil
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a", { status: { type: "idle" } });
   fake.on("turn/steer", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.type(textarea(), "hi");
@@ -3461,12 +3327,7 @@ test("sending recovered text uses current Composer routing and consumes the reco
     },
   });
   fake.on("turn/queue", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await flushPendingTurnsProjectionForTests();
@@ -3529,12 +3390,7 @@ test.each(["automatic", "Edit message"] as const)(
         },
       });
       fake.on("turn/start", (params) => ({
-        receipt: {
-          clientMutationId: params.clientMutationId,
-          disposition: "applied",
-          threadId: "thread_a",
-          projectionState: "reflected",
-        },
+        receipt: appliedReceipt(params.clientMutationId, "thread_a"),
         turn: { id: "turn_1", status: "inProgress", itemsView: "full", items: [] },
       }));
       await flushPendingTurnsProjectionForTests();
@@ -4151,12 +4007,7 @@ test.each(ENDED_STATUSES)("a %s session's compact card keeps controls and sends 
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a", { status: { type } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   const editor = textarea();
@@ -4275,12 +4126,7 @@ test("an ended session can still be typed into and submitted with the Mod+Enter 
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a", { status: { type: "notLoaded" } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -4323,12 +4169,7 @@ test("a merely-resumable stopped local session offers Send and sends turn/start"
     },
   });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_resumed", status: "inProgress", itemsView: "" },
   }));
   await waitFor(() => expect(threadsStore.getState().restartBlockingObligations.has(ref)).toBe(true));
@@ -5276,12 +5117,7 @@ test.each([399, 400])("pending interrupt still gates Stop after the inline delay
   installNarrowComposer(width);
   const fake = await mountComposer("ref_a", { status: { type: "active" } });
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thr_ref_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
   }));
   act(() => replaceEditorText(textarea(), "draft"));
   const held = holdNextWriteTransaction(["outbox", "optimistic", "recovery", "sequences"]);
@@ -5331,12 +5167,7 @@ test.each(["inline", "menu"] as const)("a rejected %s Stop preserves the draft a
   if (location === "menu") expect(submitButton().disabled).toBe(false);
   else expect(stopButton().disabled).toBe(false);
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thr_ref_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
   }));
   await press();
   await flushPendingTurnsProjectionForTests();
@@ -5351,12 +5182,7 @@ test("clicking Stop calls turn/interrupt", async () => {
     evener: { ref: "ref_a", capabilities: FULL_CAPABILITIES, queue: { revision: 0 }, activeTurnId: "turn_1" },
   });
   fake.on("turn/interrupt", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 
   await user.click(stopButton());
@@ -5740,12 +5566,7 @@ test("a successful submit includes the pasted image as a base64 InputAttachment"
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -5769,12 +5590,7 @@ test("submitting while an attachment is still mid-encode is blocked with a toast
   const user = userEvent.setup();
   const fake = await mountComposer("ref_a");
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -6406,12 +6222,7 @@ test("skill completions keep indivisible chips in the sentence and submit both r
     },
   });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -6527,12 +6338,7 @@ test.each([true, false])("explicit commands persist through remount and respect 
   const fake = await mountComposer(ref, options);
   expect(textarea().querySelectorAll("[data-command-name]")).toHaveLength(1);
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   await user.click(submitButton());
@@ -6583,20 +6389,10 @@ test.each(["same", "audit"])(
     });
     fake.on("turn/cancelQueued", (params) => ({
       removedText: text,
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     fake.on("turn/start", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       turn: { id: "turn_1", status: "inProgress", itemsView: "" },
     }));
     await user.click(screen.getByRole("button", { name: "Edit message" }));
@@ -6642,12 +6438,7 @@ test("queue edit retains current command and skill atom locations without activa
   });
   fake.on("turn/cancelQueued", (params) => ({
     removedText: "queued prose",
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
   await user.click(screen.getByRole("button", { name: "Edit message" }));
   await flushPendingTurnsProjectionForTests();
@@ -6776,12 +6567,7 @@ test.each([
     evener: { ref, capabilities: { ...FULL_CAPABILITIES, skillInput: true }, queue: { revision: 0 } },
   });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "full", items: [] },
   }));
   const editor = textarea();
@@ -6850,12 +6636,7 @@ test("a leading skill that shares a builtin name remains message input", async (
     evener: { ref, capabilities: { ...FULL_CAPABILITIES, skillInput: true }, queue: { revision: 0 } },
   });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   await user.click(submitButton());
@@ -7013,12 +6794,7 @@ test("Enter commits the highlighted option and does NOT fall through to the comp
     evener: { ...testThread("ref_slash9").evener, diagnostics: { commands: REVIEW_RELEASE_CATALOG } },
   });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
   const editor = textarea();
@@ -7265,12 +7041,7 @@ test("an unknown /foo sends as a plain message - the escape hatch", async () => 
   const user = userEvent.setup();
   const fake = await mountComposer("ref_builtin_unknown", { status: { type: "idle" } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -7290,12 +7061,7 @@ test("a plugin catalog command still sends as text - only BUILT-INS are intercep
   const user = userEvent.setup();
   const fake = await mountComposer("ref_builtin_plugin", { status: { type: "idle" } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 
@@ -7314,12 +7080,7 @@ test("a message carrying an attachment is never read as a command invocation, ev
   const user = userEvent.setup();
   const fake = await mountComposer("ref_builtin_attachment", { status: { type: "idle" } });
   fake.on("turn/start", (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     turn: { id: "turn_1", status: "inProgress", itemsView: "" },
   }));
 

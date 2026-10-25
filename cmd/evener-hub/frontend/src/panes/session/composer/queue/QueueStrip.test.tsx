@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { IDBFactory } from "fake-indexeddb";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { appliedReceipt } from "../../../../mutationReceiptTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import type {
   MutationOutboxRecord,
@@ -181,12 +182,7 @@ async function seedCanceled(text: string, input?: InputItem[]): Promise<void> {
 // applied receipt, the response every accepted control mutation carries.
 function applied(fake: FakeClient, method: "turn/drainAsSteer" | "turn/promoteQueuedAsSteer"): void {
   fake.on(method, (params) => ({
-    receipt: {
-      clientMutationId: params.clientMutationId,
-      disposition: "applied",
-      threadId: "thread_a",
-      projectionState: "reflected",
-    },
+    receipt: appliedReceipt(params.clientMutationId, "thread_a"),
   }));
 }
 
@@ -1485,12 +1481,7 @@ describe("promote", () => {
       },
     });
     fake.on("turn/promoteQueuedAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     renderStrip(defaultProps());
 
@@ -1521,12 +1512,7 @@ describe("promote", () => {
       },
     });
     fake.on("turn/promoteQueuedAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "pending",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a", { projectionState: "pending" }),
     }));
     renderStrip(defaultProps());
 
@@ -1708,12 +1694,7 @@ describe("cancel", () => {
       },
     });
     fake.on("turn/cancelQueued", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       removedText: "hello",
     }));
     renderStrip(defaultProps());
@@ -1743,12 +1724,7 @@ describe("edit", () => {
     fake.on("turn/cancelQueued", (params) => {
       calls.push("cancelQueued");
       return {
-        receipt: {
-          clientMutationId: params.clientMutationId,
-          disposition: "applied",
-          threadId: "thread_a",
-          projectionState: "reflected",
-        },
+        receipt: appliedReceipt(params.clientMutationId, "thread_a"),
         removedText: "the full untruncated message",
       };
     });
@@ -1781,12 +1757,7 @@ describe("edit", () => {
       },
     });
     fake.on("turn/cancelQueued", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       removedText: "queued text",
     }));
     const onRestoreToComposer = vi.fn();
@@ -1819,12 +1790,7 @@ describe("edit", () => {
       },
     });
     fake.on("turn/cancelQueued", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       removedText: "",
     }));
     const onRestoreToComposer = vi.fn();
@@ -1965,12 +1931,7 @@ describe("re-rendering after the queue shifts", () => {
       },
     });
     fake.on("turn/promoteQueuedAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     renderStrip(defaultProps());
 
@@ -2021,12 +1982,7 @@ describe("re-rendering after the queue shifts", () => {
       },
     });
     fake.on("turn/cancelQueued", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
       removedText: "second queued message",
     }));
     renderStrip(defaultProps());
@@ -2095,12 +2051,7 @@ describe("in-flight row locking", () => {
         new Promise((resolve) => {
           resolveCancel = () =>
             resolve({
-              receipt: {
-                clientMutationId: params.clientMutationId,
-                disposition: "applied",
-                threadId: "thread_a",
-                projectionState: "reflected",
-              },
+              receipt: appliedReceipt(params.clientMutationId, "thread_a"),
               removedText: "hello",
             });
         }),
@@ -2192,12 +2143,7 @@ describe("optimistic pending queue rows", () => {
       },
     });
     fake.on("turn/queue", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     renderStrip(defaultProps());
 
@@ -2335,12 +2281,7 @@ describe("drain-as-steer affordance", () => {
       },
     });
     fake.on("turn/drainAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     const onDrainSuccess = vi.fn();
     renderStrip(
@@ -2432,12 +2373,7 @@ describe("drain-as-steer affordance", () => {
       },
     });
     fake.on("turn/drainAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     renderStrip(defaultProps({ getComposerText: () => ({ text: "my current draft", hasPending: true }) }));
 
@@ -2469,12 +2405,7 @@ describe("drain-as-steer affordance", () => {
         new Promise((resolve) => {
           resolveDrain = () =>
             resolve({
-              receipt: {
-                clientMutationId: params.clientMutationId,
-                disposition: "applied",
-                threadId: "thread_a",
-                projectionState: "reflected",
-              },
+              receipt: appliedReceipt(params.clientMutationId, "thread_a"),
             });
         }),
     );
@@ -2502,12 +2433,7 @@ describe("drain-as-steer affordance", () => {
       },
     });
     fake.on("turn/drainAsSteer", (params) => ({
-      receipt: {
-        clientMutationId: params.clientMutationId,
-        disposition: "applied",
-        threadId: "thread_a",
-        projectionState: "reflected",
-      },
+      receipt: appliedReceipt(params.clientMutationId, "thread_a"),
     }));
     renderStrip(defaultProps({ busy: true }));
 

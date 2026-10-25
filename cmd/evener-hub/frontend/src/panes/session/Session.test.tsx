@@ -14,6 +14,7 @@ import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { StrictMode, useSyncExternalStore } from "react";
 import { afterEach, beforeAll, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { connectFakeClient } from "../../connectionTestUtils";
+import { appliedReceipt } from "../../mutationReceiptTestUtils";
 import { activitySidebarStore, resetActivitySidebarStoreForTests } from "../../shell/activitybar/activitySidebarStore";
 import { ClientProvider } from "../../shell/clientContext";
 import { conversationPaneLifetime } from "../../shell/paneLifetime";
@@ -3313,12 +3314,7 @@ test("heldEpoch bumps on arrival only - never on removal", async () => {
       return new Promise((resolve) => {
         steerSent.resolve(() =>
           resolve({
-            receipt: {
-              clientMutationId: params.clientMutationId,
-              disposition: "applied",
-              threadId: "thr_ref_a",
-              projectionState: "reflected",
-            },
+            receipt: appliedReceipt(params.clientMutationId, "thr_ref_a"),
           }),
         );
       });
