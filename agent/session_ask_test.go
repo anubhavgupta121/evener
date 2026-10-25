@@ -145,6 +145,26 @@ func newAskStateSession(t *testing.T, steps ...func(req llm.Request) llm.Respons
 	return sess, dir
 }
 
+// runAskRound drives the canonical ask-opening input on the tripwire context,
+// failing the test if the round errors.
+func runAskRound(t *testing.T, sess *Session) {
+	t.Helper()
+	ctx := tripwireCtx(t)
+	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
+		t.Fatalf("ProcessInput: %v", err)
+	}
+}
+
+// driveAsk runs the canonical ask round and requires it to land as exactly
+// one pending question, the shared opening move of the boundary tests.
+func driveAsk(t *testing.T, sess *Session) {
+	t.Helper()
+	runAskRound(t, sess)
+	if got := sess.askPendingCount(); got != 1 {
+		t.Fatalf("askPendingCount = %d, want 1 (test setup broken)", got)
+	}
+}
+
 // hasToolDef reports whether name is present among defs.
 func hasToolDef(defs []llm.ToolDefinition, name string) bool {
 	for _, td := range defs {
@@ -1115,10 +1135,7 @@ func TestAskUser_BoundaryDrainPreservesFollowUp(t *testing.T) {
 			return "queued", nil
 		})
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	if got := sess.State(); got != SessionAwaiting {
 		t.Fatalf("state = %q, want %q", got, SessionAwaiting)
@@ -1171,10 +1188,7 @@ func TestAskUser_CompactRefusedWhileAwaiting(t *testing.T) {
 	}
 	sess := newSession(t, withAdapter(f))
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 	if got := sess.State(); got != SessionAwaiting {
 		t.Fatalf("state before Compact = %q, want %q (test setup broken)", got, SessionAwaiting)
 	}
@@ -1360,10 +1374,7 @@ func TestAskUser_RestoreRederivesAwaiting(t *testing.T) {
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 	if got := sess.State(); got != SessionAwaiting {
 		t.Fatalf("pre-restore state = %q, want %q (test setup broken)", got, SessionAwaiting)
 	}
@@ -1394,10 +1405,7 @@ func TestAskUser_RestoreRederivesAwaitingAcrossTrailingSteering(t *testing.T) {
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 	if got := sess.State(); got != SessionAwaiting {
 		t.Fatalf("pre-restore state = %q, want %q (test setup broken)", got, SessionAwaiting)
 	}
@@ -1658,13 +1666,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagSteeringCarrierForAHuman
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
-	if got := sess.askPendingCount(); got != 1 {
-		t.Fatalf("pre-carrier pending count = %d, want 1 (test setup broken)", got)
-	}
+	driveAsk(t, sess)
 
 	if _, err := sess.SetHumanNote("note-skill-tag-1", "watch the ingest path"); err != nil {
 		t.Fatalf("SetHumanNote: %v", err)
@@ -2538,10 +2540,7 @@ func TestAskUser_RestoreUsesJournalProvenanceForAKindlessLegacyHumanNoteTurn(t *
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	// A legacy human-note steering turn: user-sourced, kindless (as it would
 	// be if written before SteeringKind existed), its ClientMutationID the
@@ -2601,10 +2600,7 @@ func TestAskUser_RestoreClassifiesAKindlessProvenancelessHumanNoteByItsTextShape
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	// A legacy human-note steering turn with NO provenance reachable at all:
 	// kindless, and belonging to an inherited fork prefix -- divergenceTurn
@@ -2873,13 +2869,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagAHumanNoteClaim(t *testi
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
-	if got := sess.askPendingCount(); got != 1 {
-		t.Fatalf("pre-carrier pending count = %d, want 1 (test setup broken)", got)
-	}
+	driveAsk(t, sess)
 
 	if _, err := sess.SetHumanNote("note-skill-1", "watch the ingest path"); err != nil {
 		t.Fatalf("SetHumanNote: %v", err)
@@ -3187,13 +3177,7 @@ func TestAskUser_RestoreDoesNotResolveAcrossAnUnrelatedTurnFailure(t *testing.T)
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
-	if got := sess.askPendingCount(); got != 1 {
-		t.Fatalf("pre-failure pending count = %d, want 1 (test setup broken)", got)
-	}
+	driveAsk(t, sess)
 
 	if sess.consumeSteeringMessage(steeringMessage{Text: "steer with a skill", SkillNames: []string{"no-such-skill"}}) == steeringAppendFailed {
 		t.Fatal("the failure record itself did not durably land (test setup broken)")
@@ -3267,10 +3251,7 @@ func TestAskUser_InjectPostToolSteeringClearsPendingAskForAnAcceptedUserSteer(t 
 	}
 	defer sess.Close()
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 	if got := sess.askPendingCount(); got != 0 {
 		t.Fatalf("askPendingCount after the mid-flight steer drained = %d, want 0 (the drained steer resolves the ask it landed after)", got)
 	}
@@ -3346,10 +3327,7 @@ func TestAskUser_SteeringInjectedNeverObservesAskPendingStillTrue(t *testing.T) 
 		}
 	})
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	if len(samples) == 0 {
 		t.Fatal("beforeSteeringInjectedPublish never fired; the drain never ran (test setup broken)")
@@ -3691,10 +3669,7 @@ func TestAskUser_RestoreRebuildsPendingArmsSetGoalWithoutKick(t *testing.T) {
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	meta := sess.Meta()
 	sess.Close()
@@ -3738,10 +3713,7 @@ func TestAskUser_RestoreRebuildsPendingRefusesCompact(t *testing.T) {
 		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
 	)
 
-	ctx := tripwireCtx(t)
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
+	runAskRound(t, sess)
 
 	meta := sess.Meta()
 	sess.Close()
