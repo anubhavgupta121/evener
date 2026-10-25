@@ -133,6 +133,18 @@ func restoreAskSession(t *testing.T, meta schema.SessionMeta, dir string) *Sessi
 	return restored
 }
 
+// newAskStateSession builds the canonical ask-test session: a scripted openai
+// adapter running steps, the fresh workspace dir doubled as StateDir, and the
+// standard namer profile. The dir is returned for restore-based follow-ups.
+func newAskStateSession(t *testing.T, steps ...func(req llm.Request) llm.Response) (*Session, string) {
+	t.Helper()
+	dir := t.TempDir()
+	c := llm.NewClient()
+	c.Register(&fakeAdapter{name: "openai", steps: steps})
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	return sess, dir
+}
+
 // hasToolDef reports whether name is present among defs.
 func hasToolDef(defs []llm.ToolDefinition, name string) bool {
 	for _, td := range defs {
@@ -1343,19 +1355,10 @@ func newAskRestoreClient() *llm.Client {
 // awaiting rather than RestoreSessionFromMetaWithConfig's old hardcoded idle.
 func TestAskUser_RestoreRederivesAwaiting(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -1386,19 +1389,10 @@ func TestAskUser_RestoreRederivesAwaiting(t *testing.T) {
 // coupling this test to which mechanism produces it.
 func TestAskUser_RestoreRederivesAwaitingAcrossTrailingSteering(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -1456,16 +1450,10 @@ func TestAskUser_SteeringCarrierClaimAnswersAskFailsClosedForUnknownProvenance(t
 // askPendingCount the entry clear already resolved.
 func TestAskUser_AcceptSteeringCarrierInputTagsSteeringCarrierOnAppendFailureForAnAnsweringSteer(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -1573,16 +1561,10 @@ func TestSteeringCarrierStoodDownRemembersEveryTurn(t *testing.T) {
 // append-failure test above, so the entry clear itself runs.
 func TestAskUser_RecordFailedSteeringSelectionTagsSteeringCarrierForAnAnsweringSteer(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -1625,16 +1607,10 @@ func TestAskUser_RecordFailedSteeringSelectionTagsSteeringCarrierForAnAnsweringS
 // pending ask untouched.
 func TestAskUser_AcceptSteeringCarrierInputDoesNotTagSteeringCarrierOnAppendFailureForAHumanNote(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -1677,16 +1653,10 @@ func TestAskUser_AcceptSteeringCarrierInputDoesNotTagSteeringCarrierOnAppendFail
 // through a restore.
 func TestAskUser_RecordFailedSteeringSelectionDoesNotTagSteeringCarrierForAHumanNoteClaim(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2371,19 +2341,10 @@ func TestAskUser_InterruptMarkerRetainedWriteIsAdopted(t *testing.T) {
 // hand-built turn.
 func TestAskUser_RestoreResolvesAcrossUserSteer(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2444,19 +2405,10 @@ func TestAskUser_RestoreResolvesAcrossUserSteer(t *testing.T) {
 // was found in this interaction; the fixture exists to pin it.
 func TestAskUser_RestoreResolvesAcrossUserSteerFollowedBySameRoundDaemonReminder(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2526,17 +2478,11 @@ func TestAskUser_RestoreResolvesAcrossUserSteerFollowedBySameRoundDaemonReminder
 // clearAskPendingForResolvingSteer ever ran.
 func TestAskUser_HumanNoteDuringPendingAskDoesNotResolveIt(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return finalResponse("noted") },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return finalResponse("noted") },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2587,16 +2533,10 @@ func TestAskUser_HumanNoteDuringPendingAskDoesNotResolveIt(t *testing.T) {
 // own subject, and keeps its prefixed fixture for exactly that reason).
 func TestAskUser_RestoreUsesJournalProvenanceForAKindlessLegacyHumanNoteTurn(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2656,16 +2596,10 @@ func TestAskUser_RestoreUsesJournalProvenanceForAKindlessLegacyHumanNoteTurn(t *
 // divergenceTurn set so the note turn is entirely inherited.
 func TestAskUser_RestoreClassifiesAKindlessProvenancelessHumanNoteByItsTextShape(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2761,19 +2695,10 @@ func TestAcceptSteeringCarrierInput_PanicMidDrainStillClearsTheClaim(t *testing.
 // TurnFailure turn.
 func TestAskUser_RestoreResolvesAcrossFailedSteeringCarrier(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2831,19 +2756,10 @@ func TestAskUser_RestoreResolvesAcrossFailedSteeringCarrier(t *testing.T) {
 // hand-built TurnFailure.
 func TestAskUser_RestoreResolvesAcrossFailedSteeringSelectionCarrier(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2898,19 +2814,10 @@ func TestAskUser_RestoreResolvesAcrossFailedSteeringSelectionCarrier(t *testing.
 // to fail, exactly like the answering-steer sibling above.
 func TestAskUser_RestoreDoesNotResolveAcrossAFailedHumanNoteCarrierAppend(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -2961,19 +2868,10 @@ func TestAskUser_RestoreDoesNotResolveAcrossAFailedHumanNoteCarrierAppend(t *tes
 // (SetHumanNote is still the one path that stamps SteeringKindHumanNote).
 func TestAskUser_RecordFailedSteeringSelectionDoesNotTagAHumanNoteClaim(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -3159,20 +3057,10 @@ func TestAskUser_RestoreAccumulatesPendingQuestionsAcrossNonResolvingRounds(t *t
 // shape, not a hand-built turn.
 func buildAnsweredAskHistoryForFork(t *testing.T, clientMutationID string) []schema.Turn {
 	t.Helper()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -3294,19 +3182,10 @@ func TestAskUser_ForkedChildDoesNotApplyItsOwnJournalToAnInheritedAnsweringSteer
 // hand-built TurnFailure.
 func TestAskUser_RestoreDoesNotResolveAcrossAnUnrelatedTurnFailure(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -3609,20 +3488,11 @@ func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
 // what the tail's own state settles to.
 func TestAskUser_RestoreRederivesIdleAfterAnsweredAsk(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return finalResponse("thanks, using Postgres") },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return finalResponse("thanks, using Postgres") },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -3761,19 +3631,10 @@ func TestAskUser_RestoreRederivesIdleAfterInterruptedAsk(t *testing.T) {
 // the wake is wrongly accepted and reaches Complete.
 func TestAskUser_RestoreRebuildsPendingHoldsEntryGate(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -3825,19 +3686,10 @@ func TestAskUser_RestoreRebuildsPendingHoldsEntryGate(t *testing.T) {
 // immediately instead of arming.
 func TestAskUser_RestoreRebuildsPendingArmsSetGoalWithoutKick(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -3881,19 +3733,10 @@ func TestAskUser_RestoreRebuildsPendingArmsSetGoalWithoutKick(t *testing.T) {
 // own transcript tail.
 func TestAskUser_RestoreRebuildsPendingRefusesCompact(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -4043,19 +3886,10 @@ func TestAskUser_RestoreNeedsResponseRestKeepsPendingEmptyAndGoalKicks(t *testin
 // forgets about.
 func TestAskUser_RestoreRebuildsPendingThenReplyClears(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess, dir := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
@@ -4441,16 +4275,10 @@ func TestAskUser_MidRoundResolvingSteerClearingAFreshAskDoesNotForceAwaitingEarl
 // one.
 func TestAskUser_LiveStateAfterFailedHumanNoteCarrierAppendMatchesRestore(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
-	c := llm.NewClient()
-	c.Register(&fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-		},
-	})
-	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
+	sess, _ := newAskStateSession(t,
+		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+	)
 
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {

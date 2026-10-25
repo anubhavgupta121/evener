@@ -26,28 +26,55 @@ import (
 	"primeradiant.com/evener/llm/registry"
 )
 
-func TestSession_MaxToolRoundsPerInput_StopsLoop(t *testing.T) {
-	t.Parallel()
+// roundLimitToolMsg builds a response pairing text with a glob tool call, the
+// scripted round shape the MaxToolRoundsPerInput tests loop on.
+func roundLimitToolMsg(id, text string) llm.Response {
+	call := llm.ToolCallData{
+		ID:        id,
+		Name:      "glob",
+		Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
+		Type:      "function",
+	}
+	return llm.Response{
+		Message: llm.Message{
+			Role: llm.RoleAssistant,
+			Content: []llm.ContentPart{
+				{Kind: llm.ContentText, Text: text},
+				{Kind: llm.ContentToolCall, ToolCall: &call},
+			},
+		},
+	}
+}
+
+// roundLimitToolCallMsg is roundLimitToolMsg without the text part.
+func roundLimitToolCallMsg(id string) llm.Response {
+	call := llm.ToolCallData{
+		ID:        id,
+		Name:      "glob",
+		Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
+		Type:      "function",
+	}
+	return llm.Response{
+		Message: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: []llm.ContentPart{{Kind: llm.ContentToolCall, ToolCall: &call}},
+		},
+	}
+}
+
+// newRoundLimitSession builds a session over a scripted openai adapter with
+// MaxToolRoundsPerInput set to rounds.
+func newRoundLimitSession(t *testing.T, rounds int, f *fakeAdapter) *Session {
+	t.Helper()
 	dir := t.TempDir()
 	c := llm.NewClient()
+	c.Register(f)
+	return newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{MaxToolRoundsPerInput: rounds}))
+}
 
-	toolMsg := func(id string) llm.Response {
-		call := llm.ToolCallData{
-			ID:        id,
-			Name:      "glob",
-			Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
-			Type:      "function",
-		}
-		return llm.Response{
-			Message: llm.Message{
-				Role: llm.RoleAssistant,
-				Content: []llm.ContentPart{
-					{Kind: llm.ContentText, Text: "partial " + id},
-					{Kind: llm.ContentToolCall, ToolCall: &call},
-				},
-			},
-		}
-	}
+func TestSession_MaxToolRoundsPerInput_StopsLoop(t *testing.T) {
+	t.Parallel()
+	toolMsg := func(id string) llm.Response { return roundLimitToolMsg(id, "partial "+id) }
 
 	f := &fakeAdapter{
 		name: "openai",
@@ -56,16 +83,8 @@ func TestSession_MaxToolRoundsPerInput_StopsLoop(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg("2") },
 		},
 	}
-	c.Register(f)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		MaxToolRoundsPerInput: 2,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
+	sess := newRoundLimitSession(t, 2, f)
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "loop", nil)
 	requireBudgetExhaustion(t, err, exhaustedBudgetToolRounds, 2, true)
 	if out != "partial 2" {
@@ -80,23 +99,7 @@ func TestSession_MaxToolRoundsPerInput_StopsLoop(t *testing.T) {
 
 func TestSession_MaxToolRoundsPerInput_EmitsTurnLimitEvent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-
-	toolMsg := func(id string) llm.Response {
-		call := llm.ToolCallData{
-			ID:        id,
-			Name:      "glob",
-			Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
-			Type:      "function",
-		}
-		return llm.Response{
-			Message: llm.Message{
-				Role:    llm.RoleAssistant,
-				Content: []llm.ContentPart{{Kind: llm.ContentToolCall, ToolCall: &call}},
-			},
-		}
-	}
+	toolMsg := roundLimitToolCallMsg
 
 	f := &fakeAdapter{
 		name: "openai",
@@ -105,17 +108,9 @@ func TestSession_MaxToolRoundsPerInput_EmitsTurnLimitEvent(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg("2") },
 		},
 	}
-	c.Register(f)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		MaxToolRoundsPerInput: 2,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "loop", nil)
+	sess := newRoundLimitSession(t, 2, f)
+	ctx := tripwireCtx(t)
+	_, err := sess.ProcessInput(ctx, "loop", nil)
 	requireBudgetExhaustion(t, err, exhaustedBudgetToolRounds, 2, true)
 	sess.Close()
 
@@ -135,23 +130,7 @@ func TestSession_MaxToolRoundsPerInput_EmitsTurnLimitEvent(t *testing.T) {
 
 func TestSession_MaxToolRoundsPerInput_NegativeMeansUnlimited(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-
-	toolMsg := func(id string) llm.Response {
-		call := llm.ToolCallData{
-			ID:        id,
-			Name:      "glob",
-			Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
-			Type:      "function",
-		}
-		return llm.Response{
-			Message: llm.Message{
-				Role:    llm.RoleAssistant,
-				Content: []llm.ContentPart{{Kind: llm.ContentToolCall, ToolCall: &call}},
-			},
-		}
-	}
+	toolMsg := roundLimitToolCallMsg
 
 	// 3 rounds of tool calls, then fall through to fakeAdapter's default "done" response.
 	f := &fakeAdapter{
@@ -163,16 +142,8 @@ func TestSession_MaxToolRoundsPerInput_NegativeMeansUnlimited(t *testing.T) {
 			func(req llm.Request) llm.Response { return finalResponse("done") },
 		},
 	}
-	c.Register(f)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		MaxToolRoundsPerInput: -1, // unlimited
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
+	sess := newRoundLimitSession(t, -1, f)
+	ctx := tripwireCtx(t)
 	result, err := sess.ProcessInput(ctx, "do stuff", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1490,23 +1461,32 @@ func TestSession_CustomToolRegistration_OverridesExistingTool(t *testing.T) {
 	sess.Close()
 }
 
-func TestSession_AuthenticationError_LeavesSessionIdle(t *testing.T) {
-	t.Parallel()
+// driveTerminalProviderError builds a session over an adapter that fails every
+// call with adapterErr, drives one input, and requires the call to fail, the
+// shared shape of the terminal-provider-error tests below. The session is left
+// open for the caller's state assertions and event drain.
+func driveTerminalProviderError(t *testing.T, adapterErr error, noRetry bool) (*errAdapter, *Session) {
+	t.Helper()
 	dir := t.TempDir()
 	c := llm.NewClient()
-	a := &errAdapter{name: "openai", err: llm.ErrorFromHTTPStatus("openai", 401, "bad key", nil, nil)}
+	a := &errAdapter{name: "openai", err: adapterErr}
 	c.Register(a)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
+	cfg := SessionConfig{}
+	if noRetry {
+		policy := llm.RetryPolicy{MaxRetries: 0}
+		cfg.LLMRetryPolicy = &policy
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "hi", nil)
-	if err == nil {
+	sess := newSession(t, withClient(c), withDir(dir), withConfig(cfg))
+	ctx := tripwireCtx(t)
+	if _, err := sess.ProcessInput(ctx, "hi", nil); err == nil {
 		t.Fatalf("expected error")
 	}
+	return a, sess
+}
+
+func TestSession_AuthenticationError_LeavesSessionIdle(t *testing.T) {
+	t.Parallel()
+	a, sess := driveTerminalProviderError(t, llm.ErrorFromHTTPStatus("openai", 401, "bad key", nil, nil), false)
 
 	// Terminal provider errors settle the session at idle, still open, so the
 	// operator can fix credentials and continue in place.
@@ -1531,21 +1511,7 @@ func TestSession_AuthenticationError_LeavesSessionIdle(t *testing.T) {
 
 func TestSession_ContextLengthError_EmitsWarningAndLeavesSessionIdle(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-	a := &errAdapter{name: "openai", err: llm.ErrorFromHTTPStatus("openai", 413, "too large", nil, nil)}
-	c.Register(a)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "hi", nil)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	_, sess := driveTerminalProviderError(t, llm.ErrorFromHTTPStatus("openai", 413, "too large", nil, nil), false)
 
 	// Terminal provider errors settle the session at idle, still open.
 	if got := sess.State(); got != SessionIdle {
@@ -1576,24 +1542,7 @@ func TestSession_ContextLengthError_EmitsWarningAndLeavesSessionIdle(t *testing.
 
 func TestSession_LLMError_EmitsErrorEvent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-	a := &errAdapter{name: "openai", err: llm.ErrorFromHTTPStatus("openai", 500, "boom", nil, nil)}
-	c.Register(a)
-
-	policy := llm.RetryPolicy{MaxRetries: 0}
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		LLMRetryPolicy: &policy,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "hi", nil)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	_, sess := driveTerminalProviderError(t, llm.ErrorFromHTTPStatus("openai", 500, "boom", nil, nil), true)
 	sess.Close()
 
 	errEv := false
@@ -1612,24 +1561,7 @@ func TestSession_LLMError_EmitsErrorEvent(t *testing.T) {
 
 func TestSession_ConfigurationError_EmitsEvenerDiagnosticEvent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-	a := &errAdapter{name: "openai", err: &llm.ConfigurationError{Message: "unknown provider: openrouter"}}
-	c.Register(a)
-
-	policy := llm.RetryPolicy{MaxRetries: 0}
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		LLMRetryPolicy: &policy,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "hi", nil)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	_, sess := driveTerminalProviderError(t, &llm.ConfigurationError{Message: "unknown provider: openrouter"}, true)
 	sess.Close()
 
 	for ev := range sess.Events() {
@@ -1647,24 +1579,7 @@ func TestSession_ConfigurationError_EmitsEvenerDiagnosticEvent(t *testing.T) {
 
 func TestSession_RuntimeError_EmitsEvenerDiagnosticEvent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-	a := &errAdapter{name: "openai", err: errors.New("session runtime exploded")}
-	c.Register(a)
-
-	policy := llm.RetryPolicy{MaxRetries: 0}
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		LLMRetryPolicy: &policy,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-	_, err = sess.ProcessInput(ctx, "hi", nil)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	_, sess := driveTerminalProviderError(t, errors.New("session runtime exploded"), true)
 	sess.Close()
 
 	for ev := range sess.Events() {
@@ -3585,26 +3500,7 @@ func TestDetectLoop_Patterns(t *testing.T) {
 // GAP-2.16: Round limit returns typed exhaustion and preserves partial text.
 func TestSession_RoundLimit_ReturnsTypedErrorAndPartialOutput(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-
-	toolMsg := func(id, text string) llm.Response {
-		call := llm.ToolCallData{
-			ID:        id,
-			Name:      "glob",
-			Arguments: json.RawMessage(`{"pattern":"*.go","path":"."}`),
-			Type:      "function",
-		}
-		return llm.Response{
-			Message: llm.Message{
-				Role: llm.RoleAssistant,
-				Content: []llm.ContentPart{
-					{Kind: llm.ContentText, Text: text},
-					{Kind: llm.ContentToolCall, ToolCall: &call},
-				},
-			},
-		}
-	}
+	toolMsg := roundLimitToolMsg
 
 	f := &fakeAdapter{
 		name: "openai",
@@ -3613,20 +3509,10 @@ func TestSession_RoundLimit_ReturnsTypedErrorAndPartialOutput(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg("2", "round two") },
 		},
 	}
-	c.Register(f)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		MaxToolRoundsPerInput: 2,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	sess := newRoundLimitSession(t, 2, f)
 	drainSessionEvents(sess)
-	defer sess.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	defer cancel()
-
+	ctx := tripwireCtx(t)
 	out, err := sess.ProcessInput(ctx, "loop", nil)
 	requireBudgetExhaustion(t, err, exhaustedBudgetToolRounds, 2, true)
 	if out != "round two" {
