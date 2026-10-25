@@ -554,7 +554,12 @@ it("clears the guard when a fresh read shows the removed name absent", async () 
 			return removals === 1 ? Promise.reject(cloneLitterError(null, false)) : Promise.resolve({ marketplaces: [] });
 		},
 	});
-	const tree = await mountMarketplace(hub);
+	harness.connection = readyConnection(hub.client);
+	const props = {
+		route: { params: { hubId: "hub-1" } },
+	} as unknown as ComponentProps<typeof PluginsPage>;
+	const tree = render(<PluginsStack {...props} />);
+	await act(async () => {});
 	await browseMarketplace(tree);
 	await confirmMarketplaceRemoval(tree);
 	await act(async () => {});
@@ -566,7 +571,14 @@ it("clears the guard when a fresh read shows the removed name absent", async () 
 	// registration, the same lastUpdated - and it has to stay removable.
 	await marketplacesChanged(hub);
 	await act(async () => {});
-	await removeAcmeOnceMore(tree, hub);
+	await act(async () => {
+		marketplaceRow(tree, "acme").props.onPress();
+	});
+	await act(async () => {});
+	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
+	expect(remove.props.disabled).toBe(false);
+	await confirmMarketplaceRemoval(tree);
+	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
 });
 
 it("clears an obsolete cleanup warning when a later applied removal is clean", async () => {
