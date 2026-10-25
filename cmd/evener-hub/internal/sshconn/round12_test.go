@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"primeradiant.com/evener/appwire"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hostreg"
@@ -320,9 +319,7 @@ func TestRound12RelaunchWaitsForTheOldProcessToExit(t *testing.T) {
 		onKill:     func() { killed = true },
 		onRelaunch: func() { relaunched++ },
 	})
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	if err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil); err != nil {
 		t.Fatalf("restartBare: %v", err)
@@ -377,9 +374,7 @@ func TestRound12RelaunchRefusedWhileTheOldProcessStillRuns(t *testing.T) {
 		onKill:      func() { killed = true },
 		onRelaunch:  func() { relaunched++ },
 	})
-	m := newTestManager(t, testRegistry(t, host), fr, Options{
-		sleep: func(context.Context, time.Duration) error { return nil },
-	})
+	m := newSleeplessTestManager(t, host, fr)
 
 	err := m.restartBare(context.Background(), host, m.opts.controllerVersion(), snapshotPinGitSHA(), hubIdentity{}, nil)
 	if !errors.Is(err, ErrRestart) {
