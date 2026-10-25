@@ -2469,6 +2469,77 @@ it("a foreground opening whose cache reads answer slowly but successfully still 
   }
 });
 
+it("a foreground opening whose storage read fails transiently still converges the recorded display", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // Two withheld reads arm the recovery chain (the twice-miss strand); the
+  // chain's next attempt then fails outright instead of missing the deadline.
+  // A transient storage error answers a fast recovery-needed through
+  // openLocal's catch, leaving the chain's own marker unset, so the chain's
+  // refusal exit is the only thing standing between the pane and convergence
+  // once every later read runs the healthy storage again.
+  let withheldWindowReads = 0;
+  let failingWindowReads = 0;
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (failingWindowReads > 0) {
+      failingWindowReads -= 1;
+      return Promise.reject(new Error("storage transiently failed")) as ReturnType<typeof realGetLatestWindow>;
+    }
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  withheldWindowReads = 2;
+  failingWindowReads = 1;
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    // The refusal must not end recovery for good: the pane is still
+    // body-suppressed with healthy storage just one read away, so the chain
+    // hands to source recovery and the recorded display converges exactly as
+    // the twice-miss strand does. The bounded race keeps a red honest
+    // instead of hanging a chain that never re-arms.
+    await Promise.race([
+      settleEntryTranscriptForTests(ref),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 2000);
+      }),
+    ]);
+    expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+    expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";
