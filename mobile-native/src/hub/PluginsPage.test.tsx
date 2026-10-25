@@ -238,6 +238,20 @@ async function mountMarketplace(hub: { client: ConversationClientLike }): Promis
 	return tree;
 }
 
+/** Presses the acme row again and confirms the removal: the row stays
+ * removable, the hub records a second evener/marketplace/remove, and the
+ * call sites keep asserting what their own scenario added. */
+async function removeAcmeOnceMore(tree: ReturnType<typeof render>, hub: { methods: string[] }) {
+	await act(async () => {
+		marketplaceRow(tree, "acme").props.onPress();
+	});
+	await act(async () => {});
+	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
+	expect(remove.props.disabled).toBe(false);
+	await confirmMarketplaceRemoval(tree);
+	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+}
+
 /** The props the mounted screen hands its Plugins child, for driving the
  * screen-level recorders directly: `onAppliedRemoval` is the seam whose
  * return the client-switch tests pin, and `appliedRemovalNames` is the
@@ -552,14 +566,7 @@ it("clears the guard when a fresh read shows the removed name absent", async () 
 	// registration, the same lastUpdated - and it has to stay removable.
 	await marketplacesChanged(hub);
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears an obsolete cleanup warning when a later applied removal is clean", async () => {
@@ -1311,14 +1318,7 @@ it("leaves a re-added marketplace removable after an applied removal reconciles 
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence when a blank-name re-add lands in the wire-indistinguishable second", async () => {
@@ -1369,14 +1369,7 @@ it("clears the fence when a blank-name re-add lands in the wire-indistinguishabl
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence for a blank-name re-add that resolves after the browser unmounts", async () => {
@@ -1454,14 +1447,7 @@ it("clears the fence for a blank-name re-add that resolves after the browser unm
 		tree.root.findByProps({ accessibilityLabel: "Marketplaces" }).props.onPress();
 	});
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence for a wire-indistinguishable re-add made beside another change", async () => {
@@ -1534,14 +1520,7 @@ it("clears the fence for a wire-indistinguishable re-add made beside another cha
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence for a blank-name re-add held behind a newer list read", async () => {
@@ -1626,14 +1605,7 @@ it("clears the fence for a blank-name re-add held behind a newer list read", asy
 		await Promise.resolve();
 	});
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("keeps the fence for a fenced row a blank add's answer carries unchanged", async () => {
@@ -1763,14 +1735,7 @@ it("clears the fence for a wire-indistinguishable blank re-add when no list read
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("retires the fence when the read holding a wire-indistinguishable blank re-add lands", async () => {
@@ -1857,14 +1822,7 @@ it("retires the fence when the read holding a wire-indistinguishable blank re-ad
 		await Promise.resolve();
 	});
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("answers false for an applied outcome a client switch outran, and records for the client that replaced it", async () => {
@@ -2075,14 +2033,7 @@ it("clears the fence when a same-name re-add registers while reconciliation read
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence when another client re-adds the marketplace", async () => {
@@ -2119,14 +2070,7 @@ it("clears the fence when another client re-adds the marketplace", async () => {
 		tree.root.findByProps({ accessibilityLabel: "Back to Plugins" }).props.onPress();
 	});
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence when another client re-adds the name from a different source in the same wire second", async () => {
@@ -2288,14 +2232,7 @@ it("retires the fence on the trusted read when an add resolving after unmount re
 	// acme is removable again, a press only drawing the same idempotent
 	// applied outcome.
 	expect(marketplaceRows(tree, "gamma").length).toBeGreaterThan(0);
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("briefly fences a re-added registration observed before the removal settles, then clears it", async () => {
@@ -2374,14 +2311,7 @@ it("briefly fences a re-added registration observed before the removal settles, 
 		tree.root.findByProps({ accessibilityLabel: "Marketplaces" }).props.onPress();
 	});
 	await act(async () => {});
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 it("clears the fence for a re-added marketplace whose registration carries the same wire timestamp", async () => {
@@ -2422,14 +2352,7 @@ it("clears the fence for a re-added marketplace whose registration carries the s
 	});
 	await act(async () => {});
 
-	await act(async () => {
-		marketplaceRow(tree, "acme").props.onPress();
-	});
-	await act(async () => {});
-	const remove = tree.root.findByProps({ accessibilityLabel: "Remove marketplace" });
-	expect(remove.props.disabled).toBe(false);
-	await confirmMarketplaceRemoval(tree);
-	expect(hub.methods.filter((method) => method === "evener/marketplace/remove")).toHaveLength(2);
+	await removeAcmeOnceMore(tree, hub);
 });
 
 // ---------------------------------------------------------------------------
