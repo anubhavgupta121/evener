@@ -1992,7 +1992,10 @@ func TestRunAudit_R13F4_OmissionWordingMatchesNonReproDesc(t *testing.T) {
 	// 200 reproducible sessions in a canonical bucket (fill the cap).
 	reproBucket := stateHomeBucket(base, hash1)
 	const reproCount = 200
-	seedRunTimeoutSessions(t, reproBucket, reproCount)
+	for range reproCount {
+		s := newSessionsTestSID(t)
+		writeAuditSession(t, reproBucket, s, oneCleanReadFileTurns(), fiveRunTimeoutJobsFor(s))
+	}
 	// 2 non-reproducible sessions in unsafe buckets sharing one sid
 	// (bare sid ambiguous across the two unsafe buckets).
 	nonReproBucketA := stateHomeBucket(base, "has space-a")
@@ -2001,8 +2004,20 @@ func TestRunAudit_R13F4_OmissionWordingMatchesNonReproDesc(t *testing.T) {
 	writeAuditSession(t, nonReproBucketA, nonReproSid, oneCleanReadFileTurns(), fiveRunTimeoutJobsFor(nonReproSid))
 	writeAuditSession(t, nonReproBucketB, nonReproSid, oneCleanReadFileTurns(), fiveRunTimeoutJobsFor(nonReproSid))
 
-	res := runFixtureAudit(t, base, AuditOpts{Since: 24 * time.Hour})
-	runTimeout := runTimeoutFinding(t, res)
+	rb := mustParseFixtureRunbook(t)
+	res, err := RunAudit(base, rb, AuditOpts{Since: 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runTimeout *Finding
+	for i := range res.Findings {
+		if strings.Contains(res.Findings[i].Title, "Run-timeout") {
+			runTimeout = &res.Findings[i]
+		}
+	}
+	if runTimeout == nil {
+		t.Fatalf("no run-timeout finding")
+	}
 	desc := runTimeout.Description
 	// When no non-reproducible sessions were listed (zero budget), the
 	// omission wording must NOT say "more" — there is no preceding list.
