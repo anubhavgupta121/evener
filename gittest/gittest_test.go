@@ -4,27 +4,32 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
 // ambient git state must not reach a fixture: a hostile environment that
-// selects another repository or injects config is ignored by Run.
+// selects another repository, supplies a global config file or injects config
+// is ignored by Run.
 func TestRunIgnoresAmbientGitEnvironment(t *testing.T) {
 	other := t.TempDir()
+	globalConfig := filepath.Join(other, "global.config")
+	if err := os.WriteFile(globalConfig, []byte("[fixture]\n\tglobal = leaked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("GIT_DIR", filepath.Join(other, "nope"))
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
 	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "user.name")
-	t.Setenv("GIT_CONFIG_VALUE_0", "ambient")
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(other, "missing"))
+	t.Setenv("GIT_CONFIG_KEY_0", "fixture.injected")
+	t.Setenv("GIT_CONFIG_VALUE_0", "leaked")
 
 	dir := t.TempDir()
 	Run(t, dir, "init", "-q")
-	Run(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
-	if got := Run(t, dir, "log", "-1", "--format=%an"); got == "ambient" {
-		t.Fatalf("ambient GIT_CONFIG_* reached the fixture: author %q", got)
-	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		t.Fatalf("repository not created in dir despite ambient GIT_DIR: %v", err)
+	}
+	if effective := Run(t, dir, "config", "--list"); strings.Contains(effective, "fixture.") {
+		t.Fatalf("ambient configuration reached the fixture:\n%s", effective)
 	}
 }
 
