@@ -61,7 +61,6 @@ func fuzzSubagentRegressionPrograms(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{"cancel-running", TestStableDelegate_StopRunningChildThenResume},
-		{"cancel-not-running", TestCancelAgent_NotRunning},
 		{"cancel-race", TestCancelAgent_GenuineFailureRacingCancelStaysFailed},
 		{"snapshot-shape", TestResultSnapshot_CurrentShape},
 		{"snapshot-status", TestResultSnapshot_CarriesAgentIDAndStatus},

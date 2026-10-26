@@ -1152,12 +1152,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	// session and any unadopted fresh environment before returning.
 	// On success, GC-evicted records are closed here, OUTSIDE the manager mutex.
 	if !preparedEnv.stableController {
-		var evicted []*subagent
-		if reserve := s.cfg.testOnly.subagentReserveSlot; reserve != nil {
-			evicted, err = reserve(s)
-		} else {
-			evicted, err = s.subagents.reserveSlot()
-		}
+		evicted, err := s.subagents.reserveSlot()
 		if err != nil {
 			disposeUnadopted()
 			return nil, err
@@ -1176,11 +1171,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	var treeSlot *treeReservation
 	var ok bool
 	if !preparedEnv.stableController {
-		if reserve := s.cfg.testOnly.subagentReserveTreeSlot; reserve != nil {
-			treeSlot, ok = reserve(s)
-		} else {
-			treeSlot, ok = s.reserveTreeSlot(slotKindJob)
-		}
+		treeSlot, ok = s.reserveTreeSlot(slotKindJob)
 		if !ok {
 			disposeUnadopted()
 			return nil, s.treeCapacityErrorFor()
@@ -1649,28 +1640,6 @@ func (s *Session) launchSubagentRun(runCtx context.Context, sub *subagent, runCa
 		defer runCancel()
 		sub.run(runCtx, input, inputProvenance)
 	}()
-}
-
-func (s *Session) cancelAgent(agentID string) (any, error) {
-	sub := s.getSub(agentID)
-	if sub == nil {
-		return "", fmt.Errorf("unknown agent_id: %s", agentID)
-	}
-	done, err := sub.requestRunCancel(false)
-	if err != nil {
-		return "", fmt.Errorf("agent %s is %w", agentID, err)
-	}
-	select {
-	case <-done:
-	case <-s.sclock().After(5 * time.Second):
-		return "", fmt.Errorf("timed out cancelling subagent %s", agentID)
-	}
-	sub.mu.Lock()
-	result := sub.resultSnapshotLocked()
-	sub.resultConsumed = true
-	sub.mu.Unlock()
-	b, _ := json.Marshal(result)
-	return string(b), nil
 }
 
 func (s *Session) getSub(agentID string) *subagent {
