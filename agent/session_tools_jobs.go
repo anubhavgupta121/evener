@@ -138,10 +138,6 @@ func liveSteerWaitIgnoredReason(blockTimeoutMS int, status jobstore.Status, acti
 	return ""
 }
 
-func jobWatchTool(s *Session, args map[string]any, maxChars int) (any, error) {
-	return jobWatchToolWithContext(context.Background(), s, args, maxChars)
-}
-
 func jobWatchToolWithContext(ctx context.Context, s *Session, args map[string]any, maxChars int) (any, error) {
 	jm, err := sessionJobManager(s)
 	if err != nil {
@@ -777,7 +773,7 @@ func consumeTerminalJobNotification(s *Session, jm *jobManager, rec *jobstore.Jo
 		TerminalGen: rec.TerminalGen,
 	}
 	if err := jm.appendEvent(consumed); err != nil {
-		s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("job notification consume mark failed: %v", err)})
+		s.emit(events.WarningData{Message: fmt.Sprintf("job notification consume mark failed: %v", err)})
 		return
 	}
 	rec.NotifyState = jobstore.NotifyConsumed
@@ -788,7 +784,7 @@ func consumeTerminalJobNotification(s *Session, jm *jobManager, rec *jobstore.Jo
 	// does: the copy is only a drive signal, and a signal nobody clears
 	// re-drives forever.
 	if err := jm.forwardSnapshot(consumed); err != nil {
-		s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("job notification consume forward failed: %v", err)})
+		s.emit(events.WarningData{Message: fmt.Sprintf("job notification consume forward failed: %v", err)})
 	}
 }
 

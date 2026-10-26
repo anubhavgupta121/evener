@@ -353,10 +353,6 @@ func NewSession(client *llm.Client, profile *provider.Profile, env execenv.Execu
 	}
 	profile = resolvedProfile
 	cfg.applyDefaults()
-	// Let the provider profile override the generic default command timeout.
-	if profileTimeout := profile.DefaultCommandTimeoutMS(); profileTimeout > 0 && cfg.DefaultCommandTimeoutMS == 10_000 {
-		cfg.DefaultCommandTimeoutMS = profileTimeout
-	}
 	store, ownsArtifactStore, artifactStoreErr := resolveArtifactStore(cfg.artifactStore, cfg.artifactStoreInherited)
 
 	owner := cfg.LifetimeContext
@@ -488,7 +484,7 @@ func NewSession(client *llm.Client, profile *provider.Profile, env execenv.Execu
 			_ = s.closeOwnedDelegateStore()
 		}
 	}()
-	s.subagents = newSubagentManager(s.emit, cfg.MaxRetainedTerminal)
+	s.subagents = newSubagentManager(cfg.MaxRetainedTerminal)
 	newJM := newJobManager
 	if cfg.testOnly.noSyncJobStore || testSpeedIO(cfg) {
 		newJM = newJobManagerNoSync
@@ -598,7 +594,7 @@ func NewSession(client *llm.Client, profile *provider.Profile, env execenv.Execu
 			SystemPrompt:     s.cachedSystemPrompt,
 			AgentTasks:       agentTasks,
 		}
-		tpath := filepath.Join(s.stateDir, sessionsSubdir, s.id+".transcript.jsonl")
+		tpath := schema.SessionTranscriptPath(s.stateDir, s.id)
 		var twErr error
 		if fault := s.sessionInitFault("new_transcript"); fault != nil {
 			twErr = fault
@@ -987,7 +983,7 @@ func RestoreSessionFromMetaWithConfig(client *llm.Client, profile *provider.Prof
 	// refresh below can't flip it.
 	restoredTranscriptOpened := false
 	if cfg.StateDir != "" {
-		tpath := filepath.Join(cfg.StateDir, sessionsSubdir, meta.ID+".transcript.jsonl")
+		tpath := schema.SessionTranscriptPath(cfg.StateDir, meta.ID)
 		var openErr error
 		resumeTranscript, transcriptEntries, openErr = transcript.OpenWriterForSession(tpath, meta.ID)
 		if openErr != nil && !errors.Is(openErr, os.ErrNotExist) {
@@ -1211,7 +1207,7 @@ func RestoreSessionFromMetaWithConfig(client *llm.Client, profile *provider.Prof
 			_ = s.closeOwnedDelegateStore()
 		}
 	}()
-	s.subagents = newSubagentManager(s.emit, cfg.MaxRetainedTerminal)
+	s.subagents = newSubagentManager(cfg.MaxRetainedTerminal)
 	newJM := newJobManager
 	if cfg.testOnly.noSyncJobStore || testSpeedIO(cfg) {
 		newJM = newJobManagerNoSync
@@ -1244,7 +1240,7 @@ func RestoreSessionFromMetaWithConfig(client *llm.Client, profile *provider.Prof
 	// restart-owned notification. Loading it later would overwrite that new
 	// notification with the pre-restart snapshot.
 	if steering, _, err := loadQueues(s.stateDir, s.id); err != nil {
-		s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("restore: queue reload failed: %v", err)})
+		s.emit(events.WarningData{Message: fmt.Sprintf("restore: queue reload failed: %v", err)})
 	} else {
 		s.steeringQueue = daemonSourcedSteering(steering)
 	}
@@ -1400,7 +1396,7 @@ func RestoreSessionFromMetaWithConfig(client *llm.Client, profile *provider.Prof
 	// writeTranscript consults is closed exactly once, on every path.
 	var tw *transcript.Writer
 	if s.stateDir != "" {
-		tpath := filepath.Join(s.stateDir, sessionsSubdir, s.id+".transcript.jsonl")
+		tpath := schema.SessionTranscriptPath(s.stateDir, s.id)
 		tw = resumeTranscript
 		if tw == nil {
 			hdr := transcript.Header{
@@ -1575,7 +1571,7 @@ func RestoreSessionFromMetaWithConfig(client *llm.Client, profile *provider.Prof
 	// and neither may ever fail the restore.
 	restoredAskPending, isAskRound := deriveRestoredAskPending(s.history, divergenceTurn, steeringProvenance)
 	if isAskRound && len(restoredAskPending) == 0 {
-		s.emit(events.EventWarning, events.WarningData{Message: "restore: found a pending ask_user round but could not parse any of its questions; the pending-ask holds will not apply this session"})
+		s.emit(events.WarningData{Message: "restore: found a pending ask_user round but could not parse any of its questions; the pending-ask holds will not apply this session"})
 	}
 	s.mu.Lock()
 	s.state = restoredState
@@ -2090,7 +2086,7 @@ func (s *Session) initPlugins(sessionStartKind plugin.SessionStartKind, runSessi
 			s.emitHookCompleted(end)
 			return
 		}
-		s.emit(kind, data)
+		s.emit(data)
 	})
 	s.hookRunner = runner
 	// Merge plugin agents on top of built-in agents (plugin agents win on conflict).
@@ -2312,7 +2308,7 @@ func (s *Session) logPluginLoadDiag(p plugin.Instance) {
 		Summary: fmt.Sprintf("plugin loaded: name=%s flavor=%s manifest=%s", p.Manifest.Name, p.ManifestFlavor, p.ManifestPath),
 		Outcome: "success",
 	}
-	logPath := filepath.Join(s.stateDir, sessionsSubdir, s.id+".log.jsonl")
+	logPath := schema.SessionLogPath(s.stateDir, s.id)
 	log, err := sessionlog.NewSessionLog(logPath)
 	if err != nil {
 		return
@@ -2358,7 +2354,7 @@ func (s *Session) logSessionStartHookDispatch(kind plugin.SessionStartKind, deli
 		Outcome:  outcome,
 		Failures: failures,
 	}
-	logPath := filepath.Join(s.stateDir, sessionsSubdir, s.id+".log.jsonl")
+	logPath := schema.SessionLogPath(s.stateDir, s.id)
 	log, err := sessionlog.NewSessionLog(logPath)
 	if err != nil {
 		return

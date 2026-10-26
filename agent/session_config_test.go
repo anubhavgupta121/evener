@@ -557,7 +557,7 @@ func TestSession_PreCompactHookOnlyRunsWhenCompactionEmits(t *testing.T) {
 
 	runner := hooks.NewRunner(nil, "")
 	runner.SetEventCallback(func(kind events.EventKind, data events.EventData) {
-		sess.emit(kind, data)
+		sess.emit(data)
 	})
 	runner.Add(plugin.HookPreCompact, plugin.RegisteredHook{
 		Matcher: "*",
@@ -603,7 +603,7 @@ func TestSession_PreCompactHookRunsAtCompactionBoundary(t *testing.T) {
 
 	runner := hooks.NewRunner(nil, "")
 	runner.SetEventCallback(func(kind events.EventKind, data events.EventData) {
-		sess.emit(kind, data)
+		sess.emit(data)
 	})
 	runner.Add(plugin.HookPreCompact, plugin.RegisteredHook{
 		Matcher: "*",
@@ -958,7 +958,7 @@ func TestSession_NotificationHookRunsOnWarning(t *testing.T) {
 	})
 	sess.hookRunner = runner
 
-	sess.emit(events.EventWarning, events.WarningData{Message: "heads up"})
+	sess.emit(events.WarningData{Message: "heads up"})
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("Notification hook did not run: %v", err)
 	}
@@ -2127,5 +2127,32 @@ func TestPluginSelectionSnapshotRoundTrip(t *testing.T) {
 		if !slices.Equal(want, got) {
 			t.Fatalf("PluginDirs round trip = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestSessionCommandTimeoutDefaultAndExplicit pins that an unset foreground
+// wait gets the stock default and that an explicit value, including one equal
+// to a former internal default, is kept as given.
+func TestSessionCommandTimeoutDefaultAndExplicit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  int
+		want int
+	}{
+		{"unset gets stock default", 0, 120_000},
+		{"explicit 10000 is kept", 10_000, 10_000},
+		{"explicit other is kept", 45_000, 45_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newSession(t, withConfig(SessionConfig{DefaultCommandTimeoutMS: tc.cfg}))
+			s.mu.Lock()
+			got := s.cfg.DefaultCommandTimeoutMS
+			s.mu.Unlock()
+			if got != tc.want {
+				t.Fatalf("DefaultCommandTimeoutMS = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

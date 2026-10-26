@@ -82,7 +82,7 @@ func TestSession_ExcludesConfiguredCredentialFromResponseEndpointArtifacts(t *te
 	}
 	sess.Close()
 
-	transcriptPath := filepath.Join(stateDir, sessionsSubdir, sess.ID()+".transcript.jsonl")
+	transcriptPath := schema.SessionTranscriptPath(stateDir, sess.ID())
 	transcriptBytes, err := os.ReadFile(transcriptPath)
 	if err != nil {
 		t.Fatalf("ReadFile transcript: %v", err)

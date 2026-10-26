@@ -25,10 +25,6 @@ func AsideSession(stateDir, parentID string) (string, error) {
 	return asideSessionFSWithConfig(afero.NewOsFs(), stateDir, parentID, nil)
 }
 
-func asideSessionFS(fs afero.Fs, stateDir, parentID string) (string, error) {
-	return asideSessionFSWithConfig(fs, stateDir, parentID, nil)
-}
-
 // AsideSessionWithConfig creates a full-tip child with config already selected
 // for that child. The final snapshot is supplied to the child writer before its
 // transcript and metadata are published, so a restart cannot observe a stale
@@ -65,11 +61,11 @@ func RemoveSessionArtifacts(stateDir, sessionID string) error {
 	if err := schema.ValidateSessionID(sessionID); err != nil {
 		return err
 	}
-	base := filepath.Join(stateDir, "sessions")
+	base := schema.SessionsDir(stateDir)
 	// .meta.json.lock is included: SaveSessionMeta creates it, and a rolled-back
 	// child (which never launched, so no writer can hold it) would otherwise
 	// leave a permanent empty lock file in the sessions directory.
-	for _, suffix := range []string{".meta.json", ".meta.json.lock", ".transcript.jsonl", ".api.jsonl", ".log.jsonl"} {
+	for _, suffix := range schema.SessionArtifactSuffixes {
 		if err := os.Remove(filepath.Join(base, sessionID+suffix)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"primeradiant.com/evener/agent/events"
@@ -26,8 +25,8 @@ const worktreeGitTimeoutMS = 300_000
 
 // worktreeTestSeams provides per-session failure injection at filesystem and
 // sandbox boundaries that cannot be made to fail reliably under a temp dir.
-// The map is empty in production, so the wrappers below preserve the normal
-// direct calls without ambient state or behavior changes.
+// It lives in cfg.testOnly and is zero in production, so the wrappers below
+// preserve the normal direct calls.
 type worktreeTestSeams struct {
 	useControlPolicy func(*execenv.LocalExecutionEnvironment, string) error
 	enterWorktree    func(string, bool) error
@@ -36,39 +35,29 @@ type worktreeTestSeams struct {
 	updateSidecar    func(string, string, func(*worktree.Sidecar)) error
 }
 
-var worktreeSeams sync.Map // map[*Session]worktreeTestSeams
-
-func (s *Session) testWorktreeSeams() worktreeTestSeams {
-	seams, ok := worktreeSeams.Load(s)
-	if !ok {
-		return worktreeTestSeams{}
-	}
-	return seams.(worktreeTestSeams)
-}
-
 func (s *Session) useWorktreeControlPolicy(env *execenv.LocalExecutionEnvironment, root string) error {
-	if hook := s.testWorktreeSeams().useControlPolicy; hook != nil {
+	if hook := s.cfg.testOnly.worktree.useControlPolicy; hook != nil {
 		return hook(env, root)
 	}
 	return env.UseControlPolicy(root)
 }
 
 func (s *Session) writeWorktreeSidecar(dir, name string, sidecar worktree.Sidecar) error {
-	if hook := s.testWorktreeSeams().writeSidecar; hook != nil {
+	if hook := s.cfg.testOnly.worktree.writeSidecar; hook != nil {
 		return hook(dir, name, sidecar)
 	}
 	return worktree.WriteSidecarExcl(dir, name, sidecar)
 }
 
 func (s *Session) deleteWorktreeSidecar(dir, name string) error {
-	if hook := s.testWorktreeSeams().deleteSidecar; hook != nil {
+	if hook := s.cfg.testOnly.worktree.deleteSidecar; hook != nil {
 		return hook(dir, name)
 	}
 	return worktree.DeleteSidecar(dir, name)
 }
 
 func (s *Session) updateWorktreeSidecar(dir, name string, mutate func(*worktree.Sidecar)) error {
-	if hook := s.testWorktreeSeams().updateSidecar; hook != nil {
+	if hook := s.cfg.testOnly.worktree.updateSidecar; hook != nil {
 		return hook(dir, name, mutate)
 	}
 	return worktree.UpdateSidecar(dir, name, mutate)
@@ -916,7 +905,7 @@ func projectIsGitCheckout(project identifier.Project) bool {
 // forks git for the snapshot); manage_worktree is serialized in the tool
 // stream, so nothing else swaps the env concurrently.
 func (s *Session) enterWorktree(path string, managed bool) error {
-	if hook := s.testWorktreeSeams().enterWorktree; hook != nil {
+	if hook := s.cfg.testOnly.worktree.enterWorktree; hook != nil {
 		if err := hook(path, managed); err != nil {
 			return err
 		}
@@ -1451,12 +1440,12 @@ func (s *Session) worktreeCreate(ctx context.Context, name, baseRef string) (Wor
 		}
 		run, done, err := s.worktreeCleanupRun(res.MainRoot)
 		if err != nil {
-			s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("rolling back worktree %s after a failed create failed: %v", res.Path, err)})
+			s.emit(events.WarningData{Message: fmt.Sprintf("rolling back worktree %s after a failed create failed: %v", res.Path, err)})
 			return
 		}
 		defer done()
 		if rbErr := s.rollbackFreshWorktree(run, res.Path, res.Branch, res.MetaDir, name); rbErr != nil {
-			s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("rolling back worktree %s after a failed create failed: %v", res.Path, rbErr)})
+			s.emit(events.WarningData{Message: fmt.Sprintf("rolling back worktree %s after a failed create failed: %v", res.Path, rbErr)})
 		}
 	}()
 
@@ -1962,12 +1951,12 @@ func (s *Session) worktreeEnterManagedWithPorcelain(st worktreeState, run worktr
 			}
 			unlock, done, err := s.worktreeCleanupRun(st.mainRepoRoot)
 			if err != nil {
-				s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("unlocking switch target %s after a failed switch failed: %v", target, err)})
+				s.emit(events.WarningData{Message: fmt.Sprintf("unlocking switch target %s after a failed switch failed: %v", target, err)})
 				return
 			}
 			defer done()
 			if _, unlockErr := unlock("worktree", "unlock", target); unlockErr != nil {
-				s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("unlocking switch target %s after a failed switch failed: %v", target, unlockErr)})
+				s.emit(events.WarningData{Message: fmt.Sprintf("unlocking switch target %s after a failed switch failed: %v", target, unlockErr)})
 			}
 		}()
 	case worktree.ActAdopt:
@@ -3388,7 +3377,7 @@ func (s *Session) releaseStrandedOwnMarker(files execenv.FileMutator, lanePath s
 	if claimedErr == nil && s.isOwnMarker(claimedReason) {
 		// The lane is already unlocked; a leftover claim file is harmless to git.
 		if rmErr := os.Remove(claimedPath); rmErr != nil {
-			s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("removing the released lock claim %s failed: %v", claimedPath, rmErr)})
+			s.emit(events.WarningData{Message: fmt.Sprintf("removing the released lock claim %s failed: %v", claimedPath, rmErr)})
 		}
 		return true, nil
 	}
@@ -3463,7 +3452,7 @@ func (s *Session) restoreStrandedOwnMarker(lanePath string) {
 	f, err := os.OpenFile(lockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		if !os.IsExist(err) && !os.IsNotExist(err) {
-			s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("re-locking stranded own worktree marker at %s after a failed collection failed: %v", lanePath, err)})
+			s.emit(events.WarningData{Message: fmt.Sprintf("re-locking stranded own worktree marker at %s after a failed collection failed: %v", lanePath, err)})
 		}
 		return
 	}
@@ -3472,7 +3461,7 @@ func (s *Session) restoreStrandedOwnMarker(lanePath string) {
 		writeErr = closeErr
 	}
 	if writeErr != nil {
-		s.emit(events.EventWarning, events.WarningData{Message: fmt.Sprintf("re-locking stranded own worktree marker at %s after a failed collection failed: %v", lanePath, writeErr)})
+		s.emit(events.WarningData{Message: fmt.Sprintf("re-locking stranded own worktree marker at %s after a failed collection failed: %v", lanePath, writeErr)})
 	}
 }
 

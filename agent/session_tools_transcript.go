@@ -398,14 +398,6 @@ func execReadTranscript(deps *toolDeps, args map[string]any) (any, error) {
 	return execReadSessionTranscript(deps, args)
 }
 
-func parseRetainedReadArgs(args map[string]any) (retainedReadArgs, retainedReadOperation, error) {
-	parsed, operation, issues := parseRetainedReadArgsWithIssues(args)
-	if len(issues) > 0 {
-		return retainedReadArgs{}, retainedReadDefault, errors.New("invalid_request: " + issues[0].Reason)
-	}
-	return parsed, operation, nil
-}
-
 type retainedReadParseIssue struct {
 	Field  string
 	Reason string
@@ -1637,6 +1629,6 @@ func resolvedSessionMeta(deps *toolDeps, path, ref string) schema.SessionMeta {
 // session ID.
 func bucketAndSessionFromPath(path string) (bucketDir, sessionID string) {
 	bucketDir = filepath.Dir(filepath.Dir(path))
-	sessionID = strings.TrimSuffix(filepath.Base(path), ".transcript.jsonl")
+	sessionID = strings.TrimSuffix(filepath.Base(path), schema.SessionTranscriptSuffix)
 	return bucketDir, sessionID
 }

@@ -401,10 +401,6 @@ func (s *Session) JobActivityTree(params appwire.JobsListParams) (appwire.JobAct
 	})
 }
 
-func projectStableLiveActivityTree(clock *jobActivityClock, rootID string, load func() (*activitySessionSnapshot, int, int, error)) (appwire.JobActivityTree, error) {
-	return projectStableLiveActivityTreeAt(clock, rootID, time.Now().UTC(), load)
-}
-
 func projectStableLiveActivityTreeAt(clock *jobActivityClock, rootID string, now time.Time, load func() (*activitySessionSnapshot, int, int, error)) (appwire.JobActivityTree, error) {
 	for range 8 {
 		before := activityCurrentRootRevision(clock)
@@ -1055,10 +1051,6 @@ func activityRecordBefore(left, right *jobstore.JobRecord) bool {
 	return left.StartedAt.Before(right.StartedAt)
 }
 
-func projectActivitySession(snapshot activitySessionSnapshot, budget *activityBudget) appwire.JobActivitySession {
-	return projectActivitySessionAt(snapshot, budget, 0, nil, 0)
-}
-
 // projectActivitySessionAt renders snapshot's own entries (its owned shell
 // jobs, then its stable delegates — the fixed order every entryIndex below
 // counts against) into one appwire.JobActivitySession, recursing into each
@@ -1193,9 +1185,9 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 		OriginItemID:        truncateActivityText(descriptor.OriginItemID, activityMaxLabelRunes),
 		RunStartedAt:        status.RunStartedAt,
 		LatestActivityAt:    status.LatestActivityAt,
-		RunningForMS:        cloneInt64(status.RunningForMS),
-		QuietForMS:          cloneInt64(status.QuietForMS),
-		DurationMS:          cloneInt64(status.DurationMS),
+		RunningForMS:        appwire.ClonePointer(status.RunningForMS),
+		QuietForMS:          appwire.ClonePointer(status.QuietForMS),
+		DurationMS:          appwire.ClonePointer(status.DurationMS),
 		DelegationAllowance: descriptor.DelegationAllowance,
 		ParentWatchGranted:  descriptor.ParentWatchGranted,
 		Turns:               []appwire.JobActivityJob{},
@@ -1288,14 +1280,6 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 	projectedChild := projectActivitySessionAt(*child, budget, depth+1, childPath, resumeIndex)
 	delegate.Child = &projectedChild
 	return delegate
-}
-
-func cloneInt64(value *int64) *int64 {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	return &clone
 }
 
 func activityUsageFromCumulative(usage *schema.CumulativeUsage) *appwire.EvenerUsage {

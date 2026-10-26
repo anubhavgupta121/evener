@@ -1013,7 +1013,7 @@ func TestRestoreSession_FromMetaAndTranscript(t *testing.T) {
 	}
 
 	// Write a transcript file with history.
-	tpath := filepath.Join(stateDir, sessionsSubdir, meta.ID+".transcript.jsonl")
+	tpath := schema.SessionTranscriptPath(stateDir, meta.ID)
 	tw, err := transcript.NewWriter(tpath, transcript.Header{
 		SessionID: meta.ID,
 		CreatedAt: meta.CreatedAt,
@@ -1131,7 +1131,7 @@ func TestRestoreSessionFromMeta_TranscriptWithCompaction(t *testing.T) {
 	}
 
 	// Write a transcript with compaction.
-	tpath := filepath.Join(stateDir, sessionsSubdir, meta.ID+".transcript.jsonl")
+	tpath := schema.SessionTranscriptPath(stateDir, meta.ID)
 	tw, err := transcript.NewWriter(tpath, transcript.Header{
 		SessionID: meta.ID,
 		CreatedAt: meta.CreatedAt,
