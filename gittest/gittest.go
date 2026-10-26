@@ -62,7 +62,7 @@ func Run(t testing.TB, dir string, args ...string) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	cmd := exec.Command("git", append([]string{"-c", "protocol.file.allow=always"}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-c", "protocol.file.allow=always"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = Env()
 	out, err := cmd.CombinedOutput()
