@@ -1530,7 +1530,7 @@ func TestReadTranscript_RejectsCorruptInteriorLines(t *testing.T) {
 	f.Close()
 
 	_, entries, skipped, err := readTranscript(path, "")
-	if err == nil || !strings.Contains(err.Error(), "parsing transcript line") {
+	if !isTranscriptLineError(err) {
 		t.Fatalf("readTranscript = entries %d skipped %d err %v, want corruption error", len(entries), skipped, err)
 	}
 }
@@ -1836,7 +1836,7 @@ func TestTranscriptReadersRejectCorruptNonFinalLine(t *testing.T) {
 		t.Fatalf("strict read error = %v, want corrupt_child_transcript", err)
 	}
 	_, entries, skipped, err := readTranscript(path, "")
-	if err == nil || !strings.Contains(err.Error(), "parsing transcript line") {
+	if !isTranscriptLineError(err) {
 		t.Fatalf("readTranscript = entries %d skipped %d err %v, want corruption error", len(entries), skipped, err)
 	}
 }
@@ -1888,7 +1888,7 @@ func TestStrictChildTranscriptCorruptBodyPrecedesSessionMismatch(t *testing.T) {
 		t.Fatalf("strict read error = %v, want corrupt_child_transcript", err)
 	}
 	_, entries, skipped, err := readTranscript(path, "")
-	if err == nil || !strings.Contains(err.Error(), "parsing transcript line") {
+	if !isTranscriptLineError(err) {
 		t.Fatalf("readTranscript = entries %d skipped %d err %v, want corruption error", len(entries), skipped, err)
 	}
 }
@@ -1964,7 +1964,7 @@ func TestStrictChildTranscriptRejectsOversizedBodyLine(t *testing.T) {
 		t.Fatalf("strict read error = %v, want corrupt_child_transcript", err)
 	}
 	_, _, _, err = readTranscript(path, "")
-	if err == nil || !strings.Contains(err.Error(), "parsing transcript line") {
+	if !isTranscriptLineError(err) {
 		t.Fatalf("readTranscript error = %v, want corruption error", err)
 	}
 }
