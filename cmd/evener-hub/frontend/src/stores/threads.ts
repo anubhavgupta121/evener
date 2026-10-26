@@ -1226,7 +1226,17 @@ function scheduleEntryOpeningRecovery(ref: string): void {
       if (opened) return;
       if (entryTranscriptRoute(ref) !== route) return; // a retired route's recovery must not outlive it
       if ((refCounts.get(ref) ?? 0) <= 0) return; // holder released: nothing left to recover for
-      if (holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) return; // another path healed the display mid-chain
+      // Another path healed the display mid-chain only while the repository
+      // still backs that display: a pending attempt whose timeout disposed the
+      // shared reader lets the repository reclaim its bodies without
+      // publishing, so the store's snapshot alone can be a stale complete view
+      // the next publication would prune. Require the resident range too, and
+      // a reclaimed repository re-opens instead of ending recovery on it.
+      if (
+        holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref)) &&
+        route.repository?.holdsResidentForegroundRange()
+      )
+        return;
       if (route.localOpenDeadlineMissed === true && stalledAttempts < 1) {
         // The attempt missed the deadline again under sustained slowness; the
         // pane is still stranded and held, so give the storage chain one
