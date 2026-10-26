@@ -1,4 +1,4 @@
-import type { ThreadModel, ThreadReadResponse } from "@evener/appwire-client";
+import type { Task, ThreadModel, ThreadReadResponse } from "@evener/appwire-client";
 import { WireError } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -82,7 +82,7 @@ function connectFakeClient(): FakeClient {
   return fake;
 }
 
-const RETAINED_TASKS = [
+const RETAINED_TASKS: Task[] = [
   {
     id: 1,
     type: "implement",
