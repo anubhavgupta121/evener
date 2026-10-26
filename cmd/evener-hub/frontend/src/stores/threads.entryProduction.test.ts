@@ -2784,6 +2784,71 @@ it("a settle begun while a refused recovery's source read is held spans the re-o
   }
 });
 
+it("a refused recovery whose source read fails leaves the re-open to the ordinary retry", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  const client = connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+
+  // Two withheld reads arm the chain and the third rejects (the transient-
+  // error refusal), so the chain hands to the source — and the source read
+  // itself fails. The hand-off's re-open promotes the view a successful
+  // source read restored; after a failed one there is nothing to promote,
+  // and the owned hydration retry owns convergence, so the chain must not
+  // issue a further storage read before it exits.
+  let withheldWindowReads = 0;
+  let failingWindowReads = 0;
+  let laterWindowReads = 0;
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (failingWindowReads > 0) {
+      failingWindowReads -= 1;
+      return Promise.reject(new Error("storage transiently failed")) as ReturnType<typeof realGetLatestWindow>;
+    }
+    laterWindowReads += 1;
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  let wireReads = 0;
+  client.on("thread/read", () => {
+    wireReads += 1;
+    return wireReads < 2 ? read : Promise.reject(new Error("source read failed"));
+  });
+  withheldWindowReads = 2;
+  failingWindowReads = 1;
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    const settledWithinBound = await Promise.race([
+      settleEntryTranscriptForTests(ref).then(() => true),
+      new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), 2000);
+      }),
+    ]);
+    expect(settledWithinBound).toBe(true);
+    expect(laterWindowReads).toBe(0);
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";

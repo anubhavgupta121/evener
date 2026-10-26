@@ -1245,6 +1245,7 @@ function scheduleEntryOpeningRecovery(ref: string): void {
       // paths own the rest.
       route.repository?.beginFreshBaseline();
       publishEntryTranscriptModel(ref);
+      let sourceReadFailed = false;
       try {
         const client = await requireReadyClient();
         const epoch = readyEpoch;
@@ -1254,9 +1255,16 @@ function scheduleEntryOpeningRecovery(ref: string): void {
         // it; the tracked read joins under it rather than displacing it, so
         // a consumer that starts waiting mid-read still captures a promise
         // covering the entire recovery.
-        await refreshTrackedThread(client, epoch, ref, false, false, undefined, undefined, "foreground", false);
+        await refreshTrackedThread(client, epoch, ref, false, true, undefined, undefined, "foreground", false);
       } catch {
-        // A failed source read keeps the ordinary owner-scoped retry.
+        // A failed source read keeps the ordinary owner-scoped retry — the
+        // owned hydration lifecycle schedules it — and the re-open below
+        // promotes the view a successful read restored, so a failed one has
+        // nothing to promote.
+        sourceReadFailed = true;
+      }
+      if (sourceReadFailed) {
+        return;
       }
       if (entryTranscriptRoute(ref) !== route) return;
       if ((refCounts.get(ref) ?? 0) <= 0) return;
