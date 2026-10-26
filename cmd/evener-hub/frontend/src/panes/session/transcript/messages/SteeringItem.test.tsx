@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ItemModel, TurnModel } from "@evener/appwire-client";
 import { keyID } from "@evener/appwire-client/state/navigation";
 import { notificationWireItem } from "@evener/appwire-client/testing/notificationWireFixtures";
@@ -11,6 +8,7 @@ import { afterAll, afterEach, expect, test, vi } from "vitest";
 import { registerPaneForTests } from "../../../../shell/paneRegistry";
 import { resetWorkspaceStoreForTests, workspaceStore } from "../../../../shell/workspace";
 import { navigationStore } from "../../../../stores/navigation/store";
+import { readModuleCss } from "../../../../styles/cssBlock";
 import { resetDisclosureStoreForTests } from "../../../../widgets/disclosure/disclosureStore";
 import { ignoringTurn, itemRendererFor } from "../types";
 import { SteeringItem } from "./SteeringItem";
@@ -635,8 +633,7 @@ test("a collapsed divider keeps its steered text out of the document until opene
 });
 
 test("the diamond sits in the content column at 50% opacity - no gutter pull", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "steeringitem.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "steeringitem.module.css");
   const slot = /\.railIcon\s*\{([^}]*)\}/.exec(css);
   expect(slot).not.toBeNull();
   expect(slot![1]).toContain("opacity: 0.5");

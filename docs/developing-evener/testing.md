@@ -1132,6 +1132,11 @@ call. For the same reason a suite resets every global store it renders
 against, such as `resetToastStoreForTests()`, in `beforeEach`; otherwise a
 toast from the previous test can satisfy this test's assertion.
 
+The connection store follows the same rule: reset it with
+`resetConnectionStoreForTests()` (`stores/connection.ts`) rather than a
+hand-written `setState`, and wire a ready fake with `connectReadyFakeClient()`
+(`src/testing/connection.ts`) rather than a per-file `connectFakeClient`.
+
 ### Frontend store-fixture contracts
 
 Five contracts that repeatedly bite store-test authors, none of them visible
@@ -1640,11 +1645,9 @@ instead of faking the environment.
 **A stylesheet assertion that matches its own comment.** A test that greps CSS
 text (`expect(css).toContain("flex: none")`) will match the declaration quoted
 in a doc comment above the rule. One of these passed with its implementation
-deleted. Strip comments before matching:
-
-```ts
-const css = readFileSync(…, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-```
+deleted. Read the stylesheet with `readModuleCss(import.meta.url, "x.module.css")`
+from `src/styles/cssBlock.ts`, which strips comments, and pick rules with
+`topRuleBlock` / `mediaBlock` from the same file.
 
 The general rule: **prove a new test can fail.** Break the thing it covers,
 watch it go red, then put it back. A test you have only ever seen pass has not

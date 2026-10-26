@@ -22,6 +22,7 @@ import {
   activityDetailsThread,
   activitySummary,
 } from "../../stores/sessionActivityTestUtils";
+import { readModuleCss } from "../../styles/cssBlock";
 import { activitySidebarStore, resetActivitySidebarStoreForTests } from "../activitybar/activitySidebarStore";
 import { openAttentionSession } from "../attentionHistory";
 import { captureAttentionPlacement, presentAttentionTarget, restoreAttentionPlacement } from "../attentionPlacement";
@@ -1558,8 +1559,7 @@ test("mounting already at the focused pane's own URL does not dispatch a redunda
 // the inset cannot false-positive the match.
 
 test("the host lifts nothing off the bottom edge - docked chrome owns the bottom inset", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "StackHost.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "StackHost.module.css");
   expect(css).not.toContain("env(safe-area-inset-bottom)");
   const hostRule = css.match(/\.host \{([^}]*)\}/)?.[1] ?? "";
   expect(hostRule).not.toContain("padding-bottom");

@@ -1,12 +1,10 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ItemModel, ThreadModel, TurnModel } from "@evener/appwire-client";
 import { makeTranscriptDisplayConfig, projectThread, WarningCodeMCPReconnected } from "@evener/appwire-client";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { installLocalStorage, MemoryStorage } from "../../../../storageTestUtils";
 import { prefsStore, resetPrefsStoreForTests } from "../../../../stores/prefs";
+import { readModuleCss } from "../../../../styles/cssBlock";
 import { TranscriptRenderProvider } from "../../../../transcriptDisplay/renderContext";
 import { resetDisclosureStoreForTests } from "../../../../widgets/disclosure/disclosureStore";
 import { TurnBlock } from "../TurnBlock";
@@ -253,8 +251,7 @@ test("a system prompt mounts its Markdown body below the summary only once opene
 });
 
 test("the system prompt body is a full-width block row under the summary", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "systemnoticeitem.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "systemnoticeitem.module.css");
   const rule = (selector: string): string => {
     const match = css.match(new RegExp(`\\.${selector}\\s*\\{([^}]*)\\}`));
     return match?.[1] ?? "";
