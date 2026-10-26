@@ -18,6 +18,7 @@ import {
   mergeTranscriptTurnVersioned,
   pruneBackgroundHistoryBodies,
   readDisposition,
+  resolvePendingEscalation,
   type SnapshotIdentity,
   type ThreadItem,
   type ThreadItemPosition,
@@ -245,6 +246,15 @@ export interface TranscriptRepositoryBinding {
    * first and may cache. Absent means 0.
    */
   historyGeneration?: number;
+  /**
+   * The escalation ids this client resolved, owned by whoever replaces the
+   * repository so a replacement inherits them. A resolved escalation never
+   * returns, but the resolving client learns of it from its own acknowledgment,
+   * which the daemon's snapshot cut does not order, so a read issued before the
+   * resolve can still carry the card; every read the repository adopts drops
+   * these. Absent, the repository keeps its own.
+   */
+  resolvedEscalations?: Set<string>;
   /**
    * A browser-lifetime nonce. The baseline identity is minted from the
    * tab-local connection lifetime and source revision, but that lifetime
@@ -483,6 +493,7 @@ export class TranscriptRepository {
   // whose demand the eviction policy consults.
   #unregisterPreferred: (() => void) | undefined;
   readonly #endClaims = new Set<string>();
+  readonly #resolvedEscalations: Set<string>;
   #endWork: Promise<void> | undefined;
   #endRetryCancel: (() => void) | undefined;
   #endRetryAttempt = 0;
@@ -497,6 +508,7 @@ export class TranscriptRepository {
     this.#cache = cache;
     this.#admission = binding.admission ?? entryWriteAdmissionFor(cache);
     this.#binding = scalarBinding;
+    this.#resolvedEscalations = binding.resolvedEscalations ?? new Set();
     this.#baselineIdentity = this.#mintBaseline();
     if (binding.isPreferred) {
       this.#unregisterPreferred = cache.registerPreferredHistory(binding.historyKey, binding.isPreferred);
@@ -903,6 +915,12 @@ export class TranscriptRepository {
     }
   }
 
+  #withoutResolvedEscalations(model: ThreadModel): ThreadModel {
+    let kept = model;
+    for (const escalationId of this.#resolvedEscalations) kept = resolvePendingEscalation(kept, escalationId);
+    return kept;
+  }
+
   /** Apply response metadata after the caller's generation and intent fences. */
   acceptResponseFields(fields: Partial<Pick<ThreadModel, "goal" | "humanNote">>): void {
     if (this.#disposed || this.#sealed || !this.#model) return;
@@ -922,6 +940,9 @@ export class TranscriptRepository {
         this.#endClaims.add(notification.params.roundId);
         this.#startEndDisposition();
       }
+    }
+    if (notification.method === "evener/sandbox/escalation/resolved") {
+      this.#resolvedEscalations.add(notification.params.escalationId);
     }
     const previousModel = this.#model;
     const now = this.#now();
@@ -3088,7 +3109,9 @@ export class TranscriptRepository {
 
   #publish(): void {
     this.#reconcileHandoffOverlay();
-    if (this.#model) this.#model = hydratedDisplay(this.#model);
+    // Every publication passes here, so no path (a response-only field update
+    // included) can republish a resolved escalation.
+    if (this.#model) this.#model = this.#withoutResolvedEscalations(hydratedDisplay(this.#model));
     if (this.#readerCount > 0 && this.#model) {
       for (const turn of this.#model.turns) {
         for (const item of turn.items) {
