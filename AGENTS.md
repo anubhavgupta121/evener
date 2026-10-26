@@ -247,17 +247,23 @@ loading them, since each opens a socket the moment its body runs.
   `make test-web` before "fixing" it). When two reviewers conflict, the
   reconciliation usually is that both are right about different cases; pin
   both cases.
-- **Merge through the merge queue.** If every CI check is green and RoboRev
-  notes only 'low' findings or findings you have conclusively refuted, add the
-  PR to main's merge queue: `gh pr merge <N> --repo prime-radiant-inc/evener
-  --squash`. The queue tests it on top of main and the PRs ahead of it and
-  merges it when the required checks pass there, so do not merge `origin/main`
-  into the branch just to catch up, and never use `--admin`, which skips the
-  queue. The queue checks CI only, not RoboRev (its status passes even when
-  the review lists findings), so read the review before enqueueing; never use
-  `--auto`. Pushing to a queued PR removes it from the queue. If the queue drops
-  the PR for a failing check, fix the cause and enqueue again. Handle 'low'
-  findings immediately in a fast-follow PR.
+- **Merge through the merge queue.** Main requires one approving review, and
+  RoboRev supplies it: a few minutes after its combined review names the PR's
+  head, the roborev-primeradiant app approves when nothing is medium or above
+  and requests changes otherwise. A push dismisses the approval until the new
+  head is reviewed. Once every CI check is green and RoboRev has approved, add
+  the PR to main's merge queue: `gh pr merge <N> --repo
+  prime-radiant-inc/evener --squash`. The queue tests it on top of main and
+  the PRs ahead of it and merges it when the required checks pass there, so do
+  not merge `origin/main` into the branch just to catch up. Never use `--auto`.
+  Pushing to a queued PR removes it from the queue; if the queue drops the PR
+  for a failing check, fix the cause and enqueue again. Handle 'low' findings
+  immediately in a fast-follow PR.
+- **Refuted findings.** RoboRev never reads rebuttals, so a PR whose
+  remaining medium-or-above findings you have conclusively refuted on the PR
+  keeps its requested changes. That case alone is an admin merge: merge
+  `origin/main` if behind, wait for every check to be green on that head, then
+  `gh pr merge <N> --repo prime-radiant-inc/evener --squash --admin`.
 
 - **Gates run from the repo root.** `make test-web`'s target lives in the root
   Makefile; running it from `cmd/evener-hub/frontend` dies with "No rule to
