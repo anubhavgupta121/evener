@@ -187,6 +187,7 @@ native:agent:./internal/worktree:FuzzSidecarJSONRoundtrip
 native:agent:./internal/worktree:FuzzSidecarNameRoundtrip
 native:agent:./internal/worktree:FuzzValidateName
 native:.:./internal/hubendpoint:FuzzParseOrigin
+native:.:./hubapi:FuzzNavigationRecordDecode
 native:.:./rendezvous:FuzzList
 native:.:./internal/appserver:FuzzHandleMessage
 native:.:./server:FuzzDecodeSubscriptionAdmissionParams
