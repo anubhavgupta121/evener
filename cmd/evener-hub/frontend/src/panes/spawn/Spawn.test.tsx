@@ -52,7 +52,7 @@ import {
   setDraftField,
   spawnDraftsStore,
 } from "./spawnDrafts";
-import { SPAWN_SLASH_CATALOG_DEBOUNCE_MS } from "./useSpawnSlashCatalog";
+import { SCOPED_HOST_READ_DEBOUNCE_MS } from "./useScopedHostRead";
 
 let modelListOverride: ModelDescriptor[] | null = null;
 
@@ -217,7 +217,12 @@ function attachCalls(fake: FakeClient): { host: string }[] {
     .map((call) => call.params as { host: string });
 }
 
-function renderSpawn(client: FakeClient, focused = true) {
+// connectStore wires `client` as the app's connected client, as the shell does:
+// the launch-config store behind the path and resolve reads speaks through it,
+// and so do the global stores that fetch on connect. Tests counting this pane's
+// own requests opt out.
+function renderSpawn(client: FakeClient, focused = true, { connectStore = true } = {}) {
+  if (connectStore) act(() => connectionStore.getState().connect(client));
   return render(
     <ClientProvider client={client}>
       <Spawn params={{}} paneId="spawn-1" focused={focused} />
@@ -685,13 +690,13 @@ test("completion menu ownership: a remounted prompt's cleared snapshot retires i
     f.on("thread/start", () => started.promise);
     f.on("evener/spawn/slashCatalog", () => ({ commands: [{ name: "review", description: "Review" }], skills: [] }));
   });
-  const mounted = renderSpawn(fake);
+  const mounted = renderSpawn(fake, true, { connectStore: false });
   await user.type(promptField(), "/re");
   await screen.findByTestId("composer-slash-menu");
   await user.keyboard("{Meta>}{Enter}{/Meta}");
   await waitFor(() => expect(fake.calls.filter((call) => call.method === "thread/start")).toHaveLength(1));
   mounted.unmount();
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await screen.findByTestId("composer-slash-menu");
   await act(async () => started.resolve(startResponse("local:completion-a")));
   expect(promptField().textContent).toBe("");
@@ -883,7 +888,7 @@ test.each([false, true])("project navigation isolates stale-model notices (late 
       harness === "evener" && cwd === undefined ? catalog.promise : { data: [{ provider: "openai", model: "gpt-5" }] },
     ),
   );
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await waitFor(() => expect(fake.calls.some((c) => c.method === "model/list")).toBe(true));
   if (late) await visitSpawnURL("/new?dir=/tmp/review-b");
   await act(async () => catalog.resolve({ data: [{ provider: "openai", model: "gpt-5" }] }));
@@ -905,7 +910,7 @@ test.each([false, true])("stale-model sweep retires its originating draft (navig
       harness === "evener" && cwd === undefined ? catalog.promise : { data: [{ provider: "openai", model: "gpt-5" }] },
     ),
   );
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await waitFor(() => expect(fake.calls.some((c) => c.method === "model/list")).toBe(true));
   expect(modelValue().textContent).toBe("openai/retired");
   if (navigate) await visitSpawnURL("/new?dir=/tmp/review-b");
@@ -2619,6 +2624,49 @@ test("a spawn retry that recovers the registry reads the selected host's listing
   expect(listingReads()).toHaveLength(1);
 });
 
+// The host picker reads the navigation manifest, and the host registry behind
+// the launch-config store is only re-read by Settings. A registry snapshot that
+// predates a host added from another client must not turn that host's path and
+// resolve reads into refusals.
+test("a selected host the cached registry predates is still resolved on that host", async () => {
+  const user = setupUser();
+  seedSources([
+    { id: "local", label: "Local", kind: "local", online: true },
+    { id: "buildbox", label: "buildbox", kind: "ssh", online: true },
+  ]);
+  const hostRow = (name: string) => ({
+    name,
+    generation: 1,
+    incarnationId: `inc-${name}`,
+    origin: "hub.toml" as const,
+    attached: true,
+    midAttach: false,
+    removed: false,
+  });
+  const fake = readyClient((f) => {
+    f.on("evener/host/list", () => ({ hosts: [hostRow("other"), hostRow("buildbox")] }));
+    f.on("evener/host/request", (params) => routedDiscoveryDefault((params as HostRequestParams).method));
+  });
+  hostsStore.setState({ load: { phase: "ready", hosts: [hostRow("other")] } });
+  renderSpawn(fake);
+  await settled();
+  fireEvent.change(screen.getByLabelText("Host"), { target: { value: "buildbox" } });
+  await settled();
+  await setWorkingDir(user, "/srv/app");
+  await settled();
+
+  await waitFor(() =>
+    expect(
+      fake.calls.some(
+        (call) =>
+          call.method === "evener/host/request" &&
+          (call.params as HostRequestParams).host === "buildbox" &&
+          (call.params as HostRequestParams).method === "evener/launch/resolve",
+      ),
+    ).toBe(true),
+  );
+});
+
 test("successful keyless testing refreshes availability without an auth notification", async () => {
   const user = setupUser();
   let available = false;
@@ -3827,6 +3875,7 @@ test("loads sticky defaults from localStorage on mount", async () => {
   localStorage.setItem("evener-hub.spawn-defaults.global.working_dir", "/saved/project");
   localStorage.setItem("evener-hub.spawn-defaults./saved/project", JSON.stringify({ access_mode: "workspace-write" }));
   renderSpawn(readyClient());
+  await settled();
 
   await waitFor(() => expectWorkingDir("/saved/project"));
   await user.click(screen.getByRole("button", { name: "Advanced options" }));
@@ -3894,7 +3943,7 @@ test("kata 11ee: a second ?dir= navigation while already mounted still prefills 
 // while the pane is already open must refill the prompt too.
 test("kata 11ee: a second ?prompt= navigation while already mounted still prefills the prompt", async () => {
   window.history.pushState({}, "", "/new?prompt=first");
-  renderSpawn(readyClient());
+  renderSpawn(readyClient(), true, { connectStore: false });
   await waitFor(() =>
     expect((screen.getByRole("textbox", { name: "Prompt" }) as HTMLDivElement).textContent).toBe("first"),
   );
@@ -3918,7 +3967,7 @@ test("kata 11ee: a second ?prompt= navigation while already mounted still prefil
 test("kata 11ee: a navigation with no ?dir=/?prompt= at all leaves already-typed values untouched", async () => {
   const user = setupUser();
   window.history.pushState({}, "", "/new?dir=%2Fhome%2Fme%2Fapp");
-  renderSpawn(readyClient());
+  renderSpawn(readyClient(), true, { connectStore: false });
   await waitFor(() => expectWorkingDir("/home/me/app"));
   await fillPrompt(user, "typed by hand");
 
@@ -4640,6 +4689,7 @@ test.each([false, true])(
     const fake = readyClient((client) => {
       client.on("evener/launch/resolve", () => ({ effective: { sandbox: "read-only" }, layers: {}, provenance: {} }));
     });
+    connectionStore.getState().connect(fake);
     render(
       <>
         <button type="button" aria-controls="unrelated-panel" aria-expanded="false" onClick={unrelated}>
@@ -4745,6 +4795,7 @@ test.each([false, true])("Advanced sandbox select owns Change focus, initially o
     }));
   });
   const unrelated = vi.fn();
+  connectionStore.getState().connect(fake);
   render(
     <>
       <button type="button" aria-controls="unrelated-panel" aria-expanded="false" onClick={unrelated}>
@@ -5649,7 +5700,7 @@ test("the Effort select and picker share one scoped model/list response", async 
           }),
     );
   });
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await settled();
 
   await waitFor(() => expect(resolve).toBeDefined());
@@ -5690,7 +5741,7 @@ test("the Effort select and picker share one scoped model/list response", async 
 test("evener/auth/updated drops the pane's model/list cache so the catalog and picker reload", async () => {
   const user = setupUser();
   const fake = readyClient();
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await settled();
   await waitFor(() => expect(modelListRequests(fake).filter((params) => params.harness === undefined)).toHaveLength(1));
   expect(
@@ -6518,6 +6569,7 @@ test.each(["desktop", "mobile"])("%s directory picker follows route directory ch
   const user = setupUser();
   window.history.pushState({}, "", "/new?dir=%2Fhome%2Fme%2Fapp");
   renderSpawn(readyClient());
+  await settled();
   await waitFor(() => expectWorkingDir("/home/me/app"));
   await user.click(
     surface === "desktop"
@@ -6889,7 +6941,7 @@ test("a prefilled slash token opens its menu without waiting for a keystroke", a
       skills: [],
     }));
   });
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
 
   await waitFor(() =>
     expect((screen.getByRole("textbox", { name: "Prompt" }) as HTMLDivElement).textContent).toBe("/rev"),
@@ -6953,7 +7005,7 @@ test("a non-evener harness sends no slashCatalog call and typing /goal shows no 
   // Run the fake clock past the debounce so a timer the switch failed to
   // cancel would fire here and be caught.
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(SPAWN_SLASH_CATALOG_DEBOUNCE_MS + 1);
+    await vi.advanceTimersByTimeAsync(SCOPED_HOST_READ_DEBOUNCE_MS + 1);
   });
   expect(screen.queryByTestId("composer-slash-menu")).toBeNull();
   expect(fake.calls.some((call) => call.method === "evener/spawn/slashCatalog")).toBe(false);
@@ -9587,6 +9639,82 @@ test("a remote target's advanced path value is not dropped for being invisible h
   expect(params.launchOverrides).toMatchObject({ agent: "remote-only-agent" });
 });
 
+// Switching to a host the cached registry predates re-judges the stored path
+// values on that host; the verdict must wait for the registry to list it rather
+// than be refused and left standing as the previous host's "invalid".
+test.each([false, true])(
+  "a path judged invalid on the previous host is re-judged once the registry lists the new host (older poll in flight: %s)",
+  async (pollInFlight) => {
+    seedSources([
+      { id: "local", label: "Local", kind: "local", online: true },
+      { id: "buildbox", label: "buildbox", kind: "ssh", online: true },
+    ]);
+    const schema = {
+      options: [
+        {
+          field: "agent",
+          wireField: "agent",
+          label: "Agent",
+          kind: "text",
+          group: "general",
+          pathKind: "command",
+          perLaunch: true,
+        },
+      ],
+    };
+    const hostRow = (name: string) => ({
+      name,
+      generation: 1,
+      incarnationId: `inc-${name}`,
+      origin: "hub.toml" as const,
+      attached: true,
+      midAttach: false,
+      removed: false,
+    });
+    const registry = deferred<{ hosts: ReturnType<typeof hostRow>[] }>();
+    const olderPoll = deferred<{ hosts: ReturnType<typeof hostRow>[] }>();
+    let listReads = 0;
+    const fake = readyClient((f) => {
+      f.on("evener/launch/schema", () => schema);
+      f.on("evener/path/validate", ({ path }) => ({ path, valid: false, error: "no such file or directory" }));
+      f.on("evener/host/list", () => {
+        listReads += 1;
+        // The first read is a poll that started before the host was added.
+        return pollInFlight && listReads === 1 ? olderPoll.promise : registry.promise;
+      });
+      f.on("evener/host/request", (params) => {
+        const method = (params as HostRequestParams).method;
+        if (method === "evener/launch/schema") return schema as HostForwardedResult;
+        if (method === "evener/path/validate") return { path: "", valid: true } as HostForwardedResult;
+        return routedDiscoveryDefault(method);
+      });
+    });
+    hostsStore.setState({ load: { phase: "ready", hosts: [hostRow("other")] } });
+    window.history.pushState({}, "", "/new?dir=/tmp/registry-lag-path");
+    renderSpawn(fake);
+    if (pollInFlight) await act(async () => void hostsStore.getState().refresh());
+    await settled();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "host-only-agent" } });
+    await waitFor(() =>
+      expect(completionDraft("/tmp/registry-lag-path").fields.getState().advancedOverrides).toEqual({}),
+    );
+
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "buildbox" } });
+    await settled();
+    await act(async () => {
+      registry.resolve({ hosts: [hostRow("other"), hostRow("buildbox")] });
+      olderPoll.resolve({ hosts: [hostRow("other")] });
+    });
+
+    await waitFor(() =>
+      expect(completionDraft("/tmp/registry-lag-path").fields.getState().advancedOverrides).toEqual({
+        agent: "host-only-agent",
+      }),
+    );
+  },
+);
+
 // The host picker is a DISPLAY of what the manifest last said about the hosts.
 // The store retains that snapshot while the fresh manifest is in flight, and
 // reading the SETTLED-only list there hid the picker (or flipped the visible
@@ -9725,7 +9853,7 @@ test("a draft already on a remote host is never swept by the controller's catalo
       return { data: [{ provider: "openai", model: "retired" }] } as HostForwardedResult;
     });
   });
-  const mounted = renderSpawn(fake);
+  const mounted = renderSpawn(fake, true, { connectStore: false });
   await settled();
   fireEvent.change(screen.getByLabelText("Host"), { target: { value: "buildbox" } });
   await act(async () => parked.resolve({ data: [{ provider: "openai", model: "gpt-5" }] }));
@@ -9735,7 +9863,7 @@ test("a draft already on a remote host is never swept by the controller's catalo
   // catalog request resolves under a remote target from its first render - and
   // that request is the HOST's (routed), never the controller's parked one.
   mounted.unmount();
-  renderSpawn(fake);
+  renderSpawn(fake, true, { connectStore: false });
   await settled();
   await act(async () => {});
   expect((screen.getByLabelText("Host") as HTMLSelectElement).value).toBe("buildbox");

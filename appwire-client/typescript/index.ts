@@ -432,6 +432,7 @@ export {
   globalDefaultHint,
   groupOptions,
   inactivePromptDependent,
+  inputDefaultPlaceholder,
   isCollectionKind,
   isExactSafeInteger,
   isPromptCompositeWireField,
@@ -442,6 +443,7 @@ export {
   PROMPT_DEPENDENT_WIRE_FIELDS,
   resolvedDefaultLabel,
   resolvedEmptyChoice,
+  resolvedValue,
   schemaPathKind,
 } from "./launchSchema";
 export { marketplaceSourceLabel, marketplaceSourcePin, marketplaceSourceTakesRef } from "./marketplaceSourceLabel";
