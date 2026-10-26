@@ -2849,6 +2849,102 @@ it("a refused recovery whose source read fails leaves the re-open to the ordinar
   }
 });
 
+it("a reconnect heal racing a pending recovery read still converges the display", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const rows = Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1));
+  const read = response(ref, rows);
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const texts = () =>
+    [
+      ...new Set(
+        (threadsStore.getState().threads.get(ref)?.turns ?? [])
+          .flatMap((turn) => turn.items ?? [])
+          .map((item) => item.text),
+      ),
+    ].filter(Boolean);
+  expect(texts()).toHaveLength(0);
+
+  // Two withheld reads arm the chain; its own attempt parks on a held read.
+  let withheldWindowReads = 0;
+  let laterWindowReads = 0;
+  let holdChainRead = false;
+  const chainReadEntered = deferred<void>();
+  const chainReadReleased = deferred<void>();
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (holdChainRead) {
+      holdChainRead = false;
+      chainReadEntered.resolve();
+      return chainReadReleased.promise.then(() =>
+        realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)),
+      ) as ReturnType<typeof realGetLatestWindow>;
+    }
+    laterWindowReads += 1;
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  withheldWindowReads = 2;
+  holdChainRead = true;
+  setSessionCacheStalledOpenForTests(250);
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    await chainReadEntered.promise;
+    // A reconnect whose reply carries the pane's own generation heals the
+    // display through the tracked hydration while the recovery's cache read
+    // is still pending — a read, not recorded input, so the pending attempt's
+    // timeout may still reclaim the repository behind it.
+    const second = connect(read);
+    second.on("thread/read", (params) => ({ ...read, requestGeneration: params.requestGeneration }));
+    await vi.waitFor(() => expect(texts()).toHaveLength(200));
+    // Let the parked attempt's window expire: the timeout disposes the shared
+    // reader, the repository reclaims its bodies without publishing, and the
+    // store keeps showing the healed window the repository no longer backs.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await drainSettleSteps();
+    // The parked read's deadline disposed the shared reader, and the
+    // repository reclaimed its bodies behind the still-healed store display —
+    // the mid-chain guard must not end recovery on that snapshot: the chain's
+    // own paced retry re-opens from storage and converges the recorded window.
+    await vi.waitFor(() => expect(laterWindowReads).toBe(1));
+    chainReadReleased.resolve();
+    await vi.waitFor(() => expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined());
+    // A later accepted update republishes through the repository: the re-opened
+    // range keeps its deep bodies, and the pane loses no transcript content.
+    const repopulated = rows.slice(-5).flatMap((turn) => (turn.items ?? []).map((item) => ({ ...item, version: 2 })));
+    second.emitNotification({
+      method: "history/updated",
+      params: {
+        ref,
+        threadId: "thread-a",
+        bootGeneration: "1",
+        epoch: 1,
+        snapshot: { incarnation: "inc-a", length: 225 },
+        items: repopulated,
+      },
+    });
+    await vi.waitFor(() => expect(texts()).toContain("row-26"));
+    expect(texts()).toContain("row-225");
+  } finally {
+    setSessionCacheStalledOpenForTests(5000);
+    chainReadReleased.resolve();
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
 it("ordinary browser routes reads notifications paging reopen reconnect and final release through entries", async () => {
   const storage = cache();
   const ref = "local:a";
