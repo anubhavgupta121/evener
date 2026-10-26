@@ -6,12 +6,15 @@ import (
 )
 
 // fillEveryField sets every field of v, recursively, to a distinctive
-// non-zero value, so a clone or merge that skips a field shows up as a zero.
+// non-zero value, so a clone, merge or write that skips a field shows up as a
+// zero. Unexported fields stay zero.
 func fillEveryField(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := range v.NumField() {
-			fillEveryField(v.Field(i))
+			if v.Field(i).CanSet() {
+				fillEveryField(v.Field(i))
+			}
 		}
 	case reflect.Pointer:
 		v.Set(reflect.New(v.Type().Elem()))
