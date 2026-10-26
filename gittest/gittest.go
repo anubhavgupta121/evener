@@ -13,11 +13,13 @@ import (
 	"primeradiant.com/evener/identifier"
 )
 
-// configEnvironment names the git-config variables Env strips before setting
-// its own, so an ambient value cannot win by position.
+// configEnvironment names the git-config and init-template variables Env strips
+// before setting its own, so an ambient value cannot win by position or install
+// hooks into the fixture.
 var configEnvironment = []string{
-	"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
+	"GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
 	"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+	"GIT_TEMPLATE_DIR",
 }
 
 // configEnvironmentPrefixes names the numbered GIT_CONFIG_KEY_n and

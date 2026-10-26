@@ -123,3 +123,40 @@ func TestMaintenanceProbeUsesEffectiveBoolean(t *testing.T) {
 		})
 	}
 }
+
+// An ambient template directory can install hooks that run during a fixture's
+// commits; Run must not honor it.
+func TestRunIgnoresAmbientTemplateHooks(t *testing.T) {
+	scratch := t.TempDir()
+	marker := filepath.Join(scratch, "hook-ran")
+	hooks := filepath.Join(scratch, "template", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := "#!/bin/sh\ntouch " + marker + "\n"
+	if err := os.WriteFile(filepath.Join(hooks, "post-commit"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_TEMPLATE_DIR", filepath.Join(scratch, "template"))
+
+	dir := t.TempDir()
+	Run(t, dir, "init", "-q")
+	Run(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("ambient GIT_TEMPLATE_DIR hook ran during the fixture's commit")
+	}
+}
+
+// The legacy GIT_CONFIG variable names a config file for `git config`; a
+// fixture's config writes must not land in it.
+func TestRunIgnoresAmbientGitConfigFile(t *testing.T) {
+	external := filepath.Join(t.TempDir(), "external.config")
+	t.Setenv("GIT_CONFIG", external)
+
+	dir := t.TempDir()
+	Run(t, dir, "init", "-q")
+	Run(t, dir, "config", "fixture.key", "value")
+	if _, err := os.Stat(external); err == nil {
+		t.Fatal("fixture config write reached the file named by ambient GIT_CONFIG")
+	}
+}
