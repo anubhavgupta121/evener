@@ -329,7 +329,7 @@ func RenderTranscript(r TranscriptResult, format string) string {
 				fmt.Fprintf(&b, "  results: %s", names)
 			}
 			if t.Text != "" {
-				fmt.Fprintf(&b, "  %q", oneLine(t.Text))
+				fmt.Fprintf(&b, "  %q", runetrim.OneLine(t.Text))
 			}
 			b.WriteString("\n")
 			continue
@@ -347,14 +347,14 @@ func RenderTranscript(r TranscriptResult, format string) string {
 			if tc.Intent != "" {
 				label += " — intent: " + tc.Intent
 			}
-			fmt.Fprintf(&b, "%s `%s`\n", label, oneLine(tc.ArgPreview))
+			fmt.Fprintf(&b, "%s `%s`\n", label, runetrim.OneLine(tc.ArgPreview))
 		}
 		for _, tr := range t.ToolResults {
 			label := "← " + tr.Name
 			if tr.IsError {
 				label += " (error)"
 			}
-			fmt.Fprintf(&b, "%s `%s`\n", label, oneLine(tr.ContentPreview))
+			fmt.Fprintf(&b, "%s `%s`\n", label, runetrim.OneLine(tr.ContentPreview))
 		}
 		b.WriteString("\n")
 	}
@@ -405,8 +405,4 @@ func Truncate(s string, maxLen int) string {
 		return s
 	}
 	return runetrim.Cut(s, maxLen) + "…"
-}
-
-func oneLine(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }

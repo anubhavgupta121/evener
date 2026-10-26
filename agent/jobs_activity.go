@@ -103,13 +103,6 @@ const (
 	activityAncestorTextFloorRunes = 64
 )
 
-// truncateActivityText is the activity projection's trim, stated once in
-// agent/activitybound so internal/appprojector bounds the pushed delegate frame
-// with the same rule.
-func truncateActivityText(s string, maxRunes int) string {
-	return activitybound.Truncate(s, maxRunes)
-}
-
 // boundActivityDelegatePayload clones a terminal-packet payload, or drops it
 // when it alone would dominate the envelope. Dropping beats slicing: the field
 // is json.RawMessage, so a cut would leave invalid JSON on the wire. The full
@@ -132,7 +125,7 @@ func capActivityDelegateWarnings(warnings []string) []string {
 	kept := min(len(warnings), activityMaxDelegateWarnings)
 	capped := make([]string, 0, kept+1)
 	for _, warning := range warnings[:kept] {
-		capped = append(capped, truncateActivityText(warning, activityMaxDelegateWarningRunes))
+		capped = append(capped, activitybound.Truncate(warning, activityMaxDelegateWarningRunes))
 	}
 	if len(warnings) > kept {
 		capped = append(capped, fmt.Sprintf("%d more warnings omitted", len(warnings)-kept))
@@ -1086,7 +1079,7 @@ func projectActivitySessionAt(snapshot activitySessionSnapshot, budget *activity
 	projected := appwire.JobActivitySession{
 		SessionID:   snapshot.SessionID,
 		Ref:         snapshot.Ref,
-		Label:       truncateActivityText(snapshot.Label, activityMaxLabelRunes),
+		Label:       activitybound.Truncate(snapshot.Label, activityMaxLabelRunes),
 		Entries:     make([]appwire.JobActivityEntry, 0),
 		Diagnostics: append([]string(nil), snapshot.Diagnostics...),
 	}
@@ -1156,7 +1149,7 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 	status := projectStableDelegateStatus(budget.now, row)
 	// Mandate and Task carry the same text; truncate it once rather than
 	// repeating the work for each copy.
-	task := truncateActivityText(descriptor.Task, activityMaxDelegateProseRunes)
+	task := activitybound.Truncate(descriptor.Task, activityMaxDelegateProseRunes)
 	delegate := appwire.JobActivityDelegate{
 		DelegateID:          row.id,
 		OwnerSessionID:      descriptor.OwnerSessionID,
@@ -1170,19 +1163,19 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 		Status:              string(row.lifecycle),
 		ProjectionRevision:  row.revision,
 		Resumable:           row.resumable,
-		NotResumableReason:  truncateActivityText(row.notResumableReason, activityMaxDelegateProseRunes),
+		NotResumableReason:  activitybound.Truncate(row.notResumableReason, activityMaxDelegateProseRunes),
 		Mandate:             task,
 		Task:                task,
-		Description:         truncateActivityText(descriptor.Description, activityMaxDelegateProseRunes),
+		Description:         activitybound.Truncate(descriptor.Description, activityMaxDelegateProseRunes),
 		AgentType:           descriptor.AgentType,
 		RequestedModel:      descriptor.RequestedModel,
 		ResolvedProfileID:   descriptor.ResolvedProfileID,
 		ResolvedModel:       descriptor.ResolvedModel,
 		Model:               descriptor.ResolvedModel,
 		ReasoningEffort:     descriptor.Config.ReasoningEffort,
-		OriginTurnID:        truncateActivityText(descriptor.OriginTurnID, activityMaxLabelRunes),
-		OriginToolCallID:    truncateActivityText(descriptor.OriginToolCallID, activityMaxLabelRunes),
-		OriginItemID:        truncateActivityText(descriptor.OriginItemID, activityMaxLabelRunes),
+		OriginTurnID:        activitybound.Truncate(descriptor.OriginTurnID, activityMaxLabelRunes),
+		OriginToolCallID:    activitybound.Truncate(descriptor.OriginToolCallID, activityMaxLabelRunes),
+		OriginItemID:        activitybound.Truncate(descriptor.OriginItemID, activityMaxLabelRunes),
 		RunStartedAt:        status.RunStartedAt,
 		LatestActivityAt:    status.LatestActivityAt,
 		RunningForMS:        appwire.ClonePointer(status.RunningForMS),
@@ -1194,8 +1187,8 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 	}
 	if row.lastOutcome != nil {
 		delegate.Outcome = string(row.lastOutcome.Status)
-		delegate.Reason = truncateActivityText(row.lastOutcome.Reason, activityMaxDelegateProseRunes)
-		delegate.Error = truncateActivityText(row.lastOutcome.Error, activityMaxDelegateProseRunes)
+		delegate.Reason = activitybound.Truncate(row.lastOutcome.Reason, activityMaxDelegateProseRunes)
+		delegate.Error = activitybound.Truncate(row.lastOutcome.Error, activityMaxDelegateProseRunes)
 		delegate.Terminal = delegateRunTerminal(row.lastOutcome, row.currentRunOpen)
 		if !row.lastOutcome.EndedAt.IsZero() {
 			delegate.RunEndedAt = row.lastOutcome.EndedAt.UTC().Format(time.RFC3339Nano)
@@ -1211,7 +1204,7 @@ func projectStableActivityDelegate(snapshot activitySessionSnapshot, row delegat
 		delegate.PacketKind = string(packet.Kind)
 		delegate.Message = boundActivityDelegatePayload(packet.Message)
 		delegate.StructuredResult = boundActivityDelegatePayload(packet.StructuredResult)
-		delegate.StructuredReason = truncateActivityText(packet.StructuredResultReason, activityMaxDelegateProseRunes)
+		delegate.StructuredReason = activitybound.Truncate(packet.StructuredResultReason, activityMaxDelegateProseRunes)
 		delegate.Warnings = capActivityDelegateWarnings(packet.Warnings)
 		messageDropped := len(packet.Message) > activityMaxDelegatePayloadBytes
 		resultDropped := len(packet.StructuredResult) > activityMaxDelegatePayloadBytes
@@ -1454,10 +1447,10 @@ func unsupportedActivityJobTypesError(records []*jobstore.JobRecord) string {
 // offenderID and offenderType bound the identifiers a collapsed error copies.
 // Job IDs and types are ordinarily short, but the error is fixed content the
 // envelope cannot trim, so neither is copied without a cap.
-func offenderID(id string) string { return truncateActivityText(id, activityMaxLabelRunes) }
+func offenderID(id string) string { return activitybound.Truncate(id, activityMaxLabelRunes) }
 
 func offenderType(typ jobstore.JobType) string {
-	return truncateActivityText(string(typ), activityMaxLabelRunes)
+	return activitybound.Truncate(string(typ), activityMaxLabelRunes)
 }
 
 func activityOutcome(status jobstore.Status) (bool, string) {
@@ -1603,7 +1596,7 @@ func shrinkActivityAncestors(root *appwire.JobActivitySession, ancestors int) bo
 	shrinkText := func(s string) string {
 		if n := utf8.RuneCountInString(s); n > activityAncestorTextFloorRunes {
 			changed = true
-			return truncateActivityText(s, max(activityAncestorTextFloorRunes, n/2))
+			return activitybound.Truncate(s, max(activityAncestorTextFloorRunes, n/2))
 		}
 		return s
 	}

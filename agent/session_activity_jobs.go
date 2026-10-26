@@ -9,6 +9,8 @@ import (
 	"sort"
 	"time"
 
+	"primeradiant.com/evener/agent/activitybound"
+
 	"primeradiant.com/evener/agent/internal/jobstore"
 	"primeradiant.com/evener/appwire"
 )
@@ -459,10 +461,10 @@ func (read *sessionActivityRead) jobsPage(ctx context.Context, params appwire.Se
 			jm.mu.Unlock()
 		}
 		row.OwnerSessionID = owner
-		row.Description = truncateActivityText(row.Description, activityMaxDelegateProseRunes)
-		row.Command = truncateActivityText(row.Command, activityMaxDelegateProseRunes)
-		row.Task = truncateActivityText(row.Task, activityMaxDelegateProseRunes)
-		row.Reason = truncateActivityText(row.Reason, activityMaxDelegateProseRunes)
+		row.Description = activitybound.Truncate(row.Description, activityMaxDelegateProseRunes)
+		row.Command = activitybound.Truncate(row.Command, activityMaxDelegateProseRunes)
+		row.Task = activitybound.Truncate(row.Task, activityMaxDelegateProseRunes)
+		row.Reason = activitybound.Truncate(row.Reason, activityMaxDelegateProseRunes)
 		result.Jobs = append(result.Jobs, row)
 		if !pageBudget.fits(row, result) {
 			result.Jobs = result.Jobs[:len(result.Jobs)-1]

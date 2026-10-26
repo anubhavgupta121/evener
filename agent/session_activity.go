@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 
+	"primeradiant.com/evener/agent/activitybound"
+
 	"primeradiant.com/evener/agent/internal/delegatestore"
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
@@ -228,13 +230,13 @@ func activityContextFromDelegates(result *appwire.SessionActivityContext, rootID
 			result.ParentRef = encodeRef("", owner)
 		}
 		parentDelegateID := d.ParentDelegateID
-		chain = append(chain, appwire.SessionActivityAncestor{Ref: encodeRef("", owner), SessionID: owner, DelegateID: parentDelegateID, Title: truncateActivityText(owner, activityMaxLabelRunes)})
+		chain = append(chain, appwire.SessionActivityAncestor{Ref: encodeRef("", owner), SessionID: owner, DelegateID: parentDelegateID, Title: activitybound.Truncate(owner, activityMaxLabelRunes)})
 		if parentDelegateID != "" {
 			parent := state[parentDelegateID]
 			if parent == nil || parent.Descriptor.ChildSessionID != owner {
 				return false
 			}
-			chain[len(chain)-1].Title = truncateActivityText(parent.Descriptor.Description, activityMaxLabelRunes)
+			chain[len(chain)-1].Title = activitybound.Truncate(parent.Descriptor.Description, activityMaxLabelRunes)
 		} else if owner != rootID {
 			return false
 		}
