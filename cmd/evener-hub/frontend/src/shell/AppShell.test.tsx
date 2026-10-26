@@ -64,6 +64,7 @@ import { resetSettingsOverviewStoreForTests } from "../stores/settingsOverview";
 import { holdNextWriteTransaction } from "../stores/testing/stalledIndexedDB";
 import * as threadsModule from "../stores/threads";
 import { resetThreadsStoreForTests, setProductionEntryCacheForTests, threadsStore } from "../stores/threads";
+import { readModuleCss } from "../styles/cssBlock";
 import { emptyStateReasons } from "../widgets/emptystate/emptyStateTestUtils";
 import { AppShell } from "./AppShell";
 import { activitySidebarStore, resetActivitySidebarStoreForTests } from "./activitybar/activitySidebarStore";
@@ -5815,8 +5816,7 @@ test("mobile: the shell spends --keyboard-inset as bottom padding so the compose
   // See useKeyboardInset.ts's header for the mechanism. Comments are stripped
   // before matching (testing.md: a comment quoting the declaration must not
   // satisfy the assertion).
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "AppShell.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "AppShell.module.css");
   const mobile = css.match(/@media \(max-width: 899px\) \{([\s\S]*?)\n\}/);
   expect(mobile).not.toBeNull();
   const shellRule = mobile![1]!.match(/\.shell \{([\s\S]*?)\n[ ]{2}\}/);
