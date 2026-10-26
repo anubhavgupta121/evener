@@ -3,6 +3,7 @@
 package userdirs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -23,6 +24,39 @@ func ConfigRoot(xdgConfigHome string, userHomeDir func() (string, error)) string
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "evener")
+}
+
+// ErrNoStateHome reports that neither XDG_STATE_HOME nor a home directory is
+// available, so there is no honest place for Evener's state. Callers surface
+// it rather than writing under a temporary or relative directory.
+var ErrNoStateHome = errors.New("no state home: neither XDG_STATE_HOME nor a home directory is available")
+
+// StateHome resolves the XDG state home (the parent of the "evener" state
+// root) from an XDG state base and a caller-supplied home-directory lookup.
+// It returns ErrNoStateHome when the base is empty and the home lookup fails
+// or yields nothing.
+func StateHome(xdgStateHome string, userHomeDir func() (string, error)) (string, error) {
+	if xdgStateHome != "" {
+		return xdgStateHome, nil
+	}
+	home, err := userHomeDir()
+	if err != nil {
+		return "", errors.Join(ErrNoStateHome, err)
+	}
+	if home == "" {
+		return "", ErrNoStateHome
+	}
+	return filepath.Join(home, ".local", "state"), nil
+}
+
+// StateRoot resolves Evener's machine-generated state root,
+// <state home>/evener. See StateHome for the error contract.
+func StateRoot(xdgStateHome string, userHomeDir func() (string, error)) (string, error) {
+	base, err := StateHome(xdgStateHome, userHomeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "evener"), nil
 }
 
 // Subdir derives a child directory or file from a config root. It preserves an
@@ -56,6 +90,26 @@ func UserSkills(root string) string { return Subdir(root, "skills") }
 // DefaultConfigRoot resolves the user config root from the process environment.
 func DefaultConfigRoot() string {
 	return ConfigRoot(envvars.XDGConfigHome.Getenv(), os.UserHomeDir)
+}
+
+// DefaultStateHome resolves the XDG state home from the process environment.
+func DefaultStateHome() (string, error) {
+	return StateHome(envvars.XDGStateHome.Getenv(), os.UserHomeDir)
+}
+
+// DefaultStateRoot resolves the Evener state root from the process
+// environment: $XDG_STATE_HOME/evener, or ~/.local/state/evener.
+//
+// It holds machine-generated, non-config state: the auth token, the past-
+// session index, the hub lock, and the daemon rendezvous/log directory. It is
+// the evener-wide counterpart to DefaultConfigRoot (user-editable config, e.g.
+// providers.toml) and to agent.RuntimeDir (per-project session state, also
+// under $XDG_STATE_HOME/evener). EVENER_STATE_DIR does NOT override this root:
+// that variable is a per-invocation project/session state override, a
+// different concept from this evener-wide root, and XDG_STATE_HOME is already
+// the standard override for it.
+func DefaultStateRoot() (string, error) {
+	return StateRoot(envvars.XDGStateHome.Getenv(), os.UserHomeDir)
 }
 
 // StateHomeForBucketDir reports the XDG-style state home that a project
