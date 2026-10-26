@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"primeradiant.com/evener/gittest"
 )
 
 // advanceGitRepo commits a change to file in dir, advancing HEAD.
@@ -16,7 +18,7 @@ func advanceGitRepo(t *testing.T, dir, file, content string) {
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, dir, "commit", "-aqm", "advance")
+	gittest.Run(t, dir, "commit", "-aqm", "advance")
 }
 
 // makeGitBackedMarketplace builds a marketplace repo whose one named plugin is
@@ -185,8 +187,8 @@ func TestUpdateAutoUpgrade_UpgradesARelativeSourceWhoseFolderChanged(t *testing.
 	if err := os.WriteFile(filepath.Join(mktRepo, "plugins", "widget", "extra.txt"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, mktRepo, "add", ".")
-	gitIn(t, mktRepo, "commit", "-qm", "change widget")
+	gittest.Run(t, mktRepo, "add", ".")
+	gittest.Run(t, mktRepo, "commit", "-qm", "change widget")
 	if err := m.RefreshMarketplace(context.Background(), name); err != nil {
 		t.Fatalf("RefreshMarketplace: %v", err)
 	}

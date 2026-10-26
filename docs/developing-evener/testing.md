@@ -1796,6 +1796,16 @@ the assertion is looking for.
 the model recognizes them: their answer is a verdict over a commit graph the
 model does not have, so any answer would be that stub.
 
+### Building a real repository
+
+Build real-git fixtures with `gittest` (`gittest.Run`, `gittest.NewLinkedWorktree`)
+instead of writing a local `runGit`. It runs git under `gittest.Env`: ambient
+`GIT_DIR`, injected `GIT_CONFIG_*` and the developer's global config cannot reach
+the fixture. Code in the `identifier` module cannot import it (that module
+depends on nothing else in the repository) and keeps its own helper. A fixture
+builder that wants to prove it never copies a repository while git maintenance
+is still writing into it wraps its runner in `gittest.MaintenanceProbe`.
+
 ### Adding a worktree test
 
 Default to the scripted boundary. Reach for real git only when you can name the

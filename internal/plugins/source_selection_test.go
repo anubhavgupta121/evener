@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"primeradiant.com/evener/gittest"
 )
 
 const sourceMetadataMarker = "synthetic-source-metadata-marker"
@@ -81,14 +83,14 @@ func TestInstallRejectsGitMetadataSourceSelections(t *testing.T) {
 		t.Fatal(err)
 	}
 	bareRepo := filepath.Join(root, "bare.git")
-	gitIn(t, root, "init", "-q", "--bare", bareRepo)
+	gittest.Run(t, root, "init", "-q", "--bare", bareRepo)
 	addAdminMarker(t, bareRepo)
 	separateAdmin := filepath.Join(root, "separate-admin.git")
 	separateWorktree := filepath.Join(root, "separate-worktree")
-	gitIn(t, root, "init", "-q", "--separate-git-dir", separateAdmin, separateWorktree)
+	gittest.Run(t, root, "init", "-q", "--separate-git-dir", separateAdmin, separateWorktree)
 	addAdminMarker(t, separateAdmin)
 	linkedWorktree := filepath.Join(root, "linked-worktree")
-	gitIn(t, pluginRepo, "worktree", "add", "-q", linkedWorktree)
+	gittest.Run(t, pluginRepo, "worktree", "add", "-q", linkedWorktree)
 	linkedAdmin := filepath.Join(pluginRepo, ".git", "worktrees", filepath.Base(linkedWorktree))
 	addAdminMarker(t, linkedAdmin)
 
@@ -158,8 +160,8 @@ func TestInstallAllowsWorkingTreeDirectorySource(t *testing.T) {
 	pluginRepo := filepath.Join(t.TempDir(), "plugin-worktree")
 	makeGitRepo(t, pluginRepo, "README.md", "plugin")
 	writePlugin(t, pluginRepo, "widget", map[string]string{"resources/companion.txt": "companion"})
-	gitIn(t, pluginRepo, "add", ".")
-	gitIn(t, pluginRepo, "commit", "-qm", "manifest")
+	gittest.Run(t, pluginRepo, "add", ".")
+	gittest.Run(t, pluginRepo, "commit", "-qm", "manifest")
 
 	entry, err := installDirectorySource(t, pluginRepo)
 	if err != nil {
@@ -194,7 +196,7 @@ func TestInstallWithoutGitRefusesUnverifiableAdministration(t *testing.T) {
 	}
 	root := t.TempDir()
 	admin := filepath.Join(root, "bare-admin")
-	gitIn(t, root, "init", "-q", "--bare", admin)
+	gittest.Run(t, root, "init", "-q", "--bare", admin)
 	addAdminMarker(t, admin)
 	marketRepo := filepath.Join(root, "market")
 	writeSourceCatalog(t, marketRepo, "widget", `{"source":"directory","path":"`+admin+`"}`)
@@ -346,8 +348,8 @@ func TestAmbientRepositorySelectionDoesNotBreakNormalInstall(t *testing.T) {
 	pluginRepo := filepath.Join(root, "plugin")
 	makeGitRepo(t, pluginRepo, "README.md", "plugin")
 	writePlugin(t, pluginRepo, "widget", map[string]string{"resources/companion.txt": "companion"})
-	gitIn(t, pluginRepo, "add", ".")
-	gitIn(t, pluginRepo, "commit", "-qm", "manifest")
+	gittest.Run(t, pluginRepo, "add", ".")
+	gittest.Run(t, pluginRepo, "commit", "-qm", "manifest")
 	marketRepo := filepath.Join(root, "market")
 	writeURLCatalog(t, marketRepo, "widget", pluginRepo, "")
 	makeGitRepo(t, marketRepo, "README.md", "market")
