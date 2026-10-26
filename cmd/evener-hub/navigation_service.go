@@ -1590,11 +1590,11 @@ func (key navigationResourceKey) Semantic() navigationResourceKey {
 // in-process child under the live session that runs it. Remote sessions and
 // unknown ids have no hop, so their aliases resolve to gone.
 func (w *WebServer) navigationSubagentParent(ref string) (parent, kind string, ok bool) {
-	parsed, err := hubapi.ParseRef(ref)
-	if err != nil || parsed.HostID != "local" {
+	parsed, err := appwire.ParseRef(ref)
+	if err != nil || parsed.SourceID != "local" {
 		return "", "", false
 	}
-	id := parsed.SessionID
+	id := parsed.ThreadID
 	if w.cfg.Past != nil {
 		if entry, ok := w.cfg.Past.FindIndexed(id); ok {
 			meta := entry.Meta
@@ -1685,7 +1685,7 @@ func (s webNavigationSource) Capture(ctx context.Context, generation string, now
 	assignments, sections = dropSubagentPins(assignments, sections, subagents)
 	pinView := classifySessionPins(assignments, authority)
 	assignments = canonicalPinAssignments(assignments, pinView)
-	inputs := navigationBuildInputsFromTreeSnapshot(generation, 0, tree, s.web.apiTreeSources(), hubAttentionSummaryFromCore(attention), snapshot.live, favoriteView, projectFavoritePresentation(favoriteView), sections, assignments)
+	inputs := navigationBuildInputsFromTreeSnapshot(generation, 0, tree, s.web.apiTreeSources(), attention, snapshot.live, favoriteView, projectFavoritePresentation(favoriteView), sections, assignments)
 	inputs.SessionSeen = seen
 	// Retained rows and saved metadata remain positive read evidence during
 	// an incomplete ownership scan. They cannot authorize local daemon writes.

@@ -369,27 +369,6 @@ func TestRegistryPanicsOnDivergentSameNameTypes(t *testing.T) {
 	registerTopLevel(reg, AttentionSummary{}, "unused")
 }
 
-// The live catalog already contains one same-named pair across packages —
-// hubapi.AttentionSummary and appwire.AttentionSummary (#1014's aliasing never
-// landed here). Their shapes are identical, so the generated TypeScript cannot
-// tell them apart and the dedup is invisible and correct. This pins that the
-// collision guard leaves such a pair alone: no panic, one interface emitted.
-func TestRegistryAllowsIdenticalSameNameTypesFromDifferentPackages(t *testing.T) {
-	reg := newRegistry()
-	registerTopLevel(reg, hubapi.AttentionSummary{}, "unused")
-	registerTopLevel(reg, appwire.AttentionSummary{}, "unused")
-
-	occurrences := 0
-	for _, name := range reg.order {
-		if name == "AttentionSummary" {
-			occurrences++
-		}
-	}
-	if occurrences != 1 {
-		t.Fatalf("AttentionSummary registered %d times, want 1 (registered: %v)", occurrences, reg.order)
-	}
-}
-
 // A same-named pair that renders identically is deduped, but the second
 // claimant's fields must still be walked: otherwise a divergent same-named
 // type reachable only through the dropped claimant would never be discovered,

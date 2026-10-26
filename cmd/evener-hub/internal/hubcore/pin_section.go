@@ -15,8 +15,7 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/text/cases"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver for database/sql
-
-	"primeradiant.com/evener/hubapi"
+	"primeradiant.com/evener/appwire"
 )
 
 const PinSectionNameMaxRunes = 80
@@ -67,7 +66,7 @@ func pinKeyLabel(source, sessionID string) string {
 	if source == "" {
 		return sessionID
 	}
-	return hubapi.Ref{HostID: source, SessionID: sessionID}.String()
+	return appwire.Ref{SourceID: source, ThreadID: sessionID}.String()
 }
 
 // SessionPinIdentity maps a session identity — a bare session ID, a
@@ -76,11 +75,11 @@ func pinKeyLabel(source, sessionID string) string {
 // controller's own session; any other host keeps its name, so one source's
 // identity can never address another source's row that shares its bare ID.
 func SessionPinIdentity(identity string) ArchiveKey {
-	ref, err := hubapi.ParseRef(identity)
+	ref, err := appwire.ParseRef(identity)
 	if err != nil {
 		return SessionPinKey("", identity)
 	}
-	return SessionPinKey(ref.HostID, ref.SessionID)
+	return SessionPinKey(ref.SourceID, ref.ThreadID)
 }
 
 // PinSectionStore persists named pin sections and their session assignments in
