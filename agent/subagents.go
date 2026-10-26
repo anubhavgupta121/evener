@@ -1166,8 +1166,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	// At capacity the spawn does not launch: dispose the freshly built child and
 	// any unadopted environment (the same cleanup as the retained-cap path), then
 	// surface the tree_at_capacity error to the tool call. Ownership of the reservation
-	// transfers to the delegate runningJob at attach; an unattached prepared run
-	// releases it (releasePreparedTreeSlot).
+	// transfers to the delegate runningJob at attach.
 	var treeSlot *treeReservation
 	var ok bool
 	if !preparedEnv.stableController {
@@ -1265,24 +1264,6 @@ func (s *Session) prepareSubagentRunFromSelection(
 		}
 	}
 	return prepared, nil
-}
-
-func (s *Session) trackAndLaunchPreparedSubagent(prepared *preparedSubagentRun) error {
-	if prepared == nil || prepared.sub == nil {
-		return errors.New("subagent run is not prepared")
-	}
-	s.mu.Lock()
-	if s.closingOrClosedLocked() {
-		s.mu.Unlock()
-		prepared.runCancel()
-		return errors.New("session is closed")
-	}
-	s.subagents.track(prepared.sub)
-	s.sendersWG.Add(1)
-	s.mu.Unlock()
-
-	s.launchSubagentRun(prepared.runCtx, prepared.sub, prepared.runCancel, prepared.input, s.activeCausalProvenance())
-	return nil
 }
 
 func (s *Session) noteParentJobActivity(phase string) {

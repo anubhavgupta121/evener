@@ -174,7 +174,6 @@ func miscContinuationAndCounterProgram(t *testing.T) {
 	if slot, ok := (&Session{}).reserveTreeSlot(slotKindJob); !ok || slot != nil {
 		t.Fatalf("unbounded reservation = %#v, %v", slot, ok)
 	}
-	releasePreparedTreeSlot(nil)
 
 	unsafe := llm.Message{Content: []llm.ContentPart{{Kind: llm.ContentImage}}}
 	_ = responsesContinuationMessageHasUnsafeDeltaContent(unsafe)
