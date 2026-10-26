@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
-import { connectReadyFakeClient } from "../../../testing/connection";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { Toast } from "../../../widgets";
 import { getToasts } from "../../../widgets/toast/store";
 import { ProjectSection } from "./project";

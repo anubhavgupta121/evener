@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { connectionStore, resetConnectionStoreForTests } from "../stores/connection";
 import { resetThreadsStoreForTests } from "../stores/threads";
 import { resetTranscriptDisplayStoreForTests, transcriptDisplayStore } from "../stores/transcriptDisplay";
-import { connectReadyFakeClient } from "../testing/connection";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { DevHarness } from "./DevHarness";
 
 // Mirrors the fixture helpers in ../stores/threads.test.ts (duplicated

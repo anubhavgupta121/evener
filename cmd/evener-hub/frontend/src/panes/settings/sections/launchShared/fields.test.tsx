@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { connectionStore, resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { resetExtensionsStoreForTests } from "../../../../stores/extensions";
-import { connectReadyFakeClient } from "../../../../testing/connection";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import * as catalogClientModule from "../../../../widgets/modelCatalog/catalogClient";
 import { PromptCompositeField, ScalarField } from "./fields";
 

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../../stores/connection";
 import { resetCredentialsStoreForTests, resetHostInstancesForTests } from "../../../../stores/credentials";
-import { connectReadyFakeClient } from "../../../../testing/connection";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { SettingsModelCatalog } from "./SettingsModelCatalog";
 
 // The launch/project model picker's host scope (component 07b): the picker

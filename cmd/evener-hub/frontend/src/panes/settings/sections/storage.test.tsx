@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetSettingsOverviewStoreForTests } from "../../../stores/settingsOverview";
-import { connectReadyFakeClient } from "../../../testing/connection";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { statusReasons } from "./reasonTestUtils";
 import { settingsFieldHelp, settingsFieldIds, settingsFieldValue } from "./settingsFieldTestUtils";
 import { StorageSection } from "./storage";

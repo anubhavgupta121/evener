@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetDaemonResidentsStoreForTests } from "../../../stores/daemonResidents";
 import { resetSettingsOverviewStoreForTests } from "../../../stores/settingsOverview";
-import { connectReadyFakeClient } from "../../../testing/connection";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { HubSection } from "./hub";
 import { statusReasons } from "./reasonTestUtils";
 import { settingsFieldHelp, settingsFieldIds, settingsFieldValue } from "./settingsFieldTestUtils";

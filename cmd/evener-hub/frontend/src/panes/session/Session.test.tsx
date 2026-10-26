@@ -84,7 +84,7 @@ import { resetTranscriptPagingForTests } from "./transcript/useTranscript";
 import "./testing/editorGeometry";
 import { installLocalStorage, MemoryStorage } from "../../storageTestUtils";
 import { readModuleCss } from "../../styles/cssBlock";
-import { connectReadyFakeClient } from "../../testing/connection";
+import { connectReadyFakeClient } from "../../testing/connectionTestUtils";
 import { writeSeenWatermark } from "./transcript/flow/seenWatermark";
 import * as useTranscriptScrollModule from "./transcript/flow/useTranscriptScroll";
 

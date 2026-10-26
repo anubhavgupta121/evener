@@ -1,6 +1,6 @@
 import type { AgentsDocResponse, AnyNotification, HostRow } from "@evener/appwire-client";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { connectReadyFakeClient } from "../testing/connection";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import {
   agentsDocStore,
   agentsDocStoreForHost,

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetSettingsHostForTests, setSettingsHost } from "../../../stores/settingsHost";
-import { connectReadyFakeClient } from "../../../testing/connection";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { HostScopedSurface } from "./hostScopedSurface";
 
 // The shared host-scoped frame's own contract (component 07b, round 8): its

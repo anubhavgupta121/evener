@@ -6,7 +6,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
 import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetSettingsOverviewStoreForTests, settingsOverviewStore } from "../../../stores/settingsOverview";
-import { connectReadyFakeClient } from "../../../testing/connection";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { resetDisclosureStoreForTests } from "../../../widgets/disclosure/disclosureStore";
 import { AboutSection, MIT_LICENSE_TEXT } from "./about";
 

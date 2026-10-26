@@ -8,7 +8,7 @@ import { HubWriteBusyError } from "@evener/appwire-client/state/extensions";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { threadStartedNotification } from "@evener/appwire-client/testing/notifications";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectReadyFakeClient } from "../testing/connection";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { connectionStore, resetConnectionStoreForTests } from "./connection";
 import { extensionsStore, type MarketplaceCatalogEntry, resetExtensionsStoreForTests } from "./extensions";
 

@@ -17,7 +17,7 @@ import {
 import { hostsStore } from "../../../../stores/hosts";
 import { setMutationClientIdentityForTests } from "../../../../stores/mutationClientIdentity";
 import { resetSettingsHostForTests, settingsHostStore } from "../../../../stores/settingsHost";
-import { connectReadyFakeClient } from "../../../../testing/connection";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { emptyStateReasons } from "../../../../widgets/emptystate/emptyStateTestUtils";
 import { getToasts, resetToastStoreForTests } from "../../../../widgets/toast/store";
 import { shownReasons, statusReasons } from "../reasonTestUtils";

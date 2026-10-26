@@ -12,7 +12,7 @@ import { deferRequest, FakeClient } from "@evener/appwire-client/testing/fakeCli
 import { threadStartedNotification } from "@evener/appwire-client/testing/notifications";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectReadyFakeClient } from "../testing/connection";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { connectionStore, resetConnectionStoreForTests } from "./connection";
 import {
   connectionGeneration,

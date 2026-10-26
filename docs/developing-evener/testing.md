@@ -1135,7 +1135,7 @@ toast from the previous test can satisfy this test's assertion.
 The connection store follows the same rule: reset it with
 `resetConnectionStoreForTests()` (`stores/connection.ts`) rather than a
 hand-written `setState`, and wire a ready fake with `connectReadyFakeClient()`
-(`src/testing/connection.ts`) rather than a per-file `connectFakeClient`.
+(`src/testing/connectionTestUtils.ts`) rather than a per-file `connectFakeClient`.
 
 ### Frontend store-fixture contracts
 

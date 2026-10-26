@@ -7,7 +7,7 @@ import { captureNewTabs, NEW_TAB_POLICY, openedNewTab } from "../../../../shell/
 import { connectionStore, resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { setMutationClientIdentityForTests } from "../../../../stores/mutationClientIdentity";
-import { connectReadyFakeClient } from "../../../../testing/connection";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { Toast } from "../../../../widgets";
 import { getToasts, resetToastStoreForTests } from "../../../../widgets/toast/store";
 import { toastKinds } from "../../../../widgets/toast/toastTestUtils";
