@@ -1262,6 +1262,12 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
 // released-then-reacquired pane (same ref, new route) still gets its own.
 const pendingOpeningRecoveries = new Map<string, EntryTranscriptRoute>();
 
+// The recovery chain's whole-span registration per ref, so a concurrent
+// hydration can compose with it instead of displacing it. Tracked separately
+// from trackedHydrationCompletions because a plain hydration's registration
+// may be superseded by a newer attempt, while the chain's span may not.
+const openingRecoveryCompletions = new Map<string, Promise<void>>();
+
 function scheduleEntryOpeningRecovery(ref: string): void {
   const route = entryTranscriptRoute(ref);
   if (!route || route.ref !== ref) return;
@@ -1346,9 +1352,17 @@ function scheduleEntryOpeningRecovery(ref: string): void {
     () => undefined,
     () => undefined,
   );
+  // The chain's registration is the recovery's whole span; it is also
+  // recorded in openingRecoveryCompletions so a concurrent refresh can compose
+  // with it instead of displacing it. A superseded hydration's registration
+  // may still be displaced by a newer hydration — the newer attempt owns the
+  // ref's convergence — but the recovery chain's span is not a hydration and
+  // must survive every one.
+  openingRecoveryCompletions.set(ref, recovery);
   trackedHydrationCompletions.set(ref, recovery);
   void recovery.then(() => {
     if (pendingOpeningRecoveries.get(ref) === route) pendingOpeningRecoveries.delete(ref);
+    if (openingRecoveryCompletions.get(ref) === recovery) openingRecoveryCompletions.delete(ref);
     if (trackedHydrationCompletions.get(ref) === recovery) trackedHydrationCompletions.delete(ref);
   });
 }
@@ -6856,10 +6870,22 @@ async function refreshTrackedThreadNow(
   // promise as the one consumers capture mid-read, so this read joins under
   // it instead of displacing it.
   if (registerCompletion) {
-    const completion = hydration.then(
-      () => undefined,
-      () => undefined,
-    );
+    // Compose with the opening-recovery chain's registration when one is
+    // outstanding rather than displacing it: the chain's span is wider than
+    // this hydration, and a consumer that starts waiting while this read runs
+    // must still span the recovery behind it. Hydration-only registrations
+    // still displace each other — the newer attempt owns the ref's
+    // convergence.
+    const outstandingRecovery = openingRecoveryCompletions.get(ref);
+    const completion = outstandingRecovery
+      ? Promise.all([hydration, outstandingRecovery]).then(
+          () => undefined,
+          () => undefined,
+        )
+      : hydration.then(
+          () => undefined,
+          () => undefined,
+        );
     trackedHydrationCompletions.set(ref, completion);
     void completion.then(() => {
       if (trackedHydrationCompletions.get(ref) === completion) trackedHydrationCompletions.delete(ref);
@@ -8988,6 +9014,7 @@ export function resetThreadsStoreForTests(): void {
   // under the default factory (the seam's own close-and-reattach).
   setCacheChannelFactoryForTests(defaultCacheChannelFactory);
   trackedHydrationCompletions.clear();
+  openingRecoveryCompletions.clear();
   pendingThreadHydrations.clear();
   pendingMutationReconciliations.clear();
   watchRefCounts.clear();

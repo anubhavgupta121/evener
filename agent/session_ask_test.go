@@ -2484,7 +2484,7 @@ func TestAskUser_HumanNoteDuringPendingAskDoesNotResolveIt(t *testing.T) {
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
 		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
-		func(req llm.Request) llm.Response { return finalResponse("noted") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("noted") },
 	)
 
 	ctx := tripwireCtx(t)
@@ -3469,7 +3469,7 @@ func TestAskUser_RestoreRederivesIdleAfterAnsweredAsk(t *testing.T) {
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
 		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
-		func(req llm.Request) llm.Response { return finalResponse("thanks, using Postgres") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("thanks, using Postgres") },
 	)
 
 	ctx := tripwireCtx(t)

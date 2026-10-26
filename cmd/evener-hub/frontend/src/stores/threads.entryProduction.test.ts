@@ -2370,7 +2370,12 @@ async function convergesAfterMissedLookups(misses: number): Promise<void> {
     Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
   );
   read.snapshot = { incarnation: "inc-a", length: 225 };
-  connect(read);
+  const firstClient = connect(read);
+  const firstReadIssued = deferred<void>();
+  firstClient.on("thread/read", () => {
+    firstReadIssued.resolve();
+    return read;
+  });
   const lease = acquireBackgroundThread(ref);
   await lease.ready;
   await settleEntryTranscriptForTests(ref);
@@ -2779,6 +2784,119 @@ it("a settle begun while a refused recovery's source read is held spans the re-o
     expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
     expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
   } finally {
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
+it("waiters begun while a recovery's parked read is held still wait through a concurrent refresh's own settlement", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  const client = connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // Two withheld reads arm the chain; its own paced attempt parks on a held
+  // storage read. A targeted resync mid-recovery runs its own tracked refresh
+  // with the default completion registration — a registration that must
+  // compose with the chain's outstanding one, not replace it. When the
+  // resync's own hydration settles, a settle or paging begun after it must
+  // still span the parked recovery, or paging can run before the recovery
+  // establishes its cursor.
+  let withheldWindowReads = 0;
+  let holdChainRead = false;
+  const chainReadEntered = deferred<void>();
+  const chainReadReleased = deferred<void>();
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (holdChainRead) {
+      holdChainRead = false;
+      chainReadEntered.resolve();
+      return chainReadReleased.promise.then(() =>
+        realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)),
+      ) as ReturnType<typeof realGetLatestWindow>;
+    }
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  const resyncReadIssued = deferred<void>();
+  let wireReads = 0;
+  let echoFrom = Number.POSITIVE_INFINITY;
+  client.on("thread/read", (params) => {
+    wireReads += 1;
+    if (wireReads >= echoFrom) {
+      resyncReadIssued.resolve();
+      return { ...read, requestGeneration: params.requestGeneration };
+    }
+    return read;
+  });
+  client.on("thread/turns/list", async () => {
+    return { data: [turn("older", 0)], bootGeneration: "1", epoch: 1, snapshot: { incarnation: "inc-a", length: 225 } };
+  });
+  withheldWindowReads = 2;
+  holdChainRead = true;
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    await chainReadEntered.promise;
+    echoFrom = wireReads + 1;
+    client.emitNotification({
+      method: "evener/thread/resync",
+      params: { ref, threadId: "thread-a" },
+    });
+    // The resync's own refresh settled its hydration and with it its shorter
+    // completion. Waiters begun now capture whatever registration is left
+    // while the chain's recovery is still parked behind the held read.
+    await resyncReadIssued.promise;
+    // Let the resync's own refresh run to completion — its hydration published
+    // and its shorter completion settled. The chain is still parked on the
+    // held read, so its recovery remains pending behind whatever registration
+    // the resync left.
+    await vi.waitFor(() => {
+      expect((bodies() ?? []).length).toBeGreaterThan(0);
+    });
+    await drainSettleSteps();
+    const settle = settleEntryTranscriptForTests(ref);
+    let settled = false;
+    void settle.then(() => {
+      settled = true;
+    });
+    const paging = threadsStore.getState().loadOlderTurns(ref);
+    let paged = false;
+    void paging.then(() => {
+      paged = true;
+    });
+    await drainSettleSteps();
+    expect(settled).toBe(false);
+    expect(paged).toBe(false);
+    chainReadReleased.resolve();
+    await settle;
+    await paging;
+    expect(bodies()).toContain("row-26");
+    expect(bodies()).toContain("row-225");
+  } finally {
+    chainReadReleased.resolve();
     threadsStore.getState().releaseThread(ref);
     await lease.release();
   }
