@@ -543,7 +543,7 @@ func newOnboardingGuardHub(t *testing.T, g *onboardingGuardEnv, oauthSetup func(
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := cmdutil.DefaultStateRoot()
+	state := mustStateRoot(t)
 	roster := hubcore.NewRoster(g.run, &hubcore.StatusProber{Timeout: time.Second})
 	past := newRebuiltPastIndex(t, filepath.Join(state, "projects", "*"))
 	spawner := &HubSpawner{EvenerBinary: g.binary, RunDir: g.run, HubToken: g.token, Registry: reg, ProvidersConfigPath: os.Getenv("EVENER_PROVIDERS_CONFIG"), CredentialsPath: os.Getenv("EVENER_CREDENTIALS_CONFIG")}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"primeradiant.com/evener/agent/execenv"
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/skill"
 	"primeradiant.com/evener/llm"
 )
@@ -94,7 +95,7 @@ func TestEmbeddedSkills_ProjectShadowsEmbedded(t *testing.T) {
 				if len(req.Messages) > 0 && req.Messages[0].Role == llm.RoleSystem {
 					capturedSystem = req.Messages[0].Text()
 				}
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}
@@ -132,7 +133,7 @@ func TestEmbeddedSkills_UseSkillWithProjectSkill(t *testing.T) {
 	f := &fakeAdapter{
 		name: "anthropic",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(skill) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(skill) },
 			func(req llm.Request) llm.Response {
 				for _, msg := range req.Messages {
 					for _, part := range msg.Content {
@@ -145,7 +146,7 @@ func TestEmbeddedSkills_UseSkillWithProjectSkill(t *testing.T) {
 						}
 					}
 				}
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}
@@ -182,7 +183,7 @@ func TestEmbeddedSkills_UseSkillUnknownReturnsError(t *testing.T) {
 	f := &fakeAdapter{
 		name: "anthropic",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(skill) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(skill) },
 			func(req llm.Request) llm.Response {
 				for _, msg := range req.Messages {
 					for _, part := range msg.Content {
@@ -191,7 +192,7 @@ func TestEmbeddedSkills_UseSkillUnknownReturnsError(t *testing.T) {
 						}
 					}
 				}
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}

@@ -15,6 +15,7 @@ import (
 
 	"primeradiant.com/evener/agent/events"
 	"primeradiant.com/evener/agent/execenv"
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/internal/tool"
 	"primeradiant.com/evener/appwire"
 	"primeradiant.com/evener/llm"
@@ -68,7 +69,6 @@ func communicateCallArgs(id string, args map[string]any) llm.ToolCallData {
 	}
 }
 
-// toolCallResponse is defined in tool_web_fetch_test.go (same package).
 
 // TestCommunicate_ToolChoiceNotForced_OnEveryRequest checks the whole request
 // sequence, not just the first: no round may force a tool call, including the
@@ -84,7 +84,7 @@ func TestCommunicate_ToolChoiceNotForced_OnEveryRequest(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}
@@ -126,7 +126,7 @@ func TestCommunicate_ResultExitsLoop(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 			// If the loop doesn't exit, this step would be reached.
 			func(req llm.Request) llm.Response {
@@ -172,10 +172,10 @@ func TestCommunicate_StatusMessageContinuesTurn(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(status)
+				return agenttest.ToolCallResponse(status)
 			},
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(final)
+				return agenttest.ToolCallResponse(final)
 			},
 		},
 	}
@@ -248,7 +248,7 @@ func TestCommunicate_StructuredOutputExitsLoop(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach second LLM call after communicate")
@@ -306,7 +306,7 @@ func TestCommunicate_FirstTerminalResultWins(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(first, second)
+				return agenttest.ToolCallResponse(first, second)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach second LLM call after terminal communicate")
@@ -362,13 +362,13 @@ func (a *communicateSessionRoutedAdapter) Complete(_ context.Context, req llm.Re
 	if req.SessionID == a.rootSessionID {
 		a.rootRequests++
 		if a.rootRequests == 1 {
-			response = toolCallResponse(a.delegate, a.status)
+			response = agenttest.ToolCallResponse(a.delegate, a.status)
 		} else {
-			response = toolCallResponse(a.parentDone)
+			response = agenttest.ToolCallResponse(a.parentDone)
 		}
 	} else {
 		a.childRequests++
-		response = toolCallResponse(a.childDone)
+		response = agenttest.ToolCallResponse(a.childDone)
 	}
 	response.Provider = a.Name()
 	response.Model = req.Model
@@ -685,11 +685,11 @@ func TestCommunicate_ClientSteeringBeforeResultProjectsValidNextRequest(t *testi
 		name: "anthropic",
 		steps: []func(req llm.Request) llm.Response{
 			func(llm.Request) llm.Response {
-				return toolCallResponse(communicateCall(callID, "Initial work complete."))
+				return agenttest.ToolCallResponse(communicateCall(callID, "Initial work complete."))
 			},
 			func(req llm.Request) llm.Response {
 				requestErr = validateSteeredCommunicateHistory(req.Messages, callID, "commit them")
-				return toolCallResponse(communicateCall("communicate_after_steering", "Committed."))
+				return agenttest.ToolCallResponse(communicateCall("communicate_after_steering", "Committed."))
 			},
 		},
 	}
@@ -769,11 +769,11 @@ func TestCommunicate_TerminalClientSteeringRunsAfterTheTerminalResult(t *testing
 		name: "anthropic",
 		steps: []func(req llm.Request) llm.Response{
 			func(llm.Request) llm.Response {
-				return toolCallResponse(communicateCall(firstCallID, "Initial work complete."))
+				return agenttest.ToolCallResponse(communicateCall(firstCallID, "Initial work complete."))
 			},
 			func(req llm.Request) llm.Response {
 				requestErr = validateSteeredCommunicateHistory(req.Messages, firstCallID, steerText)
-				return toolCallResponse(communicateCall(secondCallID, "Committed."))
+				return agenttest.ToolCallResponse(communicateCall(secondCallID, "Committed."))
 			},
 		},
 	}
@@ -1104,7 +1104,7 @@ func TestCommunicate_EmitsEvent(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(result) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(result) },
 		},
 	}
 	c.Register(f)
@@ -1164,7 +1164,7 @@ func TestCommunicate_AvailableImmediately(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(result) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(result) },
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach second step with MinResultRound=0")
 				return llm.Response{}

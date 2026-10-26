@@ -139,7 +139,7 @@ func TestSession_MaxToolRoundsPerInput_NegativeMeansUnlimited(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg("1") },
 			func(req llm.Request) llm.Response { return toolMsg("2") },
 			func(req llm.Request) llm.Response { return toolMsg("3") },
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	sess := newRoundLimitSession(t, -1, f)
@@ -215,7 +215,7 @@ func TestSession_EventSystem_NaturalCompletion_EmitsUserAndAssistantTextEventsIn
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("hello") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("hello") },
 		},
 	})
 
@@ -264,8 +264,8 @@ func TestSession_EventSystem_UserInputCarriesTurnIndex(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok-1") },
-			func(req llm.Request) llm.Response { return finalResponse("ok-2") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok-1") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok-2") },
 		},
 	})
 
@@ -334,7 +334,7 @@ func TestSession_EventSystem_ToolCall_EmitsStartDeltaEnd(t *testing.T) {
 			func(req llm.Request) llm.Response {
 				return llm.Response{Message: llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentPart{{Kind: llm.ContentToolCall, ToolCall: &call}}}}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	})
 
@@ -435,8 +435,8 @@ func TestSession_MultipleSequentialInputs_Work(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("first") },
-			func(req llm.Request) llm.Response { return finalResponse("second") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("first") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("second") },
 		},
 	}
 	c.Register(f)
@@ -489,9 +489,9 @@ func TestSession_Steer_IsInjectedAfterCurrentToolRound(t *testing.T) {
 					}
 				}
 				if !found {
-					return finalResponse("missing steering")
+					return agenttest.FinalResponse("missing steering")
 				}
-				return finalResponse("ok")
+				return agenttest.FinalResponse("ok")
 			},
 		},
 	}
@@ -610,7 +610,7 @@ func TestSession_ReasoningEffort_PassedThroughAndCanChange(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("ok")
+				return agenttest.FinalResponse("ok")
 			},
 		},
 	}
@@ -677,7 +677,7 @@ func TestSession_PopulatesModelRequestMetadata(t *testing.T) {
 	stateDir := t.TempDir()
 	c := llm.NewClient()
 	f := &fakeAdapter{name: "openai", steps: []func(req llm.Request) llm.Response{
-		func(req llm.Request) llm.Response { return finalResponse("ok") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 	}}
 	c.Register(f)
 
@@ -748,7 +748,7 @@ func TestSession_RetainsEncryptedReasoningAcrossToolRound(t *testing.T) {
 				},
 			}
 		},
-		func(req llm.Request) llm.Response { return finalResponse("ok") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 	}}
 	c.Register(f)
 
@@ -796,7 +796,7 @@ func TestSession_ContextWindowAwareness_EmitsWarningOver80Percent(t *testing.T) 
 	f := &fakeAdapter{
 		name: "tiny",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -848,7 +848,7 @@ func TestSession_ContextWindowAwareness_DoesNotWarnUnderThreshold(t *testing.T) 
 	f := &fakeAdapter{
 		name: "tiny",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -883,7 +883,7 @@ func TestSession_ContextWindowAwareness_DoesNotWarnForLargeImageBytes(t *testing
 	f := &fakeAdapter{
 		name: "tiny",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1084,7 +1084,7 @@ func TestSession_AbortThenFollowup(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("hello after interrupt")
+				return agenttest.FinalResponse("hello after interrupt")
 			},
 		},
 	}
@@ -1173,7 +1173,7 @@ func TestSession_AbortDrainsQueuedInputWithFreshContext(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("queued turn completed")
+				return agenttest.FinalResponse("queued turn completed")
 			},
 		},
 	}
@@ -1278,7 +1278,7 @@ func TestSession_AbortErrorDrainsQueuedInputWithFreshContext(t *testing.T) {
 				return llm.Response{}, llm.NewAbortError("user canceled", nil)
 			},
 			func(req llm.Request) (llm.Response, error) {
-				return finalResponse("queued turn completed after abort error"), nil
+				return agenttest.FinalResponse("queued turn completed after abort error"), nil
 			},
 		},
 	})
@@ -1687,13 +1687,14 @@ func TestSession_Subagent_AutoNudgeExplicitBuiltinSubagent(t *testing.T) {
 				mu.Lock()
 				callCount++
 				mu.Unlock()
-				return finalResponse("Explicit subagent recovered after nudge")
+				return agenttest.FinalResponse("Explicit subagent recovered after nudge")
 			},
 		},
 	}
 	c.Register(f)
 
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.3-codex")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
+		StateDir:         t.TempDir(),
 		MaxSubagentDepth: 1,
 	})
 	if err != nil {
@@ -1702,7 +1703,7 @@ func TestSession_Subagent_AutoNudgeExplicitBuiltinSubagent(t *testing.T) {
 	drainSessionEvents(sess)
 	defer sess.Close()
 
-	agentID := spawnRuntimeAgent(t, sess, "survey the project", "", 0, "subagent", "", nil)
+	agentID := spawnRuntimeAgent(t, sess, delegateArgs{Task: "survey the project", AgentType: "subagent"})
 	result := waitForRuntimeSubagent(t, sess, agentID)
 	if !result.Success {
 		t.Fatalf("expected explicit builtin subagent to recover, got failure: %+v", result)
@@ -1717,41 +1718,6 @@ func TestSession_Subagent_AutoNudgeExplicitBuiltinSubagent(t *testing.T) {
 		t.Errorf("expected 5 LLM calls (4 empty + nudge), got %d", cc)
 	}
 }
-func TestSession_SpawnAgent_MaxTurns(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	c := llm.NewClient()
-
-	f := &fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("done") },
-		},
-	}
-	c.Register(f)
-
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
-		MaxSubagentDepth: 1,
-	})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	defer sess.Close()
-
-	agentID := spawnRuntimeAgent(t, sess, "do it", "", 10, "", "", nil)
-
-	sub := sess.getSub(agentID)
-	if sub == nil {
-		t.Fatalf("missing subagent")
-	}
-
-	waitForRuntimeSubagent(t, sess, agentID)
-
-	if sub.sess.cfg.MaxTurns != 10 {
-		t.Fatalf("expected MaxTurns=10, got %d", sub.sess.cfg.MaxTurns)
-	}
-}
-
 func TestSubAgentStatus_Values(t *testing.T) {
 	t.Parallel()
 	// Validate the JSON wire format for each terminal status.  A bare string
@@ -1790,7 +1756,7 @@ func TestSession_ShellTool_UsesDefaultTimeout(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1833,7 +1799,7 @@ func TestSession_ShellTool_CapsTimeoutToMaxCommandTimeoutMS(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1878,7 +1844,7 @@ func TestSession_ShellTool_TimeoutAppendsMessageToToolResult(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1953,7 +1919,7 @@ func TestProcessInput_ToolChoiceIsNeverForced(t *testing.T) {
 				if req.ToolChoice.Mode != "auto" {
 					t.Fatalf("tool_choice.Mode = %q, want %q (forcing is unsafe: see doc comment)", req.ToolChoice.Mode, "auto")
 				}
-				resp := finalResponse("done")
+				resp := agenttest.FinalResponse("done")
 				resp.Finish = llm.FinishReason{Reason: "stop"}
 				return resp
 			},
@@ -2048,7 +2014,7 @@ func TestLoopDetection_PatternLength2(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolB("c4") },
 			func(req llm.Request) llm.Response { return toolA("c5") },
 			func(req llm.Request) llm.Response { return toolB("c6") },
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -2370,7 +2336,7 @@ func TestSession_ToolResults_AggregatedIntoSingleTurn(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -2438,7 +2404,7 @@ func TestSession_ToolResults_ContainsAllCallIDs(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -2508,7 +2474,7 @@ func TestSession_ToolResults_SingleCallAlsoAggregated(t *testing.T) {
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -2568,7 +2534,7 @@ func TestSession_ToolNameMapping_ReverseDispatch(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -2661,7 +2627,7 @@ func TestSession_ToolNameMapping_EventsUseCanonicalName(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -2739,7 +2705,7 @@ func TestSession_ToolIntent_IncludedInToolCallStartEvent(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -2808,7 +2774,7 @@ func TestSession_ReadBeforeWrite_WarnsOnUnreadFile(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -2891,7 +2857,7 @@ func TestSession_ReadBeforeWrite_NoWarningAfterRead(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -2955,7 +2921,7 @@ func TestSession_ReadBeforeWrite_NewFileNoWarning(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3004,7 +2970,7 @@ func TestSession_ReasoningEffort_MediumPassedThrough(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3066,7 +3032,7 @@ func TestSession_TaskListUpdateEscalatesReasoningEffort(t *testing.T) {
 			},
 			// Step 4: done — this request should carry effort=high.
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3128,7 +3094,7 @@ func TestSession_TaskList_AppendAndUpdate_EmitToolStateSnapshots(t *testing.T) {
 			func(req llm.Request) llm.Response {
 				return taskListCall("c2", `{"update":[{"id":1,"status":"done","notes":"reviewed specs"}]}`)
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -3206,7 +3172,7 @@ func TestSession_ReasoningEffort_EmptyGetsDefaultEffort(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3250,7 +3216,7 @@ func TestSession_ReasoningEffort_DisableAliasIsExplicitOff(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3285,19 +3251,19 @@ func TestSubagent_MaxTurns_DefaultsTo500_NotInheritedFromParent(t *testing.T) {
 	c := llm.NewClient()
 	f := &fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
 		func(req llm.Request) llm.Response {
-			return finalResponse("done")
+			return agenttest.FinalResponse("done")
 		},
 	}}
 	c.Register(f)
 	dir := t.TempDir()
 	// Parent has MaxTurns=100.
-	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("test-model")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{MaxTurns: 100})
+	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("test-model")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: t.TempDir(), MaxTurns: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sess.Close()
 
-	agentID := spawnRuntimeAgent(t, sess, "test task", "", 0, "", "", nil)
+	agentID := spawnRuntimeAgent(t, sess, delegateArgs{Task: "test task"})
 	sub := sess.getSub(agentID)
 	if sub == nil {
 		t.Fatal("subagent not found")
@@ -3334,13 +3300,14 @@ func TestSession_Subagent_IndependentHistory(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("subagent done")
+				return agenttest.FinalResponse("subagent done")
 			},
 		},
 	}
 	c.Register(f)
 
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
+		StateDir:         t.TempDir(),
 		MaxSubagentDepth: 1,
 	})
 	if err != nil {
@@ -3348,13 +3315,22 @@ func TestSession_Subagent_IndependentHistory(t *testing.T) {
 	}
 	defer sess.Close()
 
-	parentHistBefore := len(sess.history)
-	agentID := spawnRuntimeAgent(t, sess, "do something", "", 0, "", "", nil)
+	agentID := spawnRuntimeAgent(t, sess, delegateArgs{Task: "do something"})
 	waitForRuntimeSubagent(t, sess, agentID)
 
-	parentHistAfter := len(sess.history)
-	if parentHistAfter != parentHistBefore {
-		t.Fatalf("parent history changed: before=%d after=%d; subagent history leaked into parent", parentHistBefore, parentHistAfter)
+	// The parent may record the delegate's completion, but none of the
+	// delegate's own tool traffic.
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	for _, turn := range sess.history {
+		for _, part := range turn.Message.Content {
+			if part.ToolCall != nil && part.ToolCall.ID == "s1" {
+				t.Fatalf("subagent tool call leaked into the parent history: %+v", turn.Kind)
+			}
+			if part.ToolResult != nil && part.ToolResult.ToolCallID == "s1" {
+				t.Fatalf("subagent tool result leaked into the parent history: %+v", turn.Kind)
+			}
+		}
 	}
 }
 
@@ -3386,13 +3362,14 @@ func TestSession_Subagent_SharedFilesystem(t *testing.T) {
 				}
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("read it")
+				return agenttest.FinalResponse("read it")
 			},
 		},
 	}
 	c.Register(f)
 
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
+		StateDir:         t.TempDir(),
 		MaxSubagentDepth: 1,
 	})
 	if err != nil {
@@ -3400,7 +3377,7 @@ func TestSession_Subagent_SharedFilesystem(t *testing.T) {
 	}
 	defer sess.Close()
 
-	agentID := spawnRuntimeAgent(t, sess, "read shared.txt", "", 0, "", "", nil)
+	agentID := spawnRuntimeAgent(t, sess, delegateArgs{Task: "read shared.txt"})
 	waitForRuntimeSubagent(t, sess, agentID)
 
 	for _, req := range f.Requests() {
@@ -3421,7 +3398,7 @@ func TestSendInput_SteersRunningAgent(t *testing.T) {
 	// sendInput uses Steer() on running agents instead of rejecting them.
 	c := llm.NewClient()
 	f := &fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
-		func(req llm.Request) llm.Response { return finalResponse("ok") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 	}}
 	c.Register(f)
 	dir := t.TempDir()
@@ -3615,7 +3592,7 @@ func TestSession_SetsIdleTimeoutWithoutTotalDeadline(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return finalResponse("done")
+				return agenttest.FinalResponse("done")
 			},
 		},
 	}
@@ -3683,13 +3660,14 @@ func TestSession_Subagent_AutoNudgeOnEmptyResponseExhaustion(t *testing.T) {
 				mu.Lock()
 				callCount++
 				mu.Unlock()
-				return finalResponse("Recovered after nudge")
+				return agenttest.FinalResponse("Recovered after nudge")
 			},
 		},
 	}
 	c.Register(f)
 
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.3-codex")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
+		StateDir:         t.TempDir(),
 		MaxSubagentDepth: 1,
 	})
 	if err != nil {
@@ -3698,7 +3676,7 @@ func TestSession_Subagent_AutoNudgeOnEmptyResponseExhaustion(t *testing.T) {
 	drainSessionEvents(sess)
 	defer sess.Close()
 
-	agentID := spawnRuntimeAgent(t, sess, "survey the project", "", 0, "", "", nil)
+	agentID := spawnRuntimeAgent(t, sess, delegateArgs{Task: "survey the project"})
 	result := waitForRuntimeSubagent(t, sess, agentID)
 	if !strings.Contains(result.Output, "Recovered after nudge") {
 		t.Errorf("expected nudged subagent to report findings via communicate, got: %q", result.Output)

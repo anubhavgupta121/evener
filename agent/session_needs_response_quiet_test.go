@@ -118,7 +118,9 @@ func TestNeedsResponseRestartInsideTheQuietPeriodNeverArms(t *testing.T) {
 // but its human partner's answer, so it rests awaiting at once.
 func TestAskRestsAwaitingWithoutAQuietPeriod(t *testing.T) {
 	t.Parallel()
-	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response { return toolCallResponse(askUserCall("ask1", askUserArgsValid())) })
+	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response {
+		return agenttest.ToolCallResponse(askUserCall("ask1", askUserArgsValid()))
+	})
 	evs, mu, done := collectEvents(sess)
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hello", nil); err != nil {
@@ -202,7 +204,7 @@ func TestNeedsResponseCloseInsideTheQuietPeriodNeverArms(t *testing.T) {
 // holds it until a reply does.
 func TestPendingQuestionRestsAwaitingWithInputQueued(t *testing.T) {
 	t.Parallel()
-	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response { return toolCallResponse(askUserCall("ask1", askUserArgsValid())) })
+	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response { return agenttest.ToolCallResponse(askUserCall("ask1", askUserArgsValid())) })
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hello", nil); err != nil {
 		t.Fatal(err)
@@ -225,7 +227,7 @@ func TestPendingQuestionRestsAwaitingWithInputQueued(t *testing.T) {
 // finds the session still processing, or closing, leaves that state alone.
 func TestPendingQuestionUpgradesOnlyAnOpenIdleSession(t *testing.T) {
 	t.Parallel()
-	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response { return toolCallResponse(askUserCall("ask1", askUserArgsValid())) })
+	sess, _ := newQuietPeriodSession(t, func(llm.Request) llm.Response { return agenttest.ToolCallResponse(askUserCall("ask1", askUserArgsValid())) })
 	ctx := tripwireCtx(t)
 	if _, err := sess.ProcessInput(ctx, "hello", nil); err != nil {
 		t.Fatal(err)

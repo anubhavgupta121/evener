@@ -24,6 +24,7 @@ import (
 	"primeradiant.com/evener/agent/schema"
 	taskpkg "primeradiant.com/evener/agent/task"
 	"primeradiant.com/evener/agent/transcript"
+	"primeradiant.com/evener/identifier"
 )
 
 const delegateSalvagedDraftNote = "partial draft salvaged in the child transcript — resume it with delegate_send rather than re-dispatching"
@@ -648,7 +649,7 @@ func (s *Session) liveShellsUnderTree(path string) []string {
 func (s *Session) collectLiveShellsUnderTree(target string, out *[]string) {
 	if s.jobManager != nil {
 		for _, h := range s.jobManager.liveShellHandles() {
-			if pathEqualOrUnder(canonicalOrClean(h.dir), target) {
+			if identifier.PathUnder(canonicalOrClean(h.dir), target) {
 				*out = append(*out, h.handle)
 			}
 		}
@@ -702,64 +703,6 @@ func (s *Session) sharedWorkspaceDelegateWarning(requestedIsolation string) stri
 		}
 	}
 	return ""
-}
-
-func (s *Session) spawnAgent(ctx context.Context, task, model, workingDir string, maxTurns int, agentType string, reasoningEffort string, parentTasks []taskpkg.TaskTemplate, grantTools []string) (any, error) {
-	selection, err := s.selectSubagentModel(ctx, model, agentType)
-	if err != nil {
-		return "", err
-	}
-	if selection.warning != nil {
-		s.emitDiagnosticWarning(*selection.warning)
-	}
-	prepared, err := s.prepareSubagentRunWithModelSelection(
-		ctx, task, workingDir, maxTurns, agentType, reasoningEffort,
-		parentTasks, grantTools, selection,
-	)
-	if err != nil {
-		return "", err
-	}
-	// The legacy in-process spawn mints no delegate job, so no runningJob takes
-	// ownership of the slot prepareSubagentRun reserved and no finalize/abandon
-	// path can release it. The tree counter bounds delegate turns (spec §4); this
-	// in-process turn is not one, so return the slot rather than leak it.
-	releasePreparedTreeSlot(prepared)
-	if hook := s.cfg.testOnly.subagentAfterPrepare; hook != nil {
-		hook(s)
-	}
-	if err := s.trackAndLaunchPreparedSubagent(prepared); err != nil {
-		prepared.disposeUnadopted()
-		return "", err
-	}
-
-	b, _ := json.Marshal(map[string]any{"agent_id": prepared.sub.id, "status": string(SubagentRunning)})
-	return string(b), nil
-}
-
-func (s *Session) prepareSubagentRun(ctx context.Context, task, model, workingDir string, maxTurns int, agentType string, reasoningEffort string, parentTasks []taskpkg.TaskTemplate, grantTools []string) (*preparedSubagentRun, error) {
-	selection, err := s.selectSubagentModel(ctx, model, agentType)
-	if err != nil {
-		return nil, err
-	}
-	return s.prepareSubagentRunWithModelSelection(
-		ctx, task, workingDir, maxTurns, agentType, reasoningEffort,
-		parentTasks, grantTools, selection,
-	)
-}
-
-func (s *Session) prepareSubagentRunWithModelSelection(
-	ctx context.Context,
-	task, workingDir string,
-	maxTurns int,
-	agentType, reasoningEffort string,
-	parentTasks []taskpkg.TaskTemplate,
-	grantTools []string,
-	selection subagentModelSelection,
-) (*preparedSubagentRun, error) {
-	return s.prepareSubagentRunFromSelection(
-		ctx, task, workingDir, maxTurns, agentType, reasoningEffort,
-		parentTasks, grantTools, selection, nil, nil,
-	)
 }
 
 func (s *Session) prepareStableDelegateRun(ctx context.Context, descriptor delegatestore.Descriptor, watchParent bool, selection subagentModelSelection, inheritedContext []transcript.Entry) (*preparedSubagentRun, error) {
@@ -1209,12 +1152,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	// session and any unadopted fresh environment before returning.
 	// On success, GC-evicted records are closed here, OUTSIDE the manager mutex.
 	if !preparedEnv.stableController {
-		var evicted []*subagent
-		if reserve := s.cfg.testOnly.subagentReserveSlot; reserve != nil {
-			evicted, err = reserve(s)
-		} else {
-			evicted, err = s.subagents.reserveSlot()
-		}
+		evicted, err := s.subagents.reserveSlot()
 		if err != nil {
 			disposeUnadopted()
 			return nil, err
@@ -1233,11 +1171,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	var treeSlot *treeReservation
 	var ok bool
 	if !preparedEnv.stableController {
-		if reserve := s.cfg.testOnly.subagentReserveTreeSlot; reserve != nil {
-			treeSlot, ok = reserve(s)
-		} else {
-			treeSlot, ok = s.reserveTreeSlot(slotKindJob)
-		}
+		treeSlot, ok = s.reserveTreeSlot(slotKindJob)
 		if !ok {
 			disposeUnadopted()
 			return nil, s.treeCapacityErrorFor()
@@ -1706,28 +1640,6 @@ func (s *Session) launchSubagentRun(runCtx context.Context, sub *subagent, runCa
 		defer runCancel()
 		sub.run(runCtx, input, inputProvenance)
 	}()
-}
-
-func (s *Session) cancelAgent(agentID string) (any, error) {
-	sub := s.getSub(agentID)
-	if sub == nil {
-		return "", fmt.Errorf("unknown agent_id: %s", agentID)
-	}
-	done, err := sub.requestRunCancel(false)
-	if err != nil {
-		return "", fmt.Errorf("agent %s is %w", agentID, err)
-	}
-	select {
-	case <-done:
-	case <-s.sclock().After(5 * time.Second):
-		return "", fmt.Errorf("timed out cancelling subagent %s", agentID)
-	}
-	sub.mu.Lock()
-	result := sub.resultSnapshotLocked()
-	sub.resultConsumed = true
-	sub.mu.Unlock()
-	b, _ := json.Marshal(result)
-	return string(b), nil
 }
 
 func (s *Session) getSub(agentID string) *subagent {

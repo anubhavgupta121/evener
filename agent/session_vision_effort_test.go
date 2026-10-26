@@ -138,7 +138,7 @@ func TestPersistToolResults_VisionSteeringIncludesLatencyAndUsage(t *testing.T) 
 					},
 				}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c := llm.NewClient()
@@ -206,7 +206,7 @@ func TestPersistToolResults_VisionSteeringOmitsAbsentUsage(t *testing.T) {
 				fakeClock.Advance(7 * time.Millisecond)
 				return llm.Response{Message: llm.Assistant(visionOutputSentinel), Usage: llm.Usage{}}
 			},
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c := llm.NewClient()

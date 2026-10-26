@@ -114,7 +114,7 @@ duplicate; editing the draft does not resolve the first attempt.
 creation key. The hub
 [detaches creation from peer cancellation](../../cmd/evener-hub/app_threadlifecycle.go#L82).
 Native [submit](../../mobile-native/src/newSession.ts#L429) persists uncertainty;
-browser [creation failure](../../cmd/evener-hub/frontend/src/panes/spawn/Spawn.tsx#L2257)
+browser [creation failure](../../cmd/evener-hub/frontend/src/panes/spawn/Spawn.tsx#L2333)
 clears the busy state. Native `newSession.test.ts` tests the held unchanged draft.
 
 **Decision.** Treat each Start submission as one durable request. Preserve its
@@ -281,7 +281,7 @@ configure one on that host and offers a retry check. Existing host-scoped
 credential push and remote Codex sign-in live in Settings, so the user must find
 that route and return to the draft.
 
-**Evidence.** [Spawn provider gate](../../cmd/evener-hub/frontend/src/panes/spawn/Spawn.tsx#L2650)
+**Evidence.** [Spawn provider gate](../../cmd/evener-hub/frontend/src/panes/spawn/Spawn.tsx#L2582)
 differs from the available
 [remote sign-in](../../cmd/evener-hub/frontend/src/panes/settings/sections/credentials/CredentialsHostScope.tsx#L188)
 and [credential transfer](../../cmd/evener-hub/frontend/src/panes/settings/sections/credentials/CredentialsHostScope.tsx#L404)
@@ -571,8 +571,8 @@ notice. Saved pending deliveries and future registrations have different lifetim
 
 **Evidence.** [newJobManagerWithStoreOpen](../../agent/jobs.go) and
 [clearUnrestoredActiveWatches](../../agent/jobs.go) clear all active records;
-[watchConfigSnapshot](../../agent/job_watch.go) retains filters, identities
-and intervals. [noticeUnrestoredWatchEnds](../../agent/job_watch.go) handles
+[watchConfigSnapshot](../../agent/watch_registry.go) retains filters, identities
+and intervals. [noticeUnrestoredWatchEnds](../../agent/watch_expiry.go) handles
 the end notices. The [job-control contract](../job-control.md) distinguishes
 durable registration and delivery records from process-local observation,
 timers and callbacks.

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/afero"
 
 	"primeradiant.com/evener/agent/execenv"
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/llm"
 )
@@ -102,7 +103,7 @@ func TestCancelledTurnPersistsNoFailedTurn(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("hi back") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("hi back") },
 		},
 	})
 

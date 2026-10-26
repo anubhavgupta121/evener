@@ -13,6 +13,7 @@ import (
 
 	"primeradiant.com/evener/agent/events"
 	"primeradiant.com/evener/agent/execenv"
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/internal/goal"
 	"primeradiant.com/evener/agent/internal/hooks"
 	"primeradiant.com/evener/agent/plugin"
@@ -417,7 +418,7 @@ func TestAskUser_BoundaryEndsTurnAwaiting(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call after an ask-ending boundary")
@@ -463,7 +464,7 @@ func TestAskUser_EarlyAskStillEndsTurn(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call: the model had a read_file call queued for round 2, but an early ask must still end the turn at its own round's boundary")
@@ -497,7 +498,7 @@ func TestAskUser_MultipleAsksOneRound(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask1, ask2)
+				return agenttest.ToolCallResponse(ask1, ask2)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call after an ask-ending boundary")
@@ -542,7 +543,7 @@ func TestAskUser_ComposesWithCommunicate(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask, comm)
+				return agenttest.ToolCallResponse(ask, comm)
 			},
 		},
 	}
@@ -577,7 +578,7 @@ func TestAskUser_StopHookCannotBlockAskBoundary(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call: a Blocked Stop hook must not force another round at an ask boundary")
@@ -636,7 +637,7 @@ func TestAskUser_InterruptedTurnEndsIdle(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask, triggerCancel)
+				return agenttest.ToolCallResponse(ask, triggerCancel)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call: an interrupted turn must not continue")
@@ -676,10 +677,10 @@ func TestAskUser_DeniedOrInvalidOnlyAskDoesNotEndTurn(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(badAsk)
+				return agenttest.ToolCallResponse(badAsk)
 			},
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}
@@ -719,10 +720,10 @@ func TestAskUser_PreToolUseDenyPostsNothing(t *testing.T) {
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
-				return toolCallResponse(comm)
+				return agenttest.ToolCallResponse(comm)
 			},
 		},
 	}
@@ -795,9 +796,9 @@ func TestAskUser_EntryGateRefusesNotificationWake(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return finalResponse("thanks, going with Postgres") },
-			func(req llm.Request) llm.Response { return finalResponse("notification ack") },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("thanks, going with Postgres") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("notification ack") },
 		},
 	}
 	sess := newSession(t, withAdapter(f))
@@ -855,11 +856,11 @@ func TestAskUser_ReplyDrainsRootDelegateAttentionRefusedAtEntryGate(t *testing.T
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return finalResponse("thanks, going with Postgres") },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("thanks, going with Postgres") },
 			func(req llm.Request) llm.Response {
 				t.Error("the reply turn already showed the model the attention; no notification turn should run (#4247)")
-				return finalResponse("delegate completion ack")
+				return agenttest.FinalResponse("delegate completion ack")
 			},
 		},
 	}
@@ -955,7 +956,7 @@ func TestAskUser_EntryGateRefusesContinuationWake(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a model call: the entry gate must refuse EntryContinuation while awaiting")
 				return llm.Response{}
@@ -1001,9 +1002,9 @@ func TestAskUser_BoundaryDrainHoldsNotifications(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, enqueueNotif) },
-			func(req llm.Request) llm.Response { return finalResponse("thanks, going with Postgres") },
-			func(req llm.Request) llm.Response { return finalResponse("notification ack") },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, enqueueNotif) },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("thanks, going with Postgres") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("notification ack") },
 		},
 	}
 	sess := newSession(t, withAdapter(f))
@@ -1064,8 +1065,8 @@ func TestAskUser_QueuedInputDrainsAsReply(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, enqueueFollowUpText) },
-			func(req llm.Request) llm.Response { return finalResponse("sure, running the linter too") },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, enqueueFollowUpText) },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("sure, running the linter too") },
 		},
 	}
 	sess := newSession(t, withAdapter(f))
@@ -1117,7 +1118,7 @@ func TestAskUser_BoundaryDrainPreservesFollowUp(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, queueFollowUp) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, queueFollowUp) },
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call: an asking boundary must hold the follow-up rung")
 				return llm.Response{}
@@ -1183,7 +1184,7 @@ func TestAskUser_CompactRefusedWhileAwaiting(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 		},
 	}
 	sess := newSession(t, withAdapter(f))
@@ -1287,7 +1288,7 @@ func TestAskUser_ClearReplacesAwaitingSessionWithFreshIdleOne(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 		},
 	}
 	client := llm.NewClient()
@@ -1371,7 +1372,7 @@ func TestAskUser_RestoreRederivesAwaiting(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -1402,7 +1403,7 @@ func TestAskUser_RestoreRederivesAwaitingAcrossTrailingSteering(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -1422,7 +1423,7 @@ func TestAskUser_RestoreRederivesAwaitingAcrossTrailingSteering(t *testing.T) {
 }
 
 // TestAskUser_SteeringCarrierClaimAnswersAskFailsClosedForUnknownProvenance
-// covers RoboRev #1905 round 1's Low (session_tools_ask.go:117):
+// covers RoboRev #1905 round 1's Low:
 // steeringCarrierClaimAnswersAsk read a MISSING client-mutation journal
 // record the same as a present-but-kindless one and answered true either
 // way, so a carrier claim whose journal entry was lost (or not yet visible)
@@ -1460,7 +1461,7 @@ func TestAskUser_AcceptSteeringCarrierInputTagsSteeringCarrierOnAppendFailureFor
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -1571,7 +1572,7 @@ func TestAskUser_RecordFailedSteeringSelectionTagsSteeringCarrierForAnAnsweringS
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -1617,7 +1618,7 @@ func TestAskUser_AcceptSteeringCarrierInputDoesNotTagSteeringCarrierOnAppendFail
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -1663,7 +1664,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagSteeringCarrierForAHuman
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	driveAsk(t, sess)
@@ -1692,7 +1693,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagSteeringCarrierForAHuman
 }
 
 // streamAskUserThenFinish scripts a round that posts one ask_user call and
-// ends its turn on it — the streaming-adapter shape of toolCallResponse(ask),
+// ends its turn on it — the streaming-adapter shape of agenttest.ToolCallResponse(ask),
 // for a scriptedStreamAdapter script map.
 func streamAskUserThenFinish(ask llm.ToolCallData) func(*llm.ChanStream) {
 	return func(st *llm.ChanStream) {
@@ -1801,7 +1802,7 @@ func TestAskUser_RestoreResolvesAcrossInterruptSameRound(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, triggerCancel) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, triggerCancel) },
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call: an interrupted turn must not continue")
 				return llm.Response{}
@@ -1860,7 +1861,7 @@ func TestAskUser_InterruptMarkerWriteFailurePreservesBoundary(t *testing.T) {
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
 				modelCalls++
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
 				t.Fatalf("should not reach a second LLM call after an unrecorded interrupt marker")
@@ -2004,8 +2005,8 @@ func TestAskUser_FailedInterruptMarkerAfterAnsweredToolRoundMatchesRestore(t *te
 	adapter := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(loop, reply, trigger) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(loop, reply, trigger) },
 		},
 	}
 	c := llm.NewClient()
@@ -2252,7 +2253,7 @@ func TestAskUser_InterruptMarkerRetainedWriteIsAdopted(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, triggerCancel) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, triggerCancel) },
 		},
 	})
 	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
@@ -2345,7 +2346,7 @@ func TestAskUser_RestoreResolvesAcrossUserSteer(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -2409,7 +2410,7 @@ func TestAskUser_RestoreResolvesAcrossUserSteerFollowedBySameRoundDaemonReminder
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -2482,7 +2483,7 @@ func TestAskUser_HumanNoteDuringPendingAskDoesNotResolveIt(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 		func(req llm.Request) llm.Response { return finalResponse("noted") },
 	)
 
@@ -2511,7 +2512,7 @@ func TestAskUser_HumanNoteDuringPendingAskDoesNotResolveIt(t *testing.T) {
 }
 
 // TestAskUser_RestoreUsesJournalProvenanceForAKindlessLegacyHumanNoteTurn
-// covers RoboRev #1806 round 4's Medium (session_tools_ask.go:323): a
+// covers RoboRev #1806 round 4's Medium: a
 // steering turn persisted before SteeringKind was stamped carries no kind of
 // its own, so a legacy human-note turn looks like an ordinary (kindless)
 // answering steer and wrongly resolves a pending ask on restore. The
@@ -2537,7 +2538,7 @@ func TestAskUser_RestoreUsesJournalProvenanceForAKindlessLegacyHumanNoteTurn(t *
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -2597,7 +2598,7 @@ func TestAskUser_RestoreClassifiesAKindlessProvenancelessHumanNoteByItsTextShape
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -2624,7 +2625,7 @@ func TestAskUser_RestoreClassifiesAKindlessProvenancelessHumanNoteByItsTextShape
 }
 
 // TestAcceptSteeringCarrierInput_PanicMidDrainStillClearsTheClaim covers
-// RoboRev #1806 round 4's Low (session_lifecycle.go:2733-2735):
+// RoboRev #1806 round 4's Low:
 // setSteeringCarrierClaimDrain(id) / injectDrainedSteering() /
 // setSteeringCarrierClaimDrain("") cleared without defer, so a panic between
 // the two calls leaked the claim id — a later unrelated
@@ -2693,7 +2694,7 @@ func TestAskUser_RestoreResolvesAcrossFailedSteeringCarrier(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -2754,7 +2755,7 @@ func TestAskUser_RestoreResolvesAcrossFailedSteeringSelectionCarrier(t *testing.
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -2812,7 +2813,7 @@ func TestAskUser_RestoreDoesNotResolveAcrossAFailedHumanNoteCarrierAppend(t *tes
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -2866,7 +2867,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagAHumanNoteClaim(t *testi
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	driveAsk(t, sess)
@@ -2899,8 +2900,7 @@ func TestAskUser_RecordFailedSteeringSelectionDoesNotTagAHumanNoteClaim(t *testi
 }
 
 // TestAskUser_RestoreDoesNotResolveAcrossASuccessfulHumanNoteCarrierCompletion
-// covers the open Medium from RoboRev #1806's round-6 panel
-// (session_tools_ask.go:539-542): a successful human-note carrier does not
+// covers the open Medium from RoboRev #1806's round-6 panel: a successful human-note carrier does not
 // clear askPending live (steeringCarrierClaimAnswersAsk skips the entry
 // clear, and the note itself is not an answering steer per
 // steeringAnswersAsk), but its round still runs a real model
@@ -2924,8 +2924,8 @@ func TestAskUser_RestoreDoesNotResolveAcrossASuccessfulHumanNoteCarrierCompletio
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(comm) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(comm) },
 		},
 	})
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
@@ -2998,8 +2998,8 @@ func TestAskUser_RestoreAccumulatesPendingQuestionsAcrossNonResolvingRounds(t *t
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask1) },
-			func(req llm.Request) llm.Response { return toolCallResponse(ask2) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask1) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask2) },
 		},
 	})
 	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))
@@ -3049,7 +3049,7 @@ func buildAnsweredAskHistoryForFork(t *testing.T, clientMutationID string) []sch
 	t.Helper()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
@@ -3174,7 +3174,7 @@ func TestAskUser_RestoreDoesNotResolveAcrossAnUnrelatedTurnFailure(t *testing.T)
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	driveAsk(t, sess)
@@ -3235,10 +3235,10 @@ func TestAskUser_InjectPostToolSteeringClearsPendingAskForAnAcceptedUserSteer(t 
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
 				queueSteer()
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("using Postgres, thanks")
+				return agenttest.FinalResponse("using Postgres, thanks")
 			},
 		},
 	}
@@ -3304,10 +3304,10 @@ func TestAskUser_SteeringInjectedNeverObservesAskPendingStillTrue(t *testing.T) 
 		steps: []func(req llm.Request) llm.Response{
 			func(req llm.Request) llm.Response {
 				queueSteer()
-				return toolCallResponse(ask)
+				return agenttest.ToolCallResponse(ask)
 			},
 			func(req llm.Request) llm.Response {
-				return finalResponse("using Postgres, thanks")
+				return agenttest.FinalResponse("using Postgres, thanks")
 			},
 		},
 	}
@@ -3340,7 +3340,7 @@ func TestAskUser_SteeringInjectedNeverObservesAskPendingStillTrue(t *testing.T) 
 }
 
 // TestAskUser_ConsumeSteeringMessageEmitsInjectedBeforeAdmissionWarning covers
-// RoboRev #1905 round 1's Medium (session_queue.go:1257): round 3's original
+// RoboRev #1905 round 1's Medium: round 3's original
 // intent was only to move clearAskPendingForResolvingSteer ahead of
 // EventSteeringInjected, but the change also moved admitPreparedSkillSelection
 // and unparkSteering ahead of the emit, flipping the observable event order
@@ -3415,11 +3415,11 @@ func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(comm) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(comm) },
 			func(req llm.Request) llm.Response {
 				followUpRan = true
-				return finalResponse("ran the followup")
+				return agenttest.FinalResponse("ran the followup")
 			},
 		},
 	})
@@ -3468,7 +3468,7 @@ func TestAskUser_RestoreRederivesIdleAfterAnsweredAsk(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 		func(req llm.Request) llm.Response { return finalResponse("thanks, using Postgres") },
 	)
 
@@ -3586,9 +3586,8 @@ func TestAskUser_RestoreRederivesIdleAfterInterruptedAsk(t *testing.T) {
 // The restore tests above prove deriveRestoredState re-derives SessionAwaiting
 // after a restart with an unanswered ask_user question. That alone is not
 // enough: every hold keyed on the pending SET rather than raw state — the
-// entry gate (session_lifecycle.go:453), the goal engine's arm-don't-kick
-// paths (session_goal.go:61,:246), and Compact's guard
-// (session_compaction.go:30) — reads len(s.askPending), which stayed empty
+// entry gate, the goal engine's arm-don't-kick
+// paths (session_goal.go:61,:246), and Compact's guard — reads len(s.askPending), which stayed empty
 // across every restore before this fix (askPending was written only by the
 // live ask_user Exec path and cleared at turn entry, session_lifecycle.go:783).
 // A restored session with a genuinely pending question therefore had every
@@ -3611,7 +3610,7 @@ func TestAskUser_RestoreRebuildsPendingHoldsEntryGate(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -3666,7 +3665,7 @@ func TestAskUser_RestoreRebuildsPendingArmsSetGoalWithoutKick(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -3710,7 +3709,7 @@ func TestAskUser_RestoreRebuildsPendingRefusesCompact(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	runAskRound(t, sess)
@@ -3757,7 +3756,7 @@ func TestAskUser_RestoreRebuildsPendingCountAndOrder(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask1, ask2) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask1, ask2) },
 		},
 	})
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
@@ -3851,7 +3850,7 @@ func TestAskUser_RestoreNeedsResponseRestKeepsPendingEmptyAndGoalKicks(t *testin
 }
 
 // TestAskUser_RestoreRebuildsPendingThenReplyClears covers the turn-entry
-// clear (session_lifecycle.go:783): once a restored session with a rebuilt
+// clear: once a restored session with a rebuilt
 // pending set receives the user's reply, the pending set must clear exactly
 // as it does live (spec §5.2) — proving the rebuilt set is a real, live
 // askPending and not some restore-only shadow the ordinary clear path
@@ -3860,7 +3859,7 @@ func TestAskUser_RestoreRebuildsPendingThenReplyClears(t *testing.T) {
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, dir := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -3875,7 +3874,7 @@ func TestAskUser_RestoreRebuildsPendingThenReplyClears(t *testing.T) {
 	restoreClient.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("thanks, using Postgres") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("thanks, using Postgres") },
 		},
 	})
 	restored, err := RestoreSessionFromMeta(restoreClient, withTestSessionNamer(restoreClient, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), meta, dir)
@@ -4190,12 +4189,12 @@ func TestAskUser_MidRoundResolvingSteerClearingAFreshAskDoesNotForceAwaitingEarl
 	fa := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask1) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask1) },
 			func(req llm.Request) llm.Response {
 				queueSteer()
-				return toolCallResponse(ask2)
+				return agenttest.ToolCallResponse(ask2)
 			},
-			func(req llm.Request) llm.Response { return finalResponse("using Postgres, thanks") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("using Postgres, thanks") },
 		},
 	}
 	c.Register(fa)
@@ -4249,7 +4248,7 @@ func TestAskUser_LiveStateAfterFailedHumanNoteCarrierAppendMatchesRestore(t *tes
 	t.Parallel()
 	ask := askUserCall("ask1", askUserArgsValid())
 	sess, _ := newAskStateSession(t,
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	)
 
 	ctx := tripwireCtx(t)
@@ -4292,10 +4291,10 @@ func TestAskUser_LiveStateAfterPoisonedTranscriptRefusalMatchesRestore(t *testin
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 			func(req llm.Request) llm.Response {
 				armEnvironmentPartialWriteAfter(fs, 1)
-				return toolCallResponse(loop)
+				return agenttest.ToolCallResponse(loop)
 			},
 		},
 	})
@@ -4346,7 +4345,7 @@ func TestAskUser_LiveStateAfterFailedHumanNoteCarrierProviderErrorMatchesRestore
 	adapter := &fakeErrAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) (llm.Response, error){
-			func(req llm.Request) (llm.Response, error) { return toolCallResponse(ask), nil },
+			func(req llm.Request) (llm.Response, error) { return agenttest.ToolCallResponse(ask), nil },
 			func(req llm.Request) (llm.Response, error) {
 				return llm.Response{}, llm.ErrorFromHTTPStatus("openai", 403, "carrier provider failure", nil, nil)
 			},
@@ -4385,7 +4384,7 @@ func TestAskUser_LiveStateAfterExhaustedNoToolCarrierMatchesRestore(t *testing.T
 	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
 	steps := []func(req llm.Request) llm.Response{
-		func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+		func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 	}
 	for range maxBareTextRetries + 1 {
 		steps = append(steps, func(req llm.Request) llm.Response { return llm.Response{Message: llm.Assistant("bare text")} })
@@ -4432,8 +4431,8 @@ func TestAskUser_LiveStateAfterToolRoundBudgetCarrierMatchesRestore(t *testing.T
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(loop) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(loop) },
 		},
 	})
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{
@@ -4491,8 +4490,8 @@ func TestAskUser_LiveStateAfterNotificationYieldMatchesRestore(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(taskList) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(taskList) },
 		},
 	})
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})
@@ -4551,10 +4550,10 @@ func TestAskUser_LiveStateAfterCommunicateWithPendingNotificationMatchesRestore(
 	adapter := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 			func(req llm.Request) llm.Response {
 				sess.enqueueJobNotification(jobNotification{JobID: "pending-notification", JobType: "shell", Status: "completed"})
-				return communicateResponse(true, "note recorded")
+				return agenttest.CommunicateResponse(true, "note recorded")
 			},
 		},
 	}
@@ -4625,8 +4624,8 @@ func TestAskUser_LiveStateAfterObserverYieldMatchesRestore(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask) },
-			func(req llm.Request) llm.Response { return toolCallResponse(loop) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(loop) },
 		},
 	})
 	sess, err := NewSession(c, withTestSessionNamer(c, NewOpenAIProfile("gpt-5.2")), execenv.NewLocalExecutionEnvironment(dir), SessionConfig{StateDir: dir})

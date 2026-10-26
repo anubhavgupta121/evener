@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
 	"primeradiant.com/evener/identifier"
@@ -39,7 +40,7 @@ func TestSynthesizedCallID_IsUniqueAcrossTurnsAndSurvivesRecording(t *testing.T)
 	// so the two turns' steps are not written as duplicated option expressions.
 	steps := make([]func(llm.Request) llm.Response, 0, 4)
 	for range 2 {
-		steps = append(steps, fixedStep(idlessReadCall()), fixedStep(communicateResponse(true, "done")))
+		steps = append(steps, fixedStep(idlessReadCall()), fixedStep(agenttest.CommunicateResponse(true, "done")))
 	}
 	s := newSession(t,
 		withSteps(steps...),

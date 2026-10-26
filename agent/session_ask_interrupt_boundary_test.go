@@ -39,7 +39,7 @@ func TestAskUser_RejectedInterruptUsesDurableBoundary(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return toolCallResponse(ask, cancelCall) },
+			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, cancelCall) },
 		},
 	})
 	sess := newSession(t, withClient(c), withDir(dir), withConfig(SessionConfig{StateDir: dir}))

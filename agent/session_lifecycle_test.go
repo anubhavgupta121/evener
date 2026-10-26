@@ -13,6 +13,7 @@ import (
 
 	"primeradiant.com/evener/agent/events"
 	"primeradiant.com/evener/agent/execenv"
+	"primeradiant.com/evener/agent/internal/agenttest"
 	"primeradiant.com/evener/agent/internal/tool"
 	"primeradiant.com/evener/agent/schema"
 	"primeradiant.com/evener/appwire"
@@ -27,8 +28,8 @@ func TestSession_FollowUp_ProcessesAfterCompletion(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("first") },
-			func(req llm.Request) llm.Response { return finalResponse("second") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("first") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("second") },
 		},
 	}
 	c.Register(f)
@@ -72,7 +73,7 @@ func TestSession_LoopDetection_EmitsEventAndInjectsSteering(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg() },
 			func(req llm.Request) llm.Response { return toolMsg() },
 			func(req llm.Request) llm.Response { return toolMsg() },
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -182,7 +183,7 @@ func TestSession_SessionEnd_EmittedExactlyOnce(t *testing.T) {
 	c := llm.NewClient()
 	f := &fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
 		func(req llm.Request) llm.Response {
-			return finalResponse("done")
+			return agenttest.FinalResponse("done")
 		},
 	}}
 	c.Register(f)
@@ -217,7 +218,7 @@ func TestSession_CloseForShutdownAfterCompletedTurnEmitsOneClosedBoundary(t *tes
 	t.Parallel()
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
-		func(req llm.Request) llm.Response { return finalResponse("done") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 	}})
 	sess, err := NewSession(c, NewOpenAIProfile("test-model"), execenv.NewLocalExecutionEnvironment(t.TempDir()), SessionConfig{})
 	if err != nil {
@@ -1099,7 +1100,7 @@ func TestSession_LoopDetection_WarningWording(t *testing.T) {
 			func(req llm.Request) llm.Response { return toolMsg() },
 			func(req llm.Request) llm.Response { return toolMsg() },
 			func(req llm.Request) llm.Response { return toolMsg() },
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1177,7 +1178,7 @@ func TestSession_Meta_PopulatesOriginalPrompt(t *testing.T) {
 	c.Register(&fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	})
 
@@ -1224,7 +1225,7 @@ func TestSession_ProcessInput_WithImage_BuildsMultiPartUserMessage(t *testing.T)
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1296,7 +1297,7 @@ func TestSession_ProcessInput_ImageOnly_OmitsEmptyTextPart(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("ok") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("ok") },
 		},
 	}
 	c.Register(f)
@@ -1349,8 +1350,8 @@ func TestSession_Enqueue_DrainsAfterTurnCompletes(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("first reply") },
-			func(req llm.Request) llm.Response { return finalResponse("second reply") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("first reply") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("second reply") },
 		},
 	}
 	c.Register(f)
@@ -1460,7 +1461,7 @@ func TestSession_DrainAsSteer_JoinsWithDoubleNewline(t *testing.T) {
 	f := &fakeAdapter{
 		name: "openai",
 		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return finalResponse("done") },
+			func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 		},
 	}
 	c.Register(f)
@@ -1685,7 +1686,7 @@ func TestSession_DoubleCloseCannotRecoverATerminalBoundary(t *testing.T) {
 			t.Parallel()
 			c := llm.NewClient()
 			c.Register(&fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
-				func(req llm.Request) llm.Response { return finalResponse("done") },
+				func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 			}})
 			sess, err := NewSession(c, NewOpenAIProfile("test-model"), execenv.NewLocalExecutionEnvironment(t.TempDir()), SessionConfig{})
 			if err != nil {
@@ -1737,7 +1738,7 @@ func TestSession_TerminalBoundaryReachesNoJobWatch(t *testing.T) {
 	t.Parallel()
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{name: "openai", steps: []func(llm.Request) llm.Response{
-		func(req llm.Request) llm.Response { return finalResponse("done") },
+		func(req llm.Request) llm.Response { return agenttest.FinalResponse("done") },
 	}})
 	sess, err := NewSession(c, NewOpenAIProfile("test-model"), execenv.NewLocalExecutionEnvironment(t.TempDir()), SessionConfig{})
 	if err != nil {

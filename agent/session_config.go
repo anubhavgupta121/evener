@@ -384,9 +384,6 @@ type testConfig struct {
 	// subagentPrepareFault injects deterministic external-boundary failures into
 	// prepareSubagentRun. Nil preserves every production boundary.
 	subagentPrepareFault func(point string) error
-	// subagentAfterPrepare runs after spawnAgent has prepared a child but before
-	// it tracks the child, allowing tests to reproduce the close race.
-	subagentAfterPrepare func(*Session)
 	// delegateInitialInputAppend observes the real stable-create boundary
 	// immediately before the child transcript receives its initial user input.
 	delegateInitialInputAppend func(*Session)
@@ -441,10 +438,6 @@ type testConfig struct {
 	// filesystem reads for this session. Nil preserves the production paths.
 	delegateRestoreStat     func(string) (os.FileInfo, error)
 	delegateRestoreReadFile func(string) ([]byte, error)
-	// subagentReserveSlot replaces only the retained-terminal reservation boundary.
-	subagentReserveSlot func(*Session) ([]*subagent, error)
-	// subagentReserveTreeSlot replaces only the tree-capacity reservation boundary.
-	subagentReserveTreeSlot func(*Session) (*treeReservation, bool)
 	// subagentStopGated overrides child stop-gating when handled is true.
 	subagentStopGated func(*Session, string) (stopped, handled bool)
 	// subagentRunIteration observes each production subagent input iteration.
