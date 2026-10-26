@@ -1250,33 +1250,23 @@ function scheduleEntryOpeningRecovery(ref: string): void {
         const epoch = readyEpoch;
         if (entryTranscriptRoute(ref) !== route) return;
         if ((refCounts.get(ref) ?? 0) <= 0) return;
-        await refreshTrackedThread(client, epoch, ref, false, false, undefined, undefined, "foreground");
+        // The chain's own registration spans this read and the re-open after
+        // it; the tracked read joins under it rather than displacing it, so
+        // a consumer that starts waiting mid-read still captures a promise
+        // covering the entire recovery.
+        await refreshTrackedThread(client, epoch, ref, false, false, undefined, undefined, "foreground", false);
       } catch {
         // A failed source read keeps the ordinary owner-scoped retry.
       }
       if (entryTranscriptRoute(ref) !== route) return;
       if ((refCounts.get(ref) ?? 0) <= 0) return;
-      // The tracked read registers and then settles its own completion
-      // promise, which would leave a consumer that begins waiting during the
-      // re-open — settleEntryTranscriptForTests, loadOlderTurns — holding
-      // nothing instead of this chain's convergence: register the re-open
-      // itself — the chain's remaining convergence work — before it runs,
-      // and clear that registration once it finishes.
-      const reOpen = (async () => {
-        // Mirror the raced recovery's full sequence: the read that replaced
-        // the view is followed by the local re-open that promotes its
-        // restored bodies into the display. A source response that already
-        // healed the display needs no further cache read to converge.
-        if (!holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) {
-          await openEntryTranscript(ref, true);
-        }
-      })().then(
-        () => undefined,
-        () => undefined,
-      );
-      trackedHydrationCompletions.set(ref, reOpen);
-      await reOpen;
-      if (trackedHydrationCompletions.get(ref) === reOpen) trackedHydrationCompletions.delete(ref);
+      // Mirror the raced recovery's full sequence: the read that replaced
+      // the view is followed by the local re-open that promotes its
+      // restored bodies into the display. A source response that already
+      // healed the display needs no further cache read to converge.
+      if (!holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) {
+        await openEntryTranscript(ref, true);
+      }
       return;
     }
   })().then(
@@ -6709,6 +6699,7 @@ async function refreshTrackedThread(
   beforePublish?: () => void,
   reopenOnlyClientMutationId?: string,
   intent: HydrationIntent = "foreground",
+  registerCompletion = true,
 ): Promise<number | undefined> {
   // The scheduler can join an existing repository end read. Apply the same
   // owner fence as refreshTrackedThreadNow before joining, so a released ref
@@ -6724,6 +6715,8 @@ async function refreshTrackedThread(
       beforePublish,
       reopenOnlyClientMutationId,
       intent,
+      undefined,
+      registerCompletion,
     );
   let attempt: number | undefined;
   const residency = transcriptResidency();
@@ -6742,6 +6735,7 @@ async function refreshTrackedThread(
         reopenOnlyClientMutationId,
         intent,
         signal,
+        registerCompletion,
       );
     },
     // Recovery needs a fresh read, even when its pending publication claim was
@@ -6761,6 +6755,7 @@ async function refreshTrackedThreadNow(
   reopenOnlyClientMutationId?: string,
   intent: HydrationIntent = "foreground",
   signal?: AbortSignal,
+  registerCompletion = true,
 ): Promise<number | undefined> {
   // Returns the tracked-hydration attempt this refresh began, or undefined
   // when it never began one (an unowned ref, or an in-flight non-targeted
@@ -6803,14 +6798,22 @@ async function refreshTrackedThreadNow(
     if (isDiscardedReadResult(pending, result.model)) return pending.baseModel ?? null;
     return publishAndReconcileThreadHydration(ref, pending, result, reopenOnlyClientMutationId, intent);
   });
-  const completion = hydration.then(
-    () => undefined,
-    () => undefined,
-  );
-  trackedHydrationCompletions.set(ref, completion);
-  void completion.then(() => {
-    if (trackedHydrationCompletions.get(ref) === completion) trackedHydrationCompletions.delete(ref);
-  });
+  // A tracked read normally publishes its own settlement in
+  // trackedHydrationCompletions so waiting consumers await its convergence.
+  // A caller that already holds a wider registration for this ref — the
+  // opening-recovery chain registers its whole span — must keep that wider
+  // promise as the one consumers capture mid-read, so this read joins under
+  // it instead of displacing it.
+  if (registerCompletion) {
+    const completion = hydration.then(
+      () => undefined,
+      () => undefined,
+    );
+    trackedHydrationCompletions.set(ref, completion);
+    void completion.then(() => {
+      if (trackedHydrationCompletions.get(ref) === completion) trackedHydrationCompletions.delete(ref);
+    });
+  }
   const hasPublishedModel = threadsStore.getState().threads.has(ref);
   // A failed targeted predecessor may already have removed `previous`.
   // Keep the newest targeted read adoptable by the still-active initial

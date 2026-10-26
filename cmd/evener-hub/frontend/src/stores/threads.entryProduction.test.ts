@@ -2469,6 +2469,13 @@ it("a foreground opening whose cache reads answer slowly but successfully still 
   }
 });
 
+// Drain the microtask queue a bounded number of steps: enough for a settle
+// helper that found nothing to await to finish returning, while no timer and
+// no held read can advance — an observation that costs no wall-clock time.
+async function drainSettleSteps(): Promise<void> {
+  for (let step = 0; step < 30; step += 1) await Promise.resolve();
+}
+
 it("a foreground opening whose storage read fails transiently still converges the recorded display", async () => {
   const storage = cache();
   const realGetLatestWindow = storage.getLatestWindow.bind(storage);
@@ -2656,7 +2663,6 @@ it("a settle begun while a refused recovery's re-open is still running awaits it
   withheldWindowReads = 2;
   failingWindowReads = 1;
   holdReopenRead = true;
-  setSessionCacheStalledOpenForTests(250);
   try {
     await threadsStore.getState().ensureThread(ref);
     await reopenEntered.promise;
@@ -2665,19 +2671,114 @@ it("a settle begun while a refused recovery's re-open is still running awaits it
     void settle.then(() => {
       settledWhileReopenHeld = true;
     });
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 150);
-    });
-    // The hand-off's tracked read settles its own completion before the
-    // re-open begins; without the chain's restored registration this settle
-    // would find nothing to await and return with the display unconverged.
+    // The re-open's storage read is held, so no timer or resolution can
+    // complete the recovery while this drains: a settle that found nothing to
+    // await returns within these steps and a settle holding the recovery's
+    // registration cannot — with no wall-clock race against the re-open's own
+    // recovery window.
     expect(settledWhileReopenHeld).toBe(false);
     reopenReleased.resolve();
     await settle;
     expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
     expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
   } finally {
-    setSessionCacheStalledOpenForTests(5000);
+    threadsStore.getState().releaseThread(ref);
+    await lease.release();
+  }
+});
+
+it("a settle begun while a refused recovery's source read is held spans the re-open behind it", async () => {
+  const storage = cache();
+  const realGetLatestWindow = storage.getLatestWindow.bind(storage);
+  setProductionEntryCacheForTests(storage);
+  const ref = "local:a";
+  const read = response(
+    ref,
+    Array.from({ length: 225 }, (_, index) => turn(`row-${index + 1}`, index + 1)),
+  );
+  read.snapshot = { incarnation: "inc-a", length: 225 };
+  const client = connect(read);
+  const lease = acquireBackgroundThread(ref);
+  await lease.ready;
+  await settleEntryTranscriptForTests(ref);
+  const key = entryHistoryKey({ ...identity, clientId: location.origin });
+  expect(await storage.getLatest(key, 300)).toHaveLength(225);
+  const bodies = () =>
+    threadsStore
+      .getState()
+      .threads.get(ref)
+      ?.turns.flatMap((turn) => turn.items)
+      .map((item) => item.text)
+      .filter(Boolean);
+  expect(bodies()).toEqual([]);
+
+  // Two withheld reads arm the chain and the third rejects (the transient-
+  // error refusal), so the chain hands to the source. The hand-off's wire
+  // read — the second thread/read the pane issues after its acquisition — is
+  // held, and the re-open's storage read behind it is held too: a settle
+  // begun while the source read is in flight must span the re-open, not
+  // resume the moment the wire read settles its own shorter completion.
+  let withheldWindowReads = 0;
+  let failingWindowReads = 0;
+  let holdReopenRead = false;
+  const reopenEntered = deferred<void>();
+  const reopenReleased = deferred<void>();
+  (storage as unknown as { getLatestWindow: unknown }).getLatestWindow = (...args: unknown[]) => {
+    if (withheldWindowReads > 0) {
+      withheldWindowReads -= 1;
+      return new Promise(() => {}) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (failingWindowReads > 0) {
+      failingWindowReads -= 1;
+      return Promise.reject(new Error("storage transiently failed")) as ReturnType<typeof realGetLatestWindow>;
+    }
+    if (holdReopenRead) {
+      holdReopenRead = false;
+      reopenEntered.resolve();
+      return reopenReleased.promise.then(() =>
+        realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)),
+      ) as ReturnType<typeof realGetLatestWindow>;
+    }
+    return realGetLatestWindow(...(args as Parameters<typeof realGetLatestWindow>)) as ReturnType<
+      typeof realGetLatestWindow
+    >;
+  };
+  const wireReadEntered = deferred<void>();
+  const wireReadReleased = deferred<void>();
+  let wireReads = 0;
+  client.on("thread/read", () => {
+    wireReads += 1;
+    if (wireReads < 2) return read;
+    wireReadEntered.resolve();
+    return wireReadReleased.promise.then(() => read);
+  });
+  withheldWindowReads = 2;
+  failingWindowReads = 1;
+  holdReopenRead = true;
+  try {
+    await threadsStore.getState().ensureThread(ref);
+    await wireReadEntered.promise;
+    const settle = settleEntryTranscriptForTests(ref);
+    let settled = false;
+    void settle.then(() => {
+      settled = true;
+    });
+    await drainSettleSteps();
+    // Held while the source read itself is held.
+    expect(settled).toBe(false);
+    wireReadReleased.resolve();
+    await drainSettleSteps();
+    // The wire read settling its own completion must not resume this settle:
+    // the re-open behind it is still pending. Pre-fix, the settle captured
+    // the wire read's shorter completion and returned here with the display
+    // unconverged.
+    expect(settled).toBe(false);
+    await reopenEntered.promise;
+    reopenReleased.resolve();
+    await settle;
+    expect(bodies()).toEqual(Array.from({ length: 200 }, (_, index) => `row-${index + 26}`));
+    expect(threadsStore.getState().threads.get(ref)?.olderCursor).toBeDefined();
+  } finally {
     threadsStore.getState().releaseThread(ref);
     await lease.release();
   }
