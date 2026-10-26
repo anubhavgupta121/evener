@@ -11,9 +11,9 @@ import (
 func fillEveryField(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Struct:
-		for i := range v.NumField() {
-			if v.Field(i).CanSet() {
-				fillEveryField(v.Field(i))
+		for _, field := range v.Fields() {
+			if field.CanSet() {
+				fillEveryField(field)
 			}
 		}
 	case reflect.Pointer:
@@ -50,8 +50,8 @@ func sharedReferences(path string, a, b reflect.Value) []string {
 	var shared []string
 	switch a.Kind() {
 	case reflect.Struct:
-		for i := range a.NumField() {
-			shared = append(shared, sharedReferences(path+"."+a.Type().Field(i).Name, a.Field(i), b.Field(i))...)
+		for field := range a.Type().Fields() {
+			shared = append(shared, sharedReferences(path+"."+field.Name, a.FieldByIndex(field.Index), b.FieldByIndex(field.Index))...)
 		}
 	case reflect.Pointer:
 		if !a.IsNil() && a.Pointer() == b.Pointer() {

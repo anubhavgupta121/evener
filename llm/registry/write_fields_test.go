@@ -43,13 +43,12 @@ func TestMarshalConfigWritesEveryProviderAndModelField(t *testing.T) {
 
 	got := doc.Providers["p"]
 	wantProvider, gotProvider := reflect.ValueOf(provider), reflect.ValueOf(got)
-	for i := range gotProvider.NumField() {
-		field := gotProvider.Type().Field(i)
+	for field := range gotProvider.Type().Fields() {
 		if field.Anonymous || field.Name == "Models" { // compared below
 			continue
 		}
-		if want := wantProvider.FieldByName(field.Name); !reflect.DeepEqual(want.Interface(), gotProvider.Field(i).Interface()) {
-			t.Errorf("Provider.%s written as %#v, want %#v", field.Name, gotProvider.Field(i).Interface(), want.Interface())
+		if want := wantProvider.FieldByName(field.Name); !reflect.DeepEqual(want.Interface(), gotProvider.FieldByIndex(field.Index).Interface()) {
+			t.Errorf("Provider.%s written as %#v, want %#v", field.Name, gotProvider.FieldByIndex(field.Index).Interface(), want.Interface())
 		}
 	}
 	if gotTransport := got.transport(); !reflect.DeepEqual(gotTransport, provider.Transport) {
