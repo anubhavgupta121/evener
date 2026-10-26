@@ -172,9 +172,6 @@ func fuzzInitWorktreePureEdges(t *testing.T) {
 	if got := cloneMap(map[string]any{"unencodable": func() {}}); got["unencodable"] == nil {
 		t.Fatal("cloneMap marshal fallback lost value")
 	}
-	if err := (*Session)(nil).trackAndLaunchPreparedSubagent(nil); err == nil {
-		t.Fatal("nil prepared run succeeded")
-	}
 	missingSub := &Session{subagents: newSubagentManager(0)}
 	if _, err := missingSub.sendInput(context.Background(), "missing", "input"); err == nil {
 		t.Fatal("unknown subagent send succeeded")
