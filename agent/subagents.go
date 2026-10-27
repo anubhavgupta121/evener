@@ -1152,12 +1152,7 @@ func (s *Session) prepareSubagentRunFromSelection(
 	// session and any unadopted fresh environment before returning.
 	// On success, GC-evicted records are closed here, OUTSIDE the manager mutex.
 	if !preparedEnv.stableController {
-		var evicted []*subagent
-		if reserve := s.cfg.testOnly.subagentReserveSlot; reserve != nil {
-			evicted, err = reserve(s)
-		} else {
-			evicted, err = s.subagents.reserveSlot()
-		}
+		evicted, err := s.subagents.reserveSlot()
 		if err != nil {
 			disposeUnadopted()
 			return nil, err
@@ -1171,16 +1166,11 @@ func (s *Session) prepareSubagentRunFromSelection(
 	// At capacity the spawn does not launch: dispose the freshly built child and
 	// any unadopted environment (the same cleanup as the retained-cap path), then
 	// surface the tree_at_capacity error to the tool call. Ownership of the reservation
-	// transfers to the delegate runningJob at attach; an unattached prepared run
-	// releases it (releasePreparedTreeSlot).
+	// transfers to the delegate runningJob at attach.
 	var treeSlot *treeReservation
 	var ok bool
 	if !preparedEnv.stableController {
-		if reserve := s.cfg.testOnly.subagentReserveTreeSlot; reserve != nil {
-			treeSlot, ok = reserve(s)
-		} else {
-			treeSlot, ok = s.reserveTreeSlot(slotKindJob)
-		}
+		treeSlot, ok = s.reserveTreeSlot(slotKindJob)
 		if !ok {
 			disposeUnadopted()
 			return nil, s.treeCapacityErrorFor()
@@ -1274,24 +1264,6 @@ func (s *Session) prepareSubagentRunFromSelection(
 		}
 	}
 	return prepared, nil
-}
-
-func (s *Session) trackAndLaunchPreparedSubagent(prepared *preparedSubagentRun) error {
-	if prepared == nil || prepared.sub == nil {
-		return errors.New("subagent run is not prepared")
-	}
-	s.mu.Lock()
-	if s.closingOrClosedLocked() {
-		s.mu.Unlock()
-		prepared.runCancel()
-		return errors.New("session is closed")
-	}
-	s.subagents.track(prepared.sub)
-	s.sendersWG.Add(1)
-	s.mu.Unlock()
-
-	s.launchSubagentRun(prepared.runCtx, prepared.sub, prepared.runCancel, prepared.input, s.activeCausalProvenance())
-	return nil
 }
 
 func (s *Session) noteParentJobActivity(phase string) {
@@ -1649,28 +1621,6 @@ func (s *Session) launchSubagentRun(runCtx context.Context, sub *subagent, runCa
 		defer runCancel()
 		sub.run(runCtx, input, inputProvenance)
 	}()
-}
-
-func (s *Session) cancelAgent(agentID string) (any, error) {
-	sub := s.getSub(agentID)
-	if sub == nil {
-		return "", fmt.Errorf("unknown agent_id: %s", agentID)
-	}
-	done, err := sub.requestRunCancel(false)
-	if err != nil {
-		return "", fmt.Errorf("agent %s is %w", agentID, err)
-	}
-	select {
-	case <-done:
-	case <-s.sclock().After(5 * time.Second):
-		return "", fmt.Errorf("timed out cancelling subagent %s", agentID)
-	}
-	sub.mu.Lock()
-	result := sub.resultSnapshotLocked()
-	sub.resultConsumed = true
-	sub.mu.Unlock()
-	b, _ := json.Marshal(result)
-	return string(b), nil
 }
 
 func (s *Session) getSub(agentID string) *subagent {

@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"primeradiant.com/evener/agent/activitybound"
+
 	"primeradiant.com/evener/agent/internal/delegatestore"
 	"primeradiant.com/evener/agent/internal/jobstore"
 	"primeradiant.com/evener/agent/schema"
@@ -71,7 +73,7 @@ func TestTruncateActivityText_DoesNotMaterializeTheInput(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	got := truncateActivityText(input, activityMaxLabelRunes)
+	got := activitybound.Truncate(input, activityMaxLabelRunes)
 	runtime.ReadMemStats(&after)
 	if n := len([]rune(got)); n != activityMaxLabelRunes {
 		t.Fatalf("label = %d runes, want %d", n, activityMaxLabelRunes)
@@ -344,12 +346,12 @@ func TestTruncateActivityText_IsRuneSafe(t *testing.T) {
 	t.Parallel()
 	// 150 runes, 300 bytes: over the 200-byte fast path, under the 200-rune cap.
 	withinRunes := strings.Repeat("é", 150)
-	if got := truncateActivityText(withinRunes, activityMaxLabelRunes); got != withinRunes {
+	if got := activitybound.Truncate(withinRunes, activityMaxLabelRunes); got != withinRunes {
 		t.Fatalf("150-rune string was altered to %q", got)
 	}
 
 	long := strings.Repeat("é", activityMaxLabelRunes+50)
-	got := truncateActivityText(long, activityMaxLabelRunes)
+	got := activitybound.Truncate(long, activityMaxLabelRunes)
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncation split a multi-byte rune: %q", got)
 	}

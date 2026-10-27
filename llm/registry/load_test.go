@@ -1056,3 +1056,54 @@ func TestLoad_WithInstances(t *testing.T) {
 		t.Fatalf("tiny: %+v", tiny)
 	}
 }
+
+// With neither XDG_STATE_HOME nor HOME the registry has no state root: it loads
+// from the embedded catalog and never reads a cache or OAuth record from a
+// path relative to the working directory.
+func TestLoadWithoutStateRootOrHomeHasNoStateRoot(t *testing.T) {
+	data, err := os.ReadFile("testdata/models.dev.sample.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	for _, dir := range []string{"catalog", filepath.Join(".local", "state", "evener", "catalog")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "models.dev.json"), []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "models.dev.meta.json"), []byte(`{"fetched_at":"2999-01-01T00:00:00Z"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := Load(WithSnapshot(data), WithEnv(mapEnv(nil)), WithNoUserLayer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StateRoot() != "" {
+		t.Fatalf("StateRoot = %q, want empty", r.StateRoot())
+	}
+	if tag, _ := r.Catalog(); tag != LayerSnapshot {
+		t.Fatalf("catalog layer = %q, want the snapshot", tag)
+	}
+	if got := r.StrayOAuthRecords(); len(got) != 0 {
+		t.Fatalf("StrayOAuthRecords = %v, want none", got)
+	}
+}
+
+func TestLoadDefaultsStateRootFromInjectedEnv(t *testing.T) {
+	data, err := os.ReadFile("testdata/models.dev.sample.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	r, err := Load(WithSnapshot(data), WithEnv(mapEnv(map[string]string{"HOME": home})), WithNoUserLayer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := r.StateRoot(), filepath.Join(home, ".local", "state", "evener"); got != want {
+		t.Fatalf("StateRoot = %q, want %q", got, want)
+	}
+}

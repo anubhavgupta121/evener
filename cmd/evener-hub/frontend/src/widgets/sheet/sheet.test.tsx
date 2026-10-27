@@ -229,7 +229,7 @@ test("all side variants' slide-in animations honor prefers-reduced-motion, using
 // Archived sessions row.
 test("full-height edge sheets follow the visible viewport, keeping a vh fallback", () => {
   const variants = ["left", "right"];
-  const css = readModuleCss(import.meta.url, "sheet.module.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "sheet.module.css");
 
   const baseIndexes: number[] = [];
   for (const variant of variants) {

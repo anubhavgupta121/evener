@@ -35,6 +35,7 @@ import { hostsStore } from "../../stores/hosts";
 import { ownClientId } from "../../stores/mutationClientIdentity";
 import { navigationStore, resetNavigationStoreForTests } from "../../stores/navigation/store";
 import { resetThreadsStoreForTests } from "../../stores/threads";
+import { readModuleCss } from "../../styles/cssBlock";
 import { enterText } from "../../textEntryTestUtils";
 import { Toast } from "../../widgets";
 import promptCardStyles from "../../widgets/promptcard/promptcard.module.css";
@@ -2918,8 +2919,8 @@ test("the prompt placeholder does not repeat the heading", async () => {
 // grep passes even when the rules are unused or overridden.
 test("mobile-only spawn hierarchy and row scale stay gated from desktop", () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const spawnCss = readFileSync(join(here, "spawn.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rowsCss = readFileSync(join(here, "MobileSettingRows.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const spawnCss = readModuleCss(import.meta.url, "spawn.module.css");
+  const rowsCss = readModuleCss(import.meta.url, "MobileSettingRows.module.css");
   const paneCss = readFileSync(join(here, "../../widgets/panescaffold/panescaffold.module.css"), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
     "",
@@ -5629,8 +5630,7 @@ test("a disabled effort control renders its disabled state on the visible wrappe
 // the wrapper's `not-allowed` on a disabled control. CSS gate: jsdom
 // evaluates no cascade, so the computed cursor is asserted on the source.
 test("the effort overlay select inherits the wrapper cursor", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const spawnCss = readFileSync(join(here, "spawn.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const spawnCss = readModuleCss(import.meta.url, "spawn.module.css");
 
   expect(spawnCss).toMatch(/\.effortSelect\s*\{[^}]*cursor:\s*inherit/);
   expect(spawnCss).toContain(".effortTrigger:not([data-disabled");
