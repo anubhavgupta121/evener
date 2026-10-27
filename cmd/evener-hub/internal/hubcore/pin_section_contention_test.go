@@ -73,13 +73,14 @@ func realBusySnapshotError(t *testing.T) error {
 	return err
 }
 
-// realNonLockError is a real driver error that retrying cannot fix.
+// realNonLockError is a real driver error that retrying cannot fix. The table
+// name contains "busy" so text matching on the message would misclassify it.
 func realNonLockError(t *testing.T) error {
 	t.Helper()
 	holder, _ := contentionConns(t)
-	_, err := holder.ExecContext(context.Background(), `INSERT INTO no_such_table VALUES (1)`)
+	_, err := holder.ExecContext(context.Background(), `INSERT INTO busy_table VALUES (1)`)
 	if err == nil {
-		t.Fatal("insert into a missing table succeeded")
+		t.Fatal("insert into a missing table named busy succeeded")
 	}
 	return err
 }
