@@ -355,14 +355,16 @@ contract:
     hub, so it uses the host's real provider configuration, credentials and state
     root, and the session record survives the run. Only its working directory is
     run-unique.
-- A test hub has no `BuildSource`, so the version-match ladder refuses an on-disk
-  host build whose version differs from the controller's and restarts a host hub
-  reporting another version. Where a check expects a host build already
-  installed, build it the way the harness builds the controller (a plain `go
-  build` of `./cmd/evener/`, reporting `dev`) or stamp both with the same
-  `-ldflags`. The deploy checks need a **clean** checkout (the build identity is
-  stamped from `HEAD`; a dirty tree skips) and the embedded web UI built (`make
-  build-web`).
+- The attach and session checks run a test hub with no `BuildSource`, so its
+  version-match ladder cannot deploy: it refuses an on-disk host build whose
+  version differs from the controller's and restarts a host hub reporting another
+  version. For those, install a matching host build, built the way the harness
+  builds the controller (a plain `go build` of `./cmd/evener/`, reporting `dev`)
+  or stamped with the same `-ldflags`. The deploy checks instead cross-compile the
+  tree under test; they need a **clean** checkout (the build identity is stamped
+  from `HEAD`; a dirty tree skips) and the embedded web UI built (`make
+  build-web`). Ordinary attachment of a protocol-compatible host does not depend
+  on build labels (`TestHostCompatibleConnectContainerE2E` pins that).
 
 | Opt-in (besides `EVENER_SSH_E2E=1`) | Test | What it proves |
 | --- | --- | --- |
