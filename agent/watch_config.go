@@ -655,7 +655,6 @@ func newWatchConfig(a watchArgs, createdAt time.Time, slot string) (*watchConfig
 		watchID = jobstore.NewWatchID()
 	}
 	cfg := &watchConfig{
-		id:                 watchID,
 		watchID:            watchID,
 		configHash:         normalizedWatchConfigHash(a),
 		sourcePublic:       watchPublicSource(a.Source, a.Target),
