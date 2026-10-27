@@ -149,7 +149,7 @@ func TestTaskAggregateMalformedPersistedStoreMatchesLiveAndColdUnknown(t *testin
 	if err := os.WriteFile(tasksPath, []byte("{malformed task JSON"), 0o644); err != nil {
 		t.Fatalf("write malformed task store: %v", err)
 	}
-	sess, err = agent.RestoreSessionFromMeta(client, profile, environment, meta, stateDir)
+	sess, err = agent.RestoreSessionFromMetaWithConfig(client, profile, environment, meta, agent.RestoreSessionConfig{StateDir: stateDir})
 	if err != nil {
 		t.Fatalf("restore session with malformed task store: %v", err)
 	}

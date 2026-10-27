@@ -756,7 +756,7 @@ func (s *Session) releaseRuntimeOnce(ctx context.Context, options closeOptions, 
 		// Close(). Both joins are therefore bounded by the shared close budget.
 		s.joinWithinCloseBudget(budgetCtx, &s.sendersWG, "detached event emitters")
 		s.releaseAPILogRoute()
-		// Close under eventsMu so a caller-owned emit() (Enqueue/DrainAsSteer or
+		// Close under eventsMu so a caller-owned emit() (the client-mutation queue handlers or
 		// the ProcessInput loop — goroutines the session cannot join) can never
 		// send on the closed channel. This replaces the old emit() recover().
 		s.eventsMu.Lock()
