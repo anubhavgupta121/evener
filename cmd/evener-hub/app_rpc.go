@@ -542,7 +542,7 @@ func resolvedOwnershipTarget(cfg hubcore.WebConfig, ref, threadID string) string
 		return ""
 	}
 	parsed, err := appwire.ParseRef(ref)
-	if err != nil || parsed.SourceID != "local" {
+	if err != nil || parsed.SourceID != appwire.LocalSourceID {
 		return ""
 	}
 	requestedID := strings.TrimSpace(threadID)
@@ -1020,7 +1020,7 @@ func newHubAppServerWithNavigationAndTrace(cfg hubcore.WebConfig, sources *appso
 		ServerName:   "evener-hub",
 		Version:      Version,
 		BuildVersion: buildinfo.Version(),
-		SourceID:     "local",
+		SourceID:     appwire.LocalSourceID,
 		// The hub's own machine: its system and architecture from the running
 		// binary, and its project roots from hub.toml's top-level `roots`, so a
 		// client showing the hub's own machine beside its SSH hosts has the
