@@ -223,7 +223,7 @@ export function removeTranscriptDisplayLocal(layout: TranscriptViewportClass): v
 
 /**
  * Convert the six pre-v1 global transcript keys once, before the new
- * layout-specific store loads. Existing keys are intentionally retained.
+ * layout-specific store loads, then removes them.
  */
 export function migrateLegacyTranscriptDisplay(): TranscriptDisplayConfigV1 | undefined {
   if (hasTranscriptDisplayLocal("desktop") || hasTranscriptDisplayLocal("mobile")) return undefined;
@@ -234,6 +234,11 @@ export function migrateLegacyTranscriptDisplay(): TranscriptDisplayConfigV1 | un
   if (config === undefined) return undefined;
   writeTranscriptDisplayConfig("desktop", config);
   writeTranscriptDisplayConfig("mobile", config);
+  // Consume the old keys once both layout keys are stored, so clearing the
+  // layout overrides later cannot make the next load migrate stale flags again.
+  if (hasTranscriptDisplayLocal("desktop") && hasTranscriptDisplayLocal("mobile")) {
+    for (const key of LEGACY_TRANSCRIPT_KEYS) removeRaw(key);
+  }
   return config;
 }
 

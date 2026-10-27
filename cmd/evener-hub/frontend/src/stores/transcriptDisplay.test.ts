@@ -698,7 +698,7 @@ test("preserves an explicit Tools-equivalent Custom through local and hub persis
   expect(transcriptDisplayStore.getState().hub.desktop?.config.content.kind).toBe("custom");
 });
 
-test("migration runs before local load and keeps old keys; later edits leave them untouched", () => {
+test("migration runs before local load and consumes the old keys; later edits never write them", () => {
   storage.setItem("evener.prefs.transcriptRoundTimings", "0");
   storage.setItem("evener.prefs.transcriptTokenCounts", "1");
   storage.setItem("evener.prefs.showCost", "1");
@@ -708,8 +708,7 @@ test("migration runs before local load and keeps old keys; later edits leave the
   expect(transcriptDisplayStore.getState().local.mobile).toEqual(transcriptDisplayStore.getState().local.desktop);
   expect(storage.getItem(desktopKey)).not.toBeNull();
   expect(storage.getItem(mobileKey)).not.toBeNull();
-  expect(storage.getItem("evener.prefs.transcriptRoundTimings")).toBe("0");
-  expect(storage.getItem("evener.prefs.transcriptTokenCounts")).toBe("1");
+  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyKeys.map(() => null));
 
   const desktopEdited = makeTranscriptDisplayConfig(
     { kind: "preset", level: "full" },
@@ -719,10 +718,9 @@ test("migration runs before local load and keeps old keys; later edits leave the
     { kind: "preset", level: "chat" },
     { tokenCounts: true, estimatedCost: true, hookExits: "all" },
   );
-  const legacyBefore = legacyKeys.map((key) => storage.getItem(key));
   transcriptDisplayStore.getState().setLocal("desktop", desktopEdited);
   transcriptDisplayStore.getState().setLocal("mobile", mobileEdited);
-  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyBefore);
+  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyKeys.map(() => null));
 });
 
 test("clearLocal removes the persisted key, broadcasts null, and follows the hub", () => {

@@ -673,7 +673,7 @@ describe("usePrefsStore hook", () => {
 });
 
 describe("transcript display legacy adapters", () => {
-  test("migrates legacy values to both layout keys and retains every old key", () => {
+  test("migrates legacy values to both layout keys and consumes the old keys", () => {
     localStorage.setItem(KEY("transcriptRoundTimings"), "0");
     localStorage.setItem(KEY("transcriptTokenCounts"), "1");
     localStorage.setItem(KEY("transcriptHookExitsNormal"), "1");
@@ -695,11 +695,11 @@ describe("transcript display legacy adapters", () => {
     expect(decodeLocalConfig(readTranscriptDisplayLocal("mobile"))).toEqual(migrated);
     expect(hasTranscriptDisplayLocal("desktop")).toBe(true);
     expect(hasTranscriptDisplayLocal("mobile")).toBe(true);
-    expect(readLegacyPreference("transcriptRoundTimings")).toBe("0");
-    expect(readLegacyPreference("transcriptTokenCounts")).toBe("1");
-    expect(readLegacyPreference("transcriptHookExitsNormal")).toBe("1");
-    expect(readLegacyPreference("transcriptPromptLoaded")).toBe("0");
-    expect(readLegacyPreference("showCost")).toBe("1");
+    expect(readLegacyPreference("transcriptRoundTimings")).toBeNull();
+    expect(readLegacyPreference("transcriptTokenCounts")).toBeNull();
+    expect(readLegacyPreference("transcriptHookExitsNormal")).toBeNull();
+    expect(readLegacyPreference("transcriptPromptLoaded")).toBeNull();
+    expect(readLegacyPreference("showCost")).toBeNull();
   });
 
   test("uses the specified defaults when a legacy key is present but malformed", () => {
@@ -727,13 +727,20 @@ describe("transcript display legacy adapters", () => {
     expect(hasTranscriptDisplayLocal("mobile")).toBe(false);
   });
 
-  test("maps all-on hooks to all and preserves the old values", () => {
+  test("maps all-on hooks to all", () => {
     localStorage.setItem(KEY("transcriptHookExitsAll"), "1");
     localStorage.setItem(KEY("transcriptHookExitsNormal"), "1");
     const migrated = migrateLegacyTranscriptDisplay();
     expect(migrated?.advanced.hookExits).toBe("all");
-    expect(readLegacyPreference("transcriptHookExitsAll")).toBe("1");
-    expect(readLegacyPreference("transcriptHookExitsNormal")).toBe("1");
+  });
+
+  test("clearing both layout overrides after migration does not resurrect the old flags", () => {
+    localStorage.setItem(KEY("showCost"), "1");
+    expect(migrateLegacyTranscriptDisplay()).toBeDefined();
+    removeTranscriptDisplayLocal("desktop");
+    removeTranscriptDisplayLocal("mobile");
+    expect(migrateLegacyTranscriptDisplay()).toBeUndefined();
+    expect(hasTranscriptDisplayLocal("desktop")).toBe(false);
   });
 
   test("removal targets only the layout key", () => {
