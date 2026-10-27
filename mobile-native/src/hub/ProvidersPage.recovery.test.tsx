@@ -38,7 +38,6 @@ vi.mock("expo-web-browser", () => ({
 	openBrowserAsync: async () => ({ type: "dismiss" }),
 	dismissBrowser: async () => ({ type: "dismiss" }),
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 vi.mock("../ConnectionProvider", () => ({ useConnection: () => harness.connection }));
 // Shown once, as a page that stays in front.
 vi.mock("@react-navigation/native", async () => {

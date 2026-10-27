@@ -55,7 +55,6 @@ vi.mock("expo-web-browser", () => ({
 	openBrowserAsync: async () => ({ type: "dismiss" }),
 	dismissBrowser: async () => ({ type: "dismiss" }),
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 vi.mock("../ConnectionProvider", () => ({ useConnection: () => harness.connection }));
 // The page's focus: each registered effect runs once, as on first showing,
 // and refocus() runs them again, as coming back to the page does.

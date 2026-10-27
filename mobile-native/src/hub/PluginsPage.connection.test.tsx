@@ -34,7 +34,6 @@ vi.mock("@react-navigation/native", async () => {
 	const { useEffect } = await import("react");
 	return { useFocusEffect: (effect: () => undefined | (() => void)) => useEffect(effect, [effect]) };
 });
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 
 const props = {
 	route: { params: { hubId: "hub-1" } },
