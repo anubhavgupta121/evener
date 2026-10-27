@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"primeradiant.com/evener/gittest"
 )
 
 // makeMarketplaceRepo builds a git repo containing a .claude-plugin/marketplace.json
@@ -2658,8 +2660,8 @@ func TestAddMarketplace_RefMatchingATrackedPathIsRejected(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "plugins", "marker"), []byte("tracked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "plugins")
-	gitIn(t, repo, "commit", "-qm", "track a path named like a ref")
+	gittest.Run(t, repo, "add", "plugins")
+	gittest.Run(t, repo, "commit", "-qm", "track a path named like a ref")
 
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "plugins"}); err == nil {
@@ -2687,9 +2689,9 @@ func TestAddMarketplace_RefMatchingATrackedPathAndAnOriginTagIsRejected(t *testi
 	if err := os.WriteFile(filepath.Join(repo, "plugins", "marker"), []byte("tracked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "plugins")
-	gitIn(t, repo, "commit", "-qm", "track a path named like a ref")
-	gitIn(t, repo, "tag", "origin/plugins")
+	gittest.Run(t, repo, "add", "plugins")
+	gittest.Run(t, repo, "commit", "-qm", "track a path named like a ref")
+	gittest.Run(t, repo, "tag", "origin/plugins")
 
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "plugins"}); err == nil {
@@ -2710,9 +2712,9 @@ func TestAddMarketplace_RefMatchingATrackedPathAndANamespaceTagIsRejected(t *tes
 	if err := os.WriteFile(filepath.Join(repo, "plugins", "marker"), []byte("tracked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "plugins")
-	gitIn(t, repo, "commit", "-qm", "track a path named like a ref")
-	gitIn(t, repo, "tag", "refs/heads/plugins")
+	gittest.Run(t, repo, "add", "plugins")
+	gittest.Run(t, repo, "commit", "-qm", "track a path named like a ref")
+	gittest.Run(t, repo, "tag", "refs/heads/plugins")
 
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "plugins"}); err == nil {
@@ -2759,19 +2761,19 @@ func TestAddMarketplace_BranchAndPathShareAName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "docs", "marker"), []byte("tracked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "docs")
-	gitIn(t, repo, "commit", "-qm", "track a path named like the branch")
-	gitIn(t, repo, "checkout", "--quiet", "-b", "docs")
+	gittest.Run(t, repo, "add", "docs")
+	gittest.Run(t, repo, "commit", "-qm", "track a path named like the branch")
+	gittest.Run(t, repo, "checkout", "--quiet", "-b", "docs")
 	advanceGitRepo(t, repo, "README.md", "on the docs branch")
-	docsTip := gitIn(t, repo, "rev-parse", "HEAD")
-	gitIn(t, repo, "checkout", "--quiet", "-")
+	docsTip := gittest.Run(t, repo, "rev-parse", "HEAD")
+	gittest.Run(t, repo, "checkout", "--quiet", "-")
 
 	m := NewManager(t.TempDir())
 	ref, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "docs"})
 	if err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != docsTip {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != docsTip {
 		t.Fatalf("HEAD = %s, want the docs branch tip %s", got, docsTip)
 	}
 }
@@ -2787,17 +2789,17 @@ func TestAddMarketplace_NonDefaultCloneRemoteName(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", "upstream")
 
 	repo := makeMarketplaceRepo(t, "remotename")
-	gitIn(t, repo, "checkout", "--quiet", "-b", "docs")
+	gittest.Run(t, repo, "checkout", "--quiet", "-b", "docs")
 	advanceGitRepo(t, repo, "README.md", "on the docs branch")
-	docsTip := gitIn(t, repo, "rev-parse", "HEAD")
-	gitIn(t, repo, "checkout", "--quiet", "-")
+	docsTip := gittest.Run(t, repo, "rev-parse", "HEAD")
+	gittest.Run(t, repo, "checkout", "--quiet", "-")
 
 	m := NewManager(t.TempDir())
 	ref, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "docs"})
 	if err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != docsTip {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != docsTip {
 		t.Fatalf("HEAD = %s, want the docs branch tip %s", got, docsTip)
 	}
 }
@@ -3070,9 +3072,9 @@ func TestRefreshMarketplace_APinnedCloneIsNotRecloned(t *testing.T) {
 		t.Skip("git not available")
 	}
 	tagRepo := makeMarketplaceRepo(t, "tagged")
-	gitIn(t, tagRepo, "tag", "v1")
+	gittest.Run(t, tagRepo, "tag", "v1")
 	shaRepo := makeMarketplaceRepo(t, "pinned")
-	head := gitIn(t, shaRepo, "rev-parse", "HEAD")
+	head := gittest.Run(t, shaRepo, "rev-parse", "HEAD")
 	m := NewManager(t.TempDir())
 	for _, src := range []Source{{Kind: SourceURL, URL: tagRepo, Ref: "v1"}, {Kind: SourceURL, URL: shaRepo, Sha: head}} {
 		if _, err := m.AddMarketplace(context.Background(), "", src); err != nil {
@@ -3182,7 +3184,7 @@ func TestRefreshMarketplace_ABrokenPinnedCloneIsRecloned(t *testing.T) {
 		t.Skip("git not available")
 	}
 	repo := makeMarketplaceRepo(t, "tagged")
-	gitIn(t, repo, "tag", "v1")
+	gittest.Run(t, repo, "tag", "v1")
 	m := NewManager(t.TempDir())
 	ref, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "v1"})
 	if err != nil {
@@ -3212,7 +3214,7 @@ func TestRefreshMarketplace_AnUnpinnedDetachedCloneIsRepaired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
-	gitIn(t, ref.InstallLocation, "checkout", "--quiet", "--detach")
+	gittest.Run(t, ref.InstallLocation, "checkout", "--quiet", "--detach")
 	advanceGitRepo(t, repo, "README.md", "new upstream content")
 	if err := m.RefreshMarketplace(context.Background(), "acme"); err != nil {
 		t.Fatalf("RefreshMarketplace: %v", err)
@@ -3253,13 +3255,13 @@ func TestRefreshMarketplace_APinnedCloneMovedOffItsPinIsPutBack(t *testing.T) {
 		t.Skip("git not available")
 	}
 	shaRepo := makeMarketplaceRepo(t, "pinned")
-	pin := gitIn(t, shaRepo, "rev-parse", "HEAD")
+	pin := gittest.Run(t, shaRepo, "rev-parse", "HEAD")
 	advanceGitRepo(t, shaRepo, "README.md", "after the pin")
 	tagRepo := makeMarketplaceRepo(t, "tagged")
-	gitIn(t, tagRepo, "tag", "v1")
-	tagged := gitIn(t, tagRepo, "rev-parse", "HEAD")
+	gittest.Run(t, tagRepo, "tag", "v1")
+	tagged := gittest.Run(t, tagRepo, "rev-parse", "HEAD")
 	advanceGitRepo(t, tagRepo, "README.md", "after the tag")
-	later := gitIn(t, tagRepo, "rev-parse", "HEAD")
+	later := gittest.Run(t, tagRepo, "rev-parse", "HEAD")
 	m := NewManager(t.TempDir())
 	shaRef, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: shaRepo, Sha: pin})
 	if err != nil {
@@ -3269,8 +3271,8 @@ func TestRefreshMarketplace_APinnedCloneMovedOffItsPinIsPutBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddMarketplace tagged: %v", err)
 	}
-	gitIn(t, shaRef.InstallLocation, "checkout", "--quiet", "-B", "main", "origin/HEAD")
-	gitIn(t, tagRef.InstallLocation, "checkout", "--quiet", "--detach", later)
+	gittest.Run(t, shaRef.InstallLocation, "checkout", "--quiet", "-B", "main", "origin/HEAD")
+	gittest.Run(t, tagRef.InstallLocation, "checkout", "--quiet", "--detach", later)
 	for name, want := range map[string]string{"pinned": pin, "tagged": tagged} {
 		if err := m.RefreshMarketplace(context.Background(), name); err != nil {
 			t.Fatalf("RefreshMarketplace %s: %v", name, err)
@@ -3279,7 +3281,7 @@ func TestRefreshMarketplace_APinnedCloneMovedOffItsPinIsPutBack(t *testing.T) {
 		if name == "tagged" {
 			loc = tagRef.InstallLocation
 		}
-		if got := gitIn(t, loc, "rev-parse", "HEAD"); got != want {
+		if got := gittest.Run(t, loc, "rev-parse", "HEAD"); got != want {
 			t.Fatalf("%s HEAD after refresh = %s, want its pin %s", name, got, want)
 		}
 	}
@@ -3292,7 +3294,7 @@ func TestRefreshMarketplace_AnUpperCaseShaPinIsIntact(t *testing.T) {
 		t.Skip("git not available")
 	}
 	repo := makeMarketplaceRepo(t, "pinned")
-	pin := strings.ToUpper(gitIn(t, repo, "rev-parse", "HEAD"))
+	pin := strings.ToUpper(gittest.Run(t, repo, "rev-parse", "HEAD"))
 	m := NewManager(t.TempDir())
 	if _, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Sha: pin}); err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
@@ -3314,18 +3316,18 @@ func TestRefreshMarketplace_ARefNamingATagAndABranchIsTheTagsPin(t *testing.T) {
 		t.Skip("git not available")
 	}
 	repo := makeMarketplaceRepo(t, "shadowed")
-	gitIn(t, repo, "tag", "rel")
-	tagged := gitIn(t, repo, "rev-parse", "HEAD")
-	gitIn(t, repo, "branch", "rel")
-	gitIn(t, repo, "checkout", "--quiet", "rel")
+	gittest.Run(t, repo, "tag", "rel")
+	tagged := gittest.Run(t, repo, "rev-parse", "HEAD")
+	gittest.Run(t, repo, "branch", "rel")
+	gittest.Run(t, repo, "checkout", "--quiet", "rel")
 	advanceGitRepo(t, repo, "README.md", "on the rel branch")
-	gitIn(t, repo, "checkout", "--quiet", "-")
+	gittest.Run(t, repo, "checkout", "--quiet", "-")
 	m := NewManager(t.TempDir())
 	ref, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "rel"})
 	if err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != tagged {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != tagged {
 		t.Fatalf("the clone checked out %s, want the tag's %s (the fixture assumes checkout prefers the tag)", got, tagged)
 	}
 	reports := recordStoreChanges(m)
@@ -3335,7 +3337,7 @@ func TestRefreshMarketplace_ARefNamingATagAndABranchIsTheTagsPin(t *testing.T) {
 	if len(*reports) != 0 {
 		t.Fatalf("refreshing an intact tag pin reported %v, want no change", *reports)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != tagged {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != tagged {
 		t.Fatalf("HEAD after refresh = %s, want the tag's %s", got, tagged)
 	}
 }
@@ -3346,27 +3348,27 @@ func TestRefreshMarketplace_ABranchRefFollowsItsTip(t *testing.T) {
 		t.Skip("git not available")
 	}
 	repo := makeMarketplaceRepo(t, "branching")
-	gitIn(t, repo, "checkout", "--quiet", "-b", "release")
+	gittest.Run(t, repo, "checkout", "--quiet", "-b", "release")
 	advanceGitRepo(t, repo, "README.md", "release one")
-	firstTip := gitIn(t, repo, "rev-parse", "HEAD")
-	gitIn(t, repo, "checkout", "--quiet", "-")
+	firstTip := gittest.Run(t, repo, "rev-parse", "HEAD")
+	gittest.Run(t, repo, "checkout", "--quiet", "-")
 	m := NewManager(t.TempDir())
 	ref, err := m.AddMarketplace(context.Background(), "", Source{Kind: SourceURL, URL: repo, Ref: "release"})
 	if err != nil {
 		t.Fatalf("AddMarketplace: %v", err)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != firstTip {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != firstTip {
 		t.Fatalf("the clone is at %s, want the release branch tip %s", got, firstTip)
 	}
 
-	gitIn(t, repo, "checkout", "--quiet", "release")
+	gittest.Run(t, repo, "checkout", "--quiet", "release")
 	advanceGitRepo(t, repo, "README.md", "release two")
-	nextTip := gitIn(t, repo, "rev-parse", "HEAD")
-	gitIn(t, repo, "checkout", "--quiet", "-")
+	nextTip := gittest.Run(t, repo, "rev-parse", "HEAD")
+	gittest.Run(t, repo, "checkout", "--quiet", "-")
 	if err := m.RefreshMarketplace(context.Background(), "branching"); err != nil {
 		t.Fatalf("RefreshMarketplace: %v", err)
 	}
-	if got := gitIn(t, ref.InstallLocation, "rev-parse", "HEAD"); got != nextTip {
+	if got := gittest.Run(t, ref.InstallLocation, "rev-parse", "HEAD"); got != nextTip {
 		t.Fatalf("HEAD after refresh = %s, want the moved release tip %s", got, nextTip)
 	}
 }
