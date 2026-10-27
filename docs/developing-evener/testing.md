@@ -916,9 +916,10 @@ A test named in a class is compared **strictly**: a breach is nonzero under
 `perTestCeilingSeconds` (currently 3s; 2s when a budget file names none) and is
 **warn-only in every mode**, `CHECK=1` included, so the unclassified backlog
 cannot red the gate; give the test a class to enforce it. A test may be named in
-exactly one class. A malformed class (a name matched by two classes, a spec that
-is not an object, a non-string or empty `tests` list) fails naming the class and
-drops it, leaving its members on the flat warn-only ceiling. A class
+exactly one class; a name matched by two classes is a config error that fails
+the run. A malformed class (a spec that is not an object, a non-string or empty
+`tests` list) fails naming the class and drops it, leaving its members on the
+flat warn-only ceiling. A class
 `ceilingSeconds` that is not a finite, float-convertible number fails in every
 mode, naming the class and the field; a huge but finite value is a legitimate
 ceiling that simply disables that class.
