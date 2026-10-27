@@ -884,7 +884,7 @@ A transient failure in the first explicit Connect happens before that supervisor
 starts, and both clients issue only one attach request. A user who has already
 asked to connect must click again.
 
-**Evidence.** [Manager.Ensure](../../cmd/evener-hub/internal/sshconn/manager.go#L537)
+**Evidence.** [Manager.Ensure](../../cmd/evener-hub/internal/sshconn/ensure.go#L25)
 starts supervision after attachment; [host attach](../../cmd/evener-hub/app_host_attach.go#L108)
 returns the initial failure. Browser
 [connect](../../cmd/evener-hub/frontend/src/stores/hosts.ts#L627) and native
@@ -1045,7 +1045,7 @@ Hub home's update footer.
 start a detached hub with output redirected to `/dev/null`. A startup failure
 then loses the original explanation before the health check reports failure.
 
-**Evidence.** [bootstrapHub](../../cmd/evener-hub/internal/sshconn/manager.go#L2182)
+**Evidence.** [bootstrapHub](../../cmd/evener-hub/internal/sshconn/ensure.go#L868)
 passes an empty log path to
 [relaunchCommand](../../cmd/evener-hub/internal/sshconn/version.go#L870).
 Manual host access or a separate supervisor/log setup is the remaining diagnosis
