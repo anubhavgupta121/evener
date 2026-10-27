@@ -72,15 +72,18 @@ func TestSystemdFallbackRequiresSelectedRootEvidence(t *testing.T) {
 				}
 				if remote == serviceLockVnodeTestCommand(currentRoot, pid) {
 					vnodeReads++
-					// The kernel lists a WRITE record only for an exclusive lock.
-					rows := 1
+					// The kernel lists the lock mode the holder took: WRITE for the
+					// exclusive lock, READ for the shared one, nothing once unlocked.
+					mode, rows := "WRITE", 1
 					switch name {
-					case "unlocked-read-only", "shared-lock":
+					case "unlocked-read-only":
 						rows = 0
+					case "shared-lock":
+						mode = "READ"
 					case "lock-query-ambiguous":
 						rows = 2
 					}
-					prefix := "awk() { [ \"$#\" -eq 6 ] && [ \"$6\" = /proc/locks ] || return 25; command awk \"$1\" \"$2\" \"$3\" \"$4\" \"$5\" " + shellquote.RemoteWord(lockTableFixture(t, filepath.Join(currentRoot, "hub.lock"), pid, rows)) + "; }; "
+					prefix := "awk() { [ \"$#\" -eq 6 ] && [ \"$6\" = /proc/locks ] || return 25; command awk \"$1\" \"$2\" \"$3\" \"$4\" \"$5\" " + shellquote.RemoteWord(lockTableFixture(t, filepath.Join(currentRoot, "hub.lock"), pid, mode, rows)) + "; }; "
 					if name == "lock-query-unavailable" {
 						prefix = "awk() { return 23; }; "
 					}
@@ -220,9 +223,9 @@ func TestSystemdFallbackRequiresSelectedRootEvidence(t *testing.T) {
 	}
 }
 
-// lockTableFixture writes a /proc/locks table with rows identical FLOCK write
-// records of pid on lock's real device and inode, and returns its path.
-func lockTableFixture(t *testing.T, lock, pid string, rows int) string {
+// lockTableFixture writes a /proc/locks table with rows identical FLOCK records
+// of pid in mode on lock's real device and inode, and returns its path.
+func lockTableFixture(t *testing.T, lock, pid, mode string, rows int) string {
 	t.Helper()
 	var stat unix.Stat_t
 	if err := unix.Stat(lock, &stat); err != nil {
@@ -230,7 +233,7 @@ func lockTableFixture(t *testing.T, lock, pid string, rows int) string {
 	}
 	var table strings.Builder
 	for i := 1; i <= rows; i++ {
-		fmt.Fprintf(&table, "%d: FLOCK  ADVISORY  WRITE %s %02x:%02x:%d 0 EOF\n", i, pid, unix.Major(stat.Dev), unix.Minor(stat.Dev), stat.Ino)
+		fmt.Fprintf(&table, "%d: FLOCK  ADVISORY  %s %s %02x:%02x:%d 0 EOF\n", i, mode, pid, unix.Major(stat.Dev), unix.Minor(stat.Dev), stat.Ino)
 	}
 	path := filepath.Join(t.TempDir(), "locks")
 	if err := os.WriteFile(path, []byte(table.String()), 0600); err != nil {
