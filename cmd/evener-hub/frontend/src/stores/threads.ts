@@ -1512,7 +1512,7 @@ function createEntryTranscriptRepository(
         const lease = syncThreadSubscription(ref, client);
         if (!lease) return Promise.reject(new Error("entry history has no subscription owner"));
         const generation = (fixture.repository?.getSnapshot()?.history?.issuedGeneration ?? 0) + 1;
-        return lease.read(threadReadParams(true, generation, held)).then((result) => {
+        return readThreadForgettingConfirmed(ref, lease, threadReadParams(true, generation, held)).then((result) => {
           if (client !== wiredClient || epoch !== readyEpoch) throw new Error("entry history source was retired");
           return result;
         });
@@ -4028,14 +4028,22 @@ async function readThreadHydration(
   try {
     try {
       if (signal?.aborted) throw new Error("Thread hydration attempt was retired");
-      response = await lease.read(threadReadParams(includeTurns, pending.requestGeneration, held));
+      response = await readThreadForgettingConfirmed(
+        ref,
+        lease,
+        threadReadParams(includeTurns, pending.requestGeneration, held),
+      );
     } catch (err) {
       if (signal?.aborted) throw err;
       if (!shouldRetryWithoutHeldSnapshot(held, err)) throw err;
       // Logical retirement removes this operation before its issued request's
       // physical slot settles. Its still-live signal cannot authorize a retry.
       if (signal?.aborted || (tracked && pendingThreadHydrations.get(ref) !== pending)) throw err;
-      response = await lease.read(threadReadParams(includeTurns, pending.requestGeneration, undefined));
+      response = await readThreadForgettingConfirmed(
+        ref,
+        lease,
+        threadReadParams(includeTurns, pending.requestGeneration, undefined),
+      );
       discardHeldHistory = true;
     }
   } catch (err) {
@@ -5303,6 +5311,61 @@ function resolvedEscalationsFor(ref: string): Set<string> {
   return resolved;
 }
 
+// A live read issued after an escalation was resolved that no longer advertises
+// it shows the daemon is done with it (it is dropped when the approved tool's
+// rerun finishes), so that id can never come back and is forgotten. Ids resolved
+// after the read was issued are kept: the read says nothing of them. Saved
+// history is not a live snapshot and confirms nothing.
+//
+// Reads are answered out of order and adopted after they return, so a confirmed
+// id is forgotten only while no read for the ref is in flight and no hydration
+// is still adopting a response; each response is also stripped of resolved ids
+// on arrival. The Set is trimmed in place; the transcript repository holds this
+// same Set.
+const threadReadsByRef = new Map<string, { inFlight: number; confirmed: Set<string> }>();
+
+function forgetConfirmedEscalations(ref: string): void {
+  const reads = threadReadsByRef.get(ref);
+  if (!reads || reads.inFlight > 0 || pendingThreadHydrations.has(ref) || pendingWatchedHydrations.has(ref)) return;
+  for (const escalationId of reads.confirmed) resolvedEscalationsByRef.get(ref)?.delete(escalationId);
+  threadReadsByRef.delete(ref);
+}
+
+function readThreadForgettingConfirmed(
+  ref: string,
+  lease: ThreadSubscriptionLease,
+  params: Parameters<ThreadSubscriptionLease["read"]>[0],
+): ReturnType<ThreadSubscriptionLease["read"]> {
+  const resolvedAtIssue = [...(resolvedEscalationsByRef.get(ref) ?? [])];
+  const reads = threadReadsByRef.get(ref) ?? { inFlight: 0, confirmed: new Set<string>() };
+  threadReadsByRef.set(ref, reads);
+  reads.inFlight += 1;
+  const settle = () => {
+    reads.inFlight -= 1;
+    forgetConfirmedEscalations(ref);
+  };
+  return lease.read(params).then(
+    (response) => {
+      const evener = response.thread.evener;
+      const advertised = evener?.pendingEscalations ?? [];
+      if (evener?.mutationStateAuthoritative === true) {
+        const advertisedIds = new Set(advertised.map((e) => e.escalationId));
+        for (const escalationId of resolvedAtIssue)
+          if (!advertisedIds.has(escalationId)) reads.confirmed.add(escalationId);
+      }
+      const resolved = resolvedEscalationsByRef.get(ref);
+      const kept = resolved ? advertised.filter((e) => !resolved.has(e.escalationId)) : advertised;
+      settle();
+      if (!evener || kept.length === advertised.length) return response;
+      return { ...response, thread: { ...response.thread, evener: { ...evener, pendingEscalations: kept } } };
+    },
+    (error) => {
+      settle();
+      throw error;
+    },
+  );
+}
+
 function withoutResolvedEscalations(ref: string, pending: PendingThreadHydration, model: ThreadModel): ThreadModel {
   // A discarded response is the base model itself (isDiscardedReadResult).
   if (model === pending.baseModel) return model;
@@ -5363,6 +5426,7 @@ function retirePendingHydration(
   pending.baseModel = undefined;
   releasePendingHydrationBytes(ref, pending);
   if (isCurrent) pendingHydrations.delete(ref);
+  forgetConfirmedEscalations(ref);
   pendingHydrationRetirementForTests?.({
     ref,
     retainedNotificationCount,
@@ -8946,6 +9010,7 @@ export function useThreadsStore<T>(selector?: (state: ThreadsStoreState) => T): 
 // an unrelated, already-discarded FakeClient.
 export function resetThreadsStoreForTests(): void {
   resolvedEscalationsByRef.clear();
+  threadReadsByRef.clear();
   for (const route of productionEntryRoutes.values()) retireEntryTranscriptRoute(route);
   productionEntryRoutes.clear();
   productionEntryCache?.close();
