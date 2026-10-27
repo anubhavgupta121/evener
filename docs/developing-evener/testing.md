@@ -340,13 +340,18 @@ contract:
   name, without matching the private config or port, so a loaded unit on a
   managed host can start or restart the regular hub.
 - The attach check is read-only. Every other check writes to the host, so each is
-  a separate opt-in: it creates its own run-unique directory, runs a private hub
-  from it, and removes the directory when it finishes, but only after proving
-  shutdown (an unproved shutdown fails the check and leaves the directory).
-- A writing check never touches the host's real install
-  (`~/.local/bin/evener`) or real `~/.config/evener/credentials.toml`: it hashes
-  both before and after and fails if either appeared or changed. A failed hash
-  probe cannot establish absence.
+  a separate opt-in. Isolation differs by check:
+  - Deploy, container, push and UI run a private hub from a run-unique directory
+    they create on the host and remove when they finish, but only after proving
+    shutdown (an unproved shutdown fails the check and leaves the directory).
+  - Deploy hashes the host's real install (`~/.local/bin/evener`) before and
+    after and fails if it changed. Push and UI hash that install and the real
+    `~/.config/evener/credentials.toml` and fail if either appeared or changed. A
+    failed hash probe cannot establish absence.
+  - The session check runs no private hub. It starts a session on the host's own
+    hub, so it uses the host's real provider configuration, credentials and state
+    root, and the session record survives the run. Only its working directory is
+    run-unique.
 - A test hub has no `BuildSource`, so the version-match ladder refuses an on-disk
   host build whose version differs from the controller's and restarts a host hub
   reporting another version. Where a check expects a host build already
