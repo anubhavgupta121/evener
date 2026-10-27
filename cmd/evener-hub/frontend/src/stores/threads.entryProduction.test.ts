@@ -2681,6 +2681,7 @@ it("a settle begun while a refused recovery's re-open is still running awaits it
     // await returns within these steps and a settle holding the recovery's
     // registration cannot — with no wall-clock race against the re-open's own
     // recovery window.
+    await drainSettleSteps();
     expect(settledWhileReopenHeld).toBe(false);
     reopenReleased.resolve();
     await settle;
