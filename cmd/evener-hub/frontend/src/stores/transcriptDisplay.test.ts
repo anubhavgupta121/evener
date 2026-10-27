@@ -744,6 +744,18 @@ test("clearLocal removes the persisted key, broadcasts null, and follows the hub
   expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyKeys.map(() => null));
 });
 
+test("clearing the only override keeps it cleared across a reload despite old keys", () => {
+  storage.setItem("evener.prefs.showCost", "1");
+  storage.setItem(desktopKey, encodeLocalConfig(preset("full")));
+  resetTranscriptDisplayStoreForTests();
+  initTranscriptDisplay();
+  transcriptDisplayStore.getState().clearLocal("desktop");
+  resetTranscriptDisplayStoreForTests();
+  initTranscriptDisplay();
+  expect(transcriptDisplayStore.getState().local.desktop).toBeUndefined();
+  expect(transcriptDisplayStore.getState().local.mobile).toBeUndefined();
+});
+
 test("keeps an in-memory local change and warns when browser storage is blocked", () => {
   const blocked = {
     getItem: () => {

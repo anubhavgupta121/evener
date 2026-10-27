@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { isMobileViewport, subscribeMobileViewport } from "../shell/useIsMobile";
 import { connectionStore } from "./connection";
-import { migrateLegacyTranscriptDisplay, readTranscriptDisplayLocal } from "./prefs";
+import { migrateLegacyTranscriptDisplay, readTranscriptDisplayLocal, retireLegacyTranscriptKeys } from "./prefs";
 import { createReadyGenerationCallback } from "./readyGenerationCallback";
 import { createBrowserSync } from "./transcriptDisplay/crossTabSync";
 import { browserDraftStorage } from "./transcriptDisplay/draftStorage";
@@ -533,6 +533,7 @@ export const transcriptDisplayStore: StoreApi<TranscriptDisplayStoreState> = cre
       delete local[layout];
       publishEffectiveTransition(state, { ...state, local }, () => transcriptDisplayStore.setState({ local }), layout);
       const localOK = removeLocal(layout);
+      retireLegacyTranscriptKeys();
       reportStorageResult((message) => transcriptDisplayStore.setState({ storageWarning: message }), localOK);
       browserSync.broadcastLocal(layout, null);
     },
