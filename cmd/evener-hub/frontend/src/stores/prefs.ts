@@ -223,10 +223,20 @@ export function removeTranscriptDisplayLocal(layout: TranscriptViewportClass): v
 
 /**
  * Convert the six pre-v1 global transcript keys once, before the new
- * layout-specific store loads, then removes them.
+ * layout-specific store loads, then remove them. A profile that already has a
+ * layout key was migrated (or dual-written by an earlier build), so its old
+ * keys are stale and are removed without being read.
  */
 export function migrateLegacyTranscriptDisplay(): TranscriptDisplayConfigV1 | undefined {
-  if (hasTranscriptDisplayLocal("desktop") || hasTranscriptDisplayLocal("mobile")) return undefined;
+  // Cleared layout overrides must stay cleared: leftover old keys would
+  // otherwise be migrated again on the next load.
+  const removeLegacyKeys = () => {
+    for (const key of LEGACY_TRANSCRIPT_KEYS) removeRaw(key);
+  };
+  if (hasTranscriptDisplayLocal("desktop") || hasTranscriptDisplayLocal("mobile")) {
+    removeLegacyKeys();
+    return undefined;
+  }
   const values: LegacyPreferenceValues = Object.fromEntries(
     LEGACY_TRANSCRIPT_KEYS.map((key) => [key, readLegacyPreference(key)]),
   ) as LegacyPreferenceValues;
@@ -234,11 +244,7 @@ export function migrateLegacyTranscriptDisplay(): TranscriptDisplayConfigV1 | un
   if (config === undefined) return undefined;
   writeTranscriptDisplayConfig("desktop", config);
   writeTranscriptDisplayConfig("mobile", config);
-  // Consume the old keys once both layout keys are stored, so clearing the
-  // layout overrides later cannot make the next load migrate stale flags again.
-  if (hasTranscriptDisplayLocal("desktop") && hasTranscriptDisplayLocal("mobile")) {
-    for (const key of LEGACY_TRANSCRIPT_KEYS) removeRaw(key);
-  }
+  if (hasTranscriptDisplayLocal("desktop") && hasTranscriptDisplayLocal("mobile")) removeLegacyKeys();
   return config;
 }
 

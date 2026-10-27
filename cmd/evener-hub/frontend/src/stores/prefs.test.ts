@@ -734,6 +734,18 @@ describe("transcript display legacy adapters", () => {
     expect(migrated?.advanced.hookExits).toBe("all");
   });
 
+  test("an already-migrated profile drops its stale legacy keys, so clearing overrides stays cleared", () => {
+    localStorage.setItem(KEY("showCost"), "1");
+    localStorage.setItem(KEY("transcriptDisplay.desktop"), "encoded");
+    localStorage.setItem(KEY("transcriptDisplay.mobile"), "encoded");
+    expect(migrateLegacyTranscriptDisplay()).toBeUndefined();
+    expect(readLegacyPreference("showCost")).toBeNull();
+    removeTranscriptDisplayLocal("desktop");
+    removeTranscriptDisplayLocal("mobile");
+    expect(migrateLegacyTranscriptDisplay()).toBeUndefined();
+    expect(hasTranscriptDisplayLocal("desktop")).toBe(false);
+  });
+
   test("clearing both layout overrides after migration does not resurrect the old flags", () => {
     localStorage.setItem(KEY("showCost"), "1");
     expect(migrateLegacyTranscriptDisplay()).toBeDefined();
