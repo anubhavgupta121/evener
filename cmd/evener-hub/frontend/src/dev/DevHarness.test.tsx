@@ -12,10 +12,10 @@ import { FAKE_INITIALIZE_RESULT } from "@evener/appwire-client/testing/fakeSocke
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { connectFakeClient } from "../connectionTestUtils";
-import { connectionStore } from "../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../stores/connection";
 import { resetThreadsStoreForTests } from "../stores/threads";
 import { resetTranscriptDisplayStoreForTests, transcriptDisplayStore } from "../stores/transcriptDisplay";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES } from "../threadTestUtils";
 import { DevHarness } from "./DevHarness";
 
@@ -49,20 +49,15 @@ function testThread(ref: string, overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-// connectFakeClient wires a fresh FakeClient through useConnectionStore's
-// locked connect(client) entry point, exactly like DevHarness's own
-// bootstrap effect will find it already wired and skip creating a real
-// AppwireClient (see DevHarness.tsx: bootstrapClient's no-op guard).
-
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, features: undefined, client: null });
+  resetConnectionStoreForTests();
   resetTranscriptDisplayStoreForTests();
   resetThreadsStoreForTests();
 });
 
 afterEach(() => {
   cleanup();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, features: undefined, client: null });
+  resetConnectionStoreForTests();
   resetTranscriptDisplayStoreForTests();
 });
 
@@ -75,7 +70,7 @@ describe("DevHarness", () => {
   // component must too, or a real "no threads yet" hub response crashes the
   // render (`null.map is not a function`) instead of showing an empty list.
   test("renders an empty list without crashing when thread/list responds with data: null", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     const fake = connectionStore.getState().client as FakeClient;
     fake.on("thread/list", () => ({ data: null }) as unknown as { data: Thread[] });
 
@@ -92,7 +87,7 @@ describe("DevHarness", () => {
   });
 
   test("shows the connection state and lists threads from a scripted thread/list", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     const fake = connectionStore.getState().client as FakeClient;
     fake.on("thread/list", () => ({ data: [testThread("ref_a"), testThread("ref_b")] }));
 
@@ -104,7 +99,7 @@ describe("DevHarness", () => {
   });
 
   test("clicking a thread row calls ensureThread and shows the model JSON", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     const fake = connectionStore.getState().client as FakeClient;
     fake.on("thread/list", () => ({ data: [testThread("ref_a")] }));
     fake.on("thread/read", () => ({ thread: testThread("ref_a") }) satisfies ThreadReadResponse);
@@ -119,7 +114,7 @@ describe("DevHarness", () => {
   });
 
   test("an injected history/updated updates the live-updating JSON view", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     const fake = connectionStore.getState().client as FakeClient;
     fake.on("thread/list", () => ({ data: [testThread("ref_a")] }));
     fake.on(

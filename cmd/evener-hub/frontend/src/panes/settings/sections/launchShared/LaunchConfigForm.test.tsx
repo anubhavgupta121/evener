@@ -7,9 +7,9 @@ import type {
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../../stores/extensions";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { Toast } from "../../../../widgets";
 import { resetToastStoreForTests } from "../../../../widgets/toast/store";
 import { toastKinds } from "../../../../widgets/toast/toastTestUtils";
@@ -281,7 +281,7 @@ describe("validation blocks save", () => {
   // same value was typed into a text box.
   test("an invalid path-kind scalar shows an inline error and does not call onSave", async () => {
     const user = userEvent.setup();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/paths/complete", () => ({ data: ["/tmp/not-real.jsonl"] }));
     const validatePath = vi.fn().mockResolvedValue({ path: "", valid: false, error: "validator-refusal" });
     const onSave = vi.fn().mockResolvedValue(RESOLVED);
@@ -306,7 +306,7 @@ describe("validation blocks save", () => {
 
   test("a picked path-kind value reaches onSave once it validates", async () => {
     const user = userEvent.setup();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/paths/complete", () => ({ data: ["/tmp/trace.jsonl"] }));
     const onSave = vi.fn().mockResolvedValue(RESOLVED);
     render(

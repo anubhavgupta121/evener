@@ -5,9 +5,9 @@ import { assertEditorialGeometry } from "./editorial-preview-measure.mjs";
 
 // Complete, unmodified measurements from the accepted private Chrome run.
 // The committed JSON records the primary artifact hash and exact source commit.
-const { samples: [evidence, collaborators] } = JSON.parse(
-  readFileSync(new URL("./editorial-preview.touch-samples.json", import.meta.url), "utf8"),
-);
+const {
+  samples: [evidence, collaborators],
+} = JSON.parse(readFileSync(new URL("./editorial-preview.touch-samples.json", import.meta.url), "utf8"));
 
 function check(measurement, context = {}) {
   assertEditorialGeometry(assert, measurement, "explicit workflow context", context);
@@ -16,14 +16,23 @@ function check(measurement, context = {}) {
 test("primary phone evidence and collaborator samples pass their actual contexts", () => {
   assert.doesNotThrow(() => check(evidence));
   assert.doesNotThrow(() => check(collaborators, { collaborators: true }));
-  assert.equal(evidence.buttons.some(button => button.label === "Open transcript"), false);
+  assert.equal(
+    evidence.buttons.some((button) => button.label === "Open transcript"),
+    false,
+  );
 });
 
 for (const label of ["Send", "Open", "Open transcript"]) {
-  for (const [width, height] of [[1, 1], [1, 44], [44, 1]]) {
+  for (const [width, height] of [
+    [1, 1],
+    [1, 44],
+    [44, 1],
+  ]) {
     test(`rejects ${label} target at ${width}x${height} without dropping legacy labels`, () => {
       const measurement = structuredClone(collaborators);
-      const target = measurement.buttons.find(button => button.label === (label === "Open" ? "Open transcript" : label));
+      const target = measurement.buttons.find(
+        (button) => button.label === (label === "Open" ? "Open transcript" : label),
+      );
       assert(target);
       assert.equal(target.width, 44);
       assert.equal(target.height, 44);
@@ -38,13 +47,13 @@ for (const label of ["Send", "Open", "Open transcript"]) {
 
 test("phone Send must have a measured visible sample", () => {
   const measurement = structuredClone(evidence);
-  measurement.buttons = measurement.buttons.filter(button => button.label !== "Send");
+  measurement.buttons = measurement.buttons.filter((button) => button.label !== "Send");
   assert.throws(() => check(measurement), /phone Send sample missing/);
 });
 
 test("collaborator Open transcript must have a measured visible sample", () => {
   const measurement = structuredClone(collaborators);
-  measurement.buttons = measurement.buttons.filter(button => button.label !== "Open transcript");
+  measurement.buttons = measurement.buttons.filter((button) => button.label !== "Open transcript");
   assert.throws(() => check(measurement, { collaborators: true }), /collaborator Open transcript sample missing/);
 });
 

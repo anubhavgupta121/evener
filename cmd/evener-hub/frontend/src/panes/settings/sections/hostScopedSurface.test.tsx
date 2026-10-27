@@ -3,10 +3,10 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetSettingsHostForTests, setSettingsHost } from "../../../stores/settingsHost";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { HostScopedSurface } from "./hostScopedSurface";
 
 // The shared host-scoped frame's own contract (component 07b, round 8): its
@@ -43,7 +43,7 @@ function Body({ host }: { host: string }) {
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetSettingsHostForTests();
   hostsStore.getState().resetForTests();
   window.history.pushState({}, "", "/settings/launch-evener");
@@ -52,12 +52,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   window.history.pushState({}, "", "/");
 });
 
 test("switching hosts remounts the body, so no draft survives into the new host", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
 
   render(<HostScopedSurface>{(host) => <Body host={host} />}</HostScopedSurface>);
@@ -74,7 +74,7 @@ test("switching hosts remounts the body, so no draft survives into the new host"
 });
 
 test("a re-render for the SAME host does not remount the body", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
 
   render(<HostScopedSurface>{(host) => <Body host={host} />}</HostScopedSurface>);
@@ -98,7 +98,7 @@ test("a re-render for the SAME host does not remount the body", async () => {
 // that - it is unchanged across the swap - so the body is keyed on the host's
 // registration identity instead.
 test("a host re-registered under the same name remounts the body, so no draft survives into the new registration", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({
     hosts: [hostRow({ name: "beta", address: "old.example:22", attached: true })],
   }));
@@ -125,7 +125,7 @@ test("a host re-registered under the same name remounts the body, so no draft su
 // read is still out) is not remounted by that first answer arriving. Nothing has
 // named that host's registration differently - it is the same host, identified.
 test("the registry's first answer for the host does not remount the body", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   setSettingsHost("beta");
 
@@ -142,7 +142,7 @@ test("the registry's first answer for the host does not remount the body", async
 // attach, a version report - moves without the registration moving, so the poll
 // re-rendering the frame above the body is not a switch either.
 test("a live-state change on an unchanged registration does not remount the body", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const registered = hostRow({ name: "beta", address: "beta.example:22", attached: true });
   fake.on("evener/host/list", () => ({ hosts: [registered] }));
 

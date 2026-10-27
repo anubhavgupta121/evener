@@ -6,9 +6,6 @@
 // the approved per-operation rendering, so each test fails until jobWatch.tsx
 // registers its exact-match "job_watch" descriptor (exact matches win over
 // the family predicate per toolRenderers.ts).
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ItemModel } from "@evener/appwire-client";
 import { buildEntityView } from "@evener/appwire-client";
 import { type ToolWireCall, toolWireStep } from "@evener/appwire-client/testing/toolWireFixtures";
@@ -115,7 +112,7 @@ test("the clamped view's CSS window matches the note policy's 100 lines", () => 
   // pinned by the stylesheet's own text (styles/cssBlock's readModuleCss +
   // topRuleBlock), with comments stripped - a grep test a comment can
   // satisfy passes while asserting nothing.
-  const css = readModuleCss(import.meta.url, "jobWatch.module.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "jobWatch.module.css");
   expect(topRuleBlock(css, ".noteClamped")).toMatch(/-webkit-line-clamp:\s*100\s*;/);
 });
 
@@ -1478,8 +1475,7 @@ test("expanded timer rows name the embedded note (e9ab5ec review)", async () => 
 // children of the list container for separators to render.
 
 test("the row rule resets native button chrome", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "jobWatch.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "jobWatch.module.css");
   const rowRule = css.match(/\.row\s*\{([^}]*)\}/)?.[1] ?? "";
   for (const decl of ["background: transparent", "cursor: pointer", "border: 0", "font: inherit"]) {
     expect(rowRule).toContain(decl);

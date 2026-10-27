@@ -97,6 +97,10 @@ export default function assert(m) {
   if (!m.sendButtonPresent) failures.push("Send answers button missing from the harness");
 
   return failures.length === 0
-    ? { pass: true, reason: "ask dock geometry holds at phone width: labels wrap inside the card, the dock sizes to content, and the transcript owns the scroll" }
+    ? {
+        pass: true,
+        reason:
+          "ask dock geometry holds at phone width: labels wrap inside the card, the dock sizes to content, and the transcript owns the scroll",
+      }
     : { pass: false, reason: failures.join("; ") };
 }

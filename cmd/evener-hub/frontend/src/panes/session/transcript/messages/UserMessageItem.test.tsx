@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ItemModel, Thread, TurnModel } from "@evener/appwire-client";
 import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -12,6 +9,7 @@ import { resetWorkspaceStoreForTests, workspaceStore } from "../../../../shell/w
 import { installLocalStorage, MemoryStorage } from "../../../../storageTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetThreadsStoreForTests } from "../../../../stores/threads";
+import { readModuleCss } from "../../../../styles/cssBlock";
 import { ALL_CAPABILITIES as FORK_CAPABILITIES } from "../../../../threadTestUtils";
 import { Toast } from "../../../../widgets";
 import { hoverForTooltip } from "../../../../widgets/tooltip/tooltipTestUtils";
@@ -124,8 +122,7 @@ test("the approved You row keeps identity, text, and attachments in one avatar +
 });
 
 test("the slack-lean layout is token-backed and has no prose card treatment", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "usermessageitem.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "usermessageitem.module.css");
   // One flex row: avatar (flex:none) + the transcript's single-sourced
   // --speaker-gap (10px, declared on .turn in turnblock.module.css), so the
   // content column lands on the same 34px line the TurnBlock gutter uses for
@@ -178,8 +175,7 @@ test("the slack-lean layout is token-backed and has no prose card treatment", ()
 });
 
 test("the speaker avatar starts at the top of the user message row", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "usermessageitem.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "usermessageitem.module.css");
   expect(css).toMatch(/\.message\s*\{[\s\S]*align-items:\s*flex-start;/);
 });
 
@@ -197,8 +193,7 @@ test("the body renders as a bubble wrapping the text and attachments", () => {
 // editorial scale, so no distinct tail renders). Serif prose stays; only
 // the containment returns.
 test("the user reading surface is an accent bubble hugging its content column", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "usermessageitem.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "usermessageitem.module.css");
   const body = /\.body\s*\{([^}]*)\}/.exec(css);
   expect(body).not.toBeNull();
   expect(body![1]).toMatch(/background:\s*var\(--accent-bg\)/);

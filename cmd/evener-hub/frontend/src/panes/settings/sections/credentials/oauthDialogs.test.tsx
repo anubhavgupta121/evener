@@ -3,11 +3,11 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../../connectionTestUtils";
 import { captureNewTabs, NEW_TAB_POLICY, openedNewTab } from "../../../../shell/openInNewTab.testSupport";
-import { connectionStore } from "../../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { setMutationClientIdentityForTests } from "../../../../stores/mutationClientIdentity";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { Toast } from "../../../../widgets";
 import { getToasts, resetToastStoreForTests } from "../../../../widgets/toast/store";
 import { toastKinds } from "../../../../widgets/toast/toastTestUtils";
@@ -22,7 +22,7 @@ async function advanceTime(milliseconds: number): Promise<void> {
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetCredentialsStoreForTests();
   // Each test reads the toasts its own actions raised.
   resetToastStoreForTests();
@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   cleanup();
   vi.useRealTimers();
   // Leave no spy installed between tests: each test that watches a new tab
@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe("OAuthRedirectDialog", () => {
   test("a dismissed redirect editor ignores a late completion", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let complete!: (value: AuthLoginCompleteResponse) => void;
     fake.on(
       "evener/auth/login/complete",
@@ -84,7 +84,7 @@ describe("OAuthRedirectDialog", () => {
   // that was never sent.
   test("a submit refused while the held listing is stale reports the change, not a failed sign-in", async () => {
     const catalogue = [{ id: "work", protocol: "openai-chat", auth: "bearer", implicit: true }];
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     first.on("evener/instance/list", () => ({ instances: [], availableProviders: catalogue }));
     await act(async () => {
       await credentialsStore.getState().fetch();
@@ -132,7 +132,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("shows a re-open link to the authorize URL", () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     render(
       <OAuthRedirectDialog
         name="work"
@@ -150,7 +150,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("empty (trimmed) submit silently cancels with no RPC call", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const complete = vi.fn();
     fake.on("evener/auth/login/complete", complete);
     const onCancel = vi.fn();
@@ -170,7 +170,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("submitting a redirect URL calls authLoginComplete and, on success, fetches + calls onSuccess", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/login/complete", (params) => {
       expect(params).toEqual({
         provider: "work",
@@ -210,7 +210,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("a completion the hub discarded unchecked restarts the sign-in instead of reporting success", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/login/complete", () => ({
       status: { provider: "work", supported: false, signedIn: false, activeSource: "none", hasStoredOAuth: false },
       restart: true,
@@ -248,7 +248,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("a completed sign-in whose listing read is lost is still reported as a sign-in", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let complete!: (value: AuthLoginCompleteResponse) => void;
     fake.on(
       "evener/auth/login/complete",
@@ -278,7 +278,7 @@ describe("OAuthRedirectDialog", () => {
     // The connection drops while the completion is in flight. The follow-up
     // listing read then rejects (fetch's requireClient contract) - but the
     // sign-in itself already succeeded, so it must not be reported as failed.
-    connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+    resetConnectionStoreForTests();
     await act(async () =>
       complete({
         status: { provider: "work", supported: true, signedIn: true, activeSource: "oauth", hasStoredOAuth: true },
@@ -289,7 +289,7 @@ describe("OAuthRedirectDialog", () => {
   });
 
   test("failure shows an inline error and a 'Sign-in failed' toast, without closing", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/login/complete", () => {
       throw new Error("expired flow");
     });
@@ -318,7 +318,7 @@ describe("OAuthRedirectDialog", () => {
 
 describe("DeviceCodeDialog", () => {
   test("shows the user code without auto-opening the verification URL", () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     const anchors = captureNewTabs();
     render(
       <DeviceCodeDialog
@@ -339,7 +339,7 @@ describe("DeviceCodeDialog", () => {
   });
 
   test("'Send me to OpenAI' stays disabled until the code is copied, then opens the verification URL without an opener", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
@@ -372,7 +372,7 @@ describe("DeviceCodeDialog", () => {
   // design, but an event-handler throw never reaches an error boundary, so
   // without the dialog's own catch the click would silently do nothing.
   test("a refused verification URL reports an error toast instead of throwing", async () => {
-    connectFakeClient();
+    connectReadyFakeClient();
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
@@ -405,7 +405,7 @@ describe("DeviceCodeDialog", () => {
 
   test("a dismissed device editor ignores success after its refresh completes", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/device/poll", () => ({ state: "authorized" }));
     let finishRead!: (value: InstanceListResponse) => void;
     fake.on(
@@ -436,7 +436,7 @@ describe("DeviceCodeDialog", () => {
 
   test("polling: authorized stops polling, fetches, toasts, and calls onSuccess", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/device/poll", (params) => {
       expect(params).toEqual({ provider: "work", flowId: "flow-2", originClientId: "test-tab" });
       return { state: "authorized" };
@@ -471,7 +471,7 @@ describe("DeviceCodeDialog", () => {
 
   test("an authorized poll whose listing read is lost still completes the sign-in", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let poll!: (value: AuthDevicePollResponse) => void;
     fake.on(
       "evener/auth/device/poll",
@@ -502,7 +502,7 @@ describe("DeviceCodeDialog", () => {
     // itself succeeded, and the follow-up listing read must neither turn it
     // into a failure nor escape this timer-driven tick as an unhandled
     // rejection.
-    connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+    resetConnectionStoreForTests();
     await act(async () => poll({ state: "authorized" }));
     expect(onSuccess).toHaveBeenCalled();
     expect(toastKinds()).toEqual(["success"]);
@@ -510,7 +510,7 @@ describe("DeviceCodeDialog", () => {
 
   test("polling: expired stops polling and switches to a 'Start again' action", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/device/poll", () => ({ state: "expired" }));
     render(
       <DeviceCodeDialog
@@ -532,7 +532,7 @@ describe("DeviceCodeDialog", () => {
 
   test("polling: an unrecognized state just reschedules (still waiting)", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let calls = 0;
     fake.on("evener/auth/device/poll", () => {
       calls += 1;
@@ -563,7 +563,7 @@ describe("DeviceCodeDialog", () => {
   // silently stops, identical to "expired".
   test("a devicePoll request failure stops polling without rescheduling - no further poll calls ever follow", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let calls = 0;
     fake.on("evener/auth/device/poll", () => {
       calls += 1;
@@ -599,7 +599,7 @@ describe("DeviceCodeDialog", () => {
   test("a poll refused while the held listing is stale keeps polling and completes once that listing lands", async () => {
     vi.useFakeTimers();
     const catalogue = [{ id: "work", protocol: "openai-chat", auth: "bearer", implicit: true }];
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     first.on("evener/instance/list", () => ({ instances: [], availableProviders: catalogue }));
     await act(async () => {
       await credentialsStore.getState().fetch();
@@ -657,7 +657,7 @@ describe("DeviceCodeDialog", () => {
   test("a poll refused while the restore read failed asks for the listing and resumes once it lands", async () => {
     vi.useFakeTimers();
     const catalogue = [{ id: "work", protocol: "openai-chat", auth: "bearer", implicit: true }];
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     first.on("evener/instance/list", () => ({ instances: [], availableProviders: catalogue }));
     await act(async () => {
       await credentialsStore.getState().fetch();
@@ -709,7 +709,7 @@ describe("DeviceCodeDialog", () => {
   test("a poll refused repeatedly keeps asking for the listing and says it is waiting for the connection", async () => {
     vi.useFakeTimers();
     const catalogue = [{ id: "work", protocol: "openai-chat", auth: "bearer", implicit: true }];
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     first.on("evener/instance/list", () => ({ instances: [], availableProviders: catalogue }));
     await act(async () => {
       await credentialsStore.getState().fetch();
@@ -764,7 +764,7 @@ describe("DeviceCodeDialog", () => {
 
   test("clicking 'Start again' after expiry calls onRestart", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/device/poll", () => ({ state: "expired" }));
     const onRestart = vi.fn();
     render(
@@ -786,7 +786,7 @@ describe("DeviceCodeDialog", () => {
 
   test("polling: a flow the hub discarded unchecked is restarted without a click and stops polling", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/auth/device/poll", () => ({ state: "restart" }));
     const onRestart = vi.fn();
     render(
@@ -812,7 +812,7 @@ describe("DeviceCodeDialog", () => {
 
   test("unmounting the dialog stops polling (no further requests after unmount)", async () => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let calls = 0;
     fake.on("evener/auth/device/poll", () => {
       calls += 1;
@@ -844,7 +844,7 @@ describe("DeviceCodeDialog", () => {
 // variants carry it, so with several Codex-capable instances on one host the
 // code on screen belonged to no instance in particular. Both name both now.
 test("a remote device dialog names the instance AND the host", () => {
-  connectFakeClient();
+  connectReadyFakeClient();
   render(
     <DeviceCodeDialog
       name="work"
@@ -863,7 +863,7 @@ test("a remote device dialog names the instance AND the host", () => {
 
 test("a completed remote sign-in names the instance AND the host in its toast", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/request", (params) => {
     if (params.method === "evener/auth/device/poll") return { state: "authorized" };
     if (params.method === "evener/instance/list") return { instances: [], availableProviders: [] };

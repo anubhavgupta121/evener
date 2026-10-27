@@ -1,8 +1,8 @@
 import type { InstanceListResponse } from "@evener/appwire-client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { confirmListingState } from "./reconcileListing";
 
 const EMPTY: InstanceListResponse = { instances: [], availableProviders: [] };
@@ -22,7 +22,7 @@ describe("confirmListingState", () => {
   // so matching it would report a mutation the host may never have reflected
   // (the removal path would clear a guided draft on it).
   test("a listing that never applied cannot confirm a match", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/instance/list", () => EMPTY);
     await credentialsStore.getState().fetch();
     fake.on("evener/instance/list", () => {
@@ -35,7 +35,7 @@ describe("confirmListingState", () => {
   });
 
   test("an applied listing that matches confirms", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/instance/list", () => EMPTY);
     await credentialsStore.getState().fetch();
 
@@ -51,7 +51,7 @@ describe("confirmListingState", () => {
   // rejection as an unhandled failure rather than the "could not confirm"
   // outcome it actually is.
   test("a read that rejects is one more failed attempt, not an escape", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/instance/list", () => EMPTY);
     await credentialsStore.getState().fetch();
     connectionStore.setState({ state: "idle", client: null });

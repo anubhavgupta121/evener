@@ -815,7 +815,7 @@ func LiveRowRef(entry LiveEntry) string {
 	if _, ref, ok := liveWorkspaceIdentity(entry); ok {
 		return ref.String()
 	}
-	return hubapi.LocalRef(entry.SessionID).String()
+	return appwire.LocalRef(entry.SessionID).String()
 }
 
 // supersededSessionIDs identifies persisted instance IDs that a live daemon

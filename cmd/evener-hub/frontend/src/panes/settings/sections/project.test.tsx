@@ -2,9 +2,9 @@ import type { LaunchConfigLayer, LaunchOptionSchemaResponse } from "@evener/appw
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { Toast } from "../../../widgets";
 import { getToasts } from "../../../widgets/toast/store";
 import { ProjectSection } from "./project";
@@ -36,7 +36,7 @@ const GLOBAL_LAYER: LaunchConfigLayer = { agent: "evener" };
 
 test("project settings review repository trust without replacing an unsaved local override", async () => {
   setQueryCwd("/repo");
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let trusted = false;
   const approvals: unknown[] = [];
   fake.on("evener/launch/schema", () => SCHEMA);
@@ -69,13 +69,13 @@ test("project settings review repository trust without replacing an unsaved loca
 });
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetLaunchConfigStoreForTests();
   setQueryCwd(null);
 });
 
 afterEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   setQueryCwd(null);
   cleanup();
 });
@@ -90,7 +90,7 @@ describe("no cwd in the query string", () => {
 describe("3-state loaded contract", () => {
   test("loading, then ready: fetches schema + project layer + global layer (global read-only, for hints)", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const calls: string[] = [];
     fake.on("evener/launch/schema", () => {
       calls.push("schema");
@@ -110,7 +110,7 @@ describe("3-state loaded contract", () => {
 
   test("error is a distinct third state (not '2-state, stays loading forever')", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => {
       throw new Error("boom");
     });
@@ -122,7 +122,7 @@ describe("3-state loaded contract", () => {
 
   test("no diagnostics panel anywhere on this page", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => SCHEMA);
     fake.on("evener/launch/getLayer", (params) => (params.layer === "project" ? PROJECT_LAYER : GLOBAL_LAYER));
     render(<ProjectSection sectionId="project" />);
@@ -134,7 +134,7 @@ describe("3-state loaded contract", () => {
 describe("save", () => {
   test("repository inspection failure leaves local overrides editable and saveable", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => SCHEMA);
     fake.on("evener/launch/getLayer", () => ({}));
     fake.on("evener/launch/resolve", () => {
@@ -156,7 +156,7 @@ describe("save", () => {
 
   test("saves to the project layer (not global) and toasts the project-specific success message", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => SCHEMA);
     fake.on("evener/launch/getLayer", (params) => (params.layer === "project" ? PROJECT_LAYER : GLOBAL_LAYER));
     fake.on("evener/launch/setLayer", (params) => {
@@ -203,7 +203,7 @@ describe("resolved-default labels", () => {
 
   test("an unset field names the effective layer's value once resolve(cwd) lands", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => BOOL_SCHEMA);
     fake.on("evener/launch/getLayer", () => ({}));
     fake.on("evener/launch/resolve", (params) => {
@@ -218,7 +218,7 @@ describe("resolved-default labels", () => {
 
   test("a failed resolve leaves the plain (use global default) marker", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => BOOL_SCHEMA);
     fake.on("evener/launch/getLayer", () => ({}));
     fake.on("evener/launch/resolve", () => {
@@ -232,7 +232,7 @@ describe("resolved-default labels", () => {
 
   test("saving refreshes the labels from setLayer's own returned resolved config", async () => {
     setQueryCwd("/repo");
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/launch/schema", () => BOOL_SCHEMA);
     fake.on("evener/launch/getLayer", () => ({}));
     fake.on("evener/launch/resolve", () => ({ effective: { sandboxNet: true }, layers: {}, provenance: {} }));

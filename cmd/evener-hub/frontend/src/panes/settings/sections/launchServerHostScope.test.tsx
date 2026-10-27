@@ -3,11 +3,11 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetLaunchConfigHostStoresForTests, resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
 import { resetSettingsHostForTests, setSettingsHost } from "../../../stores/settingsHost";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { resetToastStoreForTests } from "../../../widgets/toast/store";
 import { LaunchServerHostScope } from "./launchServer";
 import { shownReasons } from "./reasonTestUtils";
@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 test("with this hub selected the section issues the plain launch calls and never the proxy", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/schema", () => schema("controller schema"));
   fake.on("evener/launch/getLayer", () => ({ agent: "controller-agent" }));
@@ -100,7 +100,7 @@ test("with this hub selected the section issues the plain launch calls and never
 });
 
 test("selecting a remote host shows THAT host's own launch defaults, never the controller's", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   // The controller's own handlers are booby-trapped: any of them being reached
   // while beta is selected is a host-scoping bug.
@@ -139,7 +139,7 @@ test("selecting a remote host shows THAT host's own launch defaults, never the c
 });
 
 test("a remote save writes that host's layer through the proxy, never this hub's setLayer", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/setLayer", () => {
     throw new Error("a remote selection must not write this hub's launch layer");
@@ -175,7 +175,7 @@ test("a remote save writes that host's layer through the proxy, never this hub's
 });
 
 test("a host that is no longer configured says so instead of falling back to this hub", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/schema", () => {
     throw new Error("a remote selection must not read this hub's launch schema");
@@ -197,7 +197,7 @@ test("a host that is no longer configured says so instead of falling back to thi
 // layer, and the frame above it remounts the body outright - so the values that
 // go out are the NEW host's, whichever mechanism is doing the work.
 test("switching hosts writes the NEW host's values, never the previous host's unsaved draft", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/schema", () => schema("controller schema"));
   fake.on("evener/launch/getLayer", () => ({ agent: "controller-agent" }));
@@ -280,7 +280,7 @@ function installFakeClock() {
 
 test("a launch-config change for the SELECTED host re-reads the pane and shows the host's new value", async () => {
   installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let agent = "beta-agent";
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/host/request", (params) => {
@@ -311,7 +311,7 @@ test("a launch-config change for the SELECTED host re-reads the pane and shows t
 
 test("a launch-config change for a DIFFERENT host does not re-read the selected pane", async () => {
   installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/host/request", (params) => {
     const forwarded = params as { method: string };
@@ -337,7 +337,7 @@ test("a launch-config change for a DIFFERENT host does not re-read the selected 
 
 test("a BURST of launch-config changes for the selected host produces one bounded re-read", async () => {
   installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/host/request", (params) => {
     const forwarded = params as { method: string };
@@ -365,7 +365,7 @@ test("a BURST of launch-config changes for the selected host produces one bounde
 
 test("an incoming change keeps the user's typed draft and says the host's values changed", async () => {
   const user = installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let agent = "beta-agent";
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/host/request", (params) => {
@@ -397,7 +397,7 @@ test("an incoming change keeps the user's typed draft and says the host's values
 
 test("with the local hub selected, a change to its launch config re-reads the pane", async () => {
   installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let agent = "controller-agent";
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/schema", () => schema("controller schema"));
@@ -420,7 +420,7 @@ test("with the local hub selected, a change to its launch config re-reads the pa
 
 test("with the local hub selected, a REPLACED controller connection re-reads the pane", async () => {
   installFakeClock();
-  const first = connectFakeClient();
+  const first = connectReadyFakeClient();
   first.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   first.on("evener/launch/schema", () => schema("controller schema"));
   first.on("evener/launch/getLayer", () => ({ agent: "controller-agent" }));
@@ -452,7 +452,7 @@ test("with the local hub selected, a REPLACED controller connection re-reads the
 
 test("with the local hub selected, a RECOVERED controller connection re-reads the pane", async () => {
   installFakeClock();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let agent = "controller-agent";
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/schema", () => schema("controller schema"));
@@ -481,7 +481,7 @@ test("with the local hub selected, a RECOVERED controller connection re-reads th
 // what reports the transition (there is no host lifecycle notification on the
 // wire), and the pane re-issues its read on it.
 test("a pane that failed while its host was away re-reads when the host attaches", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let attached = false;
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached })] }));
   fake.on("evener/host/request", (params) => {
@@ -512,7 +512,7 @@ test("a pane that failed while its host was away re-reads when the host attaches
 // discard what the user has typed into the form above it - the form is reseeded
 // on the per-host store INSTANCE, and a re-attach is not a new instance.
 test("a reconnect re-reads the host's data without discarding what the user typed", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let attached = true;
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached })] }));
   fake.on("evener/host/request", (params) => {
@@ -554,7 +554,7 @@ test("a reconnect re-reads the host's data without discarding what the user type
 // no way to ask again is a dead end. So the failure is reported BESIDE the form,
 // with a retry that re-reads that host.
 test("a failed refresh keeps the form and the draft, reports itself beside it, and a retry clears it", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let attached = true;
   let refuse = false;
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached })] }));
@@ -599,7 +599,7 @@ test("a failed refresh keeps the form and the draft, reports itself beside it, a
 // until now no way to ask again either (the shape #2202 was flagged for on the
 // credentials pane). Retry re-reads that host.
 test("a pane left on its load failure offers a retry instead of a dead end", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let refuse = true;
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/host/request", (params) => {

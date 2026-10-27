@@ -11,7 +11,9 @@ export async function checkMovingControls(endpoint, clickControl) {
     await applyViewport(page.send, { width: 1400, height: 900 });
     for (const motion of ["stationary", "hover", "hover-reveal"]) {
       await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
-      await evaluate(page.send, `(() => {
+      await evaluate(
+        page.send,
+        `(() => {
         document.body.innerHTML = '<button id="control" style="position:fixed;left:100px;top:100px;width:28px;height:28px"><span id="marker">×</span></button>';
         window.overviewGuardState = () => ({});
         const control = document.querySelector('#control');
@@ -28,21 +30,27 @@ export async function checkMovingControls(endpoint, clickControl) {
             }
           }, { once: true });
         }
-      })()`);
+      })()`,
+      );
       await clickControl(page.send, "#marker");
-      const result = await evaluate(page.send, `(() => {
+      const result = await evaluate(
+        page.send,
+        `(() => {
         const { control, clicks } = window.clickFixture;
         return { sameControl: control === document.querySelector('#control'), clicks,
           box: control.getBoundingClientRect().toJSON(), visibility: getComputedStyle(control).visibility };
-      })()`);
+      })()`,
+      );
       assert.equal(result.sameControl, true, `${motion}: control identity`);
       assert.equal(result.clicks.length, 1, `${motion}: exactly one activation`);
       assert.equal(result.clicks[0].trusted, true, `${motion}: native click`);
       assert.equal(result.visibility, "visible", `${motion}: visible target`);
       assert.equal(result.box.left, motion === "stationary" ? 100 : 300, `${motion}: actual layout moved`);
       const { x, y } = result.clicks[0];
-      assert.ok(x > result.box.left && x < result.box.right && y > result.box.top && y < result.box.bottom,
-        `${motion}: click uses current target geometry`);
+      assert.ok(
+        x > result.box.left && x < result.box.right && y > result.box.top && y < result.box.bottom,
+        `${motion}: click uses current target geometry`,
+      );
       results.push({ motion, ...result });
     }
     return results;

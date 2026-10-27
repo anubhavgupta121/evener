@@ -47,3 +47,8 @@ func ParseRef(raw string) (Ref, error) {
 	}
 	return Ref{SourceID: sourceID, ThreadID: threadID}, nil
 }
+
+// LocalRef returns the ref of one of the controller's own sessions.
+func LocalRef(threadID string) Ref {
+	return Ref{SourceID: LocalSourceID, ThreadID: threadID}
+}

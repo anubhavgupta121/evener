@@ -127,7 +127,7 @@ func pinDecisionKey(key hubcore.ArchiveKey) hubcore.ArchiveKey {
 	if key.Source == "" {
 		return hubcore.ArchiveKey{Kind: "session", ID: key.ID}
 	}
-	return hubcore.ArchiveKey{Kind: "session", ID: hubapi.Ref{HostID: key.Source, SessionID: key.ID}.String()}
+	return hubcore.ArchiveKey{Kind: "session", ID: appwire.Ref{SourceID: key.Source, ThreadID: key.ID}.String()}
 }
 
 func classifySessionPins(assignments map[hubcore.ArchiveKey]hubcore.SessionPin, authority hubcore.FavoriteAuthority) hubcore.FavoriteRevalidation {
@@ -1063,12 +1063,6 @@ func appThreadTreeLive(thread appwire.Thread) bool {
 	}
 }
 
-// hubAttentionSummaryFromCore maps hubcore's internal attention summary to
-// hubapi's public wire type (hubapi cannot import the hub's internal package).
-func hubAttentionSummaryFromCore(sum appwire.AttentionSummary) hubapi.AttentionSummary {
-	return hubapi.AttentionSummary{NeedsYou: sum.NeedsYou, Error: sum.Error, Working: sum.Working}
-}
-
 func (s *WebServer) apiTreeSources() []hubapi.Source {
 	sources := []hubapi.Source{{
 		ID:     "local",
@@ -1213,12 +1207,12 @@ func referencedSessionAuthorities(ids []string, snapshot navigationSnapshot, loc
 // authority is keyed by: the bare id for the controller's own sessions, the
 // host-qualified ref for a remote one.
 func canonicalSessionDecisionID(raw string) (id string, remote bool) {
-	ref, err := hubapi.ParseRef(raw)
+	ref, err := appwire.ParseRef(raw)
 	switch {
 	case err != nil:
 		return raw, false
-	case ref.HostID == "local":
-		return ref.SessionID, false
+	case ref.SourceID == "local":
+		return ref.ThreadID, false
 	default:
 		return ref.String(), true
 	}
@@ -1226,8 +1220,8 @@ func canonicalSessionDecisionID(raw string) (id string, remote bool) {
 
 func favoriteSessionAliases(id string) []string {
 	aliases := []string{id}
-	if ref, err := hubapi.ParseRef(id); err == nil && ref.HostID == "local" {
-		aliases = append(aliases, ref.SessionID, "local:"+ref.SessionID)
+	if ref, err := appwire.ParseRef(id); err == nil && ref.SourceID == "local" {
+		aliases = append(aliases, ref.ThreadID, "local:"+ref.ThreadID)
 	} else if !strings.Contains(id, ":") {
 		aliases = append(aliases, "local:"+id)
 	}
@@ -1435,9 +1429,9 @@ func favoriteProjectSourceClaim(id string, snapshot navigationSnapshot) string {
 	return "local"
 }
 
-func hubRefFromTreeNodeID(id string) hubapi.Ref {
-	if ref, err := hubapi.ParseRef(id); err == nil {
+func hubRefFromTreeNodeID(id string) appwire.Ref {
+	if ref, err := appwire.ParseRef(id); err == nil {
 		return ref
 	}
-	return hubapi.LocalRef(id)
+	return appwire.LocalRef(id)
 }

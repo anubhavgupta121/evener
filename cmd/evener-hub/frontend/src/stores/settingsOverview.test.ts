@@ -1,7 +1,7 @@
 import { friendlyErrorMessage, type SettingsOverviewResponse } from "@evener/appwire-client";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../connectionTestUtils";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { connectionStore } from "./connection";
 import {
   resetSettingsOverviewStoreForTests,
@@ -41,7 +41,7 @@ describe("initial state", () => {
 
 describe("fetch", () => {
   test("requests evener/settings/overview with empty params and stores the result", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => SAMPLE_RESPONSE);
 
     await settingsOverviewStore.getState().fetch();
@@ -54,7 +54,7 @@ describe("fetch", () => {
   });
 
   test("sets loading true while the request is in flight", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let resolveRequest: (() => void) | undefined;
     fake.on(
       "evener/settings/overview",
@@ -74,7 +74,7 @@ describe("fetch", () => {
   });
 
   test("caches: a second call after a successful load does not re-request", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => SAMPLE_RESPONSE);
 
     await settingsOverviewStore.getState().fetch();
@@ -84,7 +84,7 @@ describe("fetch", () => {
   });
 
   test("concurrent calls before the first resolves share one in-flight request", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let resolveCount = 0;
     fake.on("evener/settings/overview", () => {
       resolveCount += 1;
@@ -98,7 +98,7 @@ describe("fetch", () => {
   });
 
   test("a failed fetch leaves data null and populates error", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => {
       throw new Error("boom");
     });
@@ -112,7 +112,7 @@ describe("fetch", () => {
   });
 
   test("a subsequent fetch after a failure retries (failure is not cached)", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => {
       throw new Error("boom");
     });
@@ -141,7 +141,7 @@ describe("fetch", () => {
 
 describe("refresh", () => {
   test("always issues a fresh request even when data is already cached", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => SAMPLE_RESPONSE);
     await settingsOverviewStore.getState().fetch();
     expect(fake.calls).toHaveLength(1);
@@ -151,7 +151,7 @@ describe("refresh", () => {
   });
 
   test("a failed refresh preserves the previously loaded data and surfaces the error", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => SAMPLE_RESPONSE);
     await settingsOverviewStore.getState().fetch();
 
@@ -168,7 +168,7 @@ describe("refresh", () => {
 
 describe("useSettingsOverviewStore hook", () => {
   test("reflects store state and re-renders on change", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("evener/settings/overview", () => SAMPLE_RESPONSE);
 
     const { result } = renderHook(() => useSettingsOverviewStore((s) => s.data));

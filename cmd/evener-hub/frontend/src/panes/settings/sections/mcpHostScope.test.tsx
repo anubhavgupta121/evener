@@ -3,11 +3,11 @@ import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../stores/extensions";
 import { hostsStore } from "../../../stores/hosts";
 import { resetSettingsHostForTests, setSettingsHost } from "../../../stores/settingsHost";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { resetToastStoreForTests } from "../../../widgets/toast/store";
 import { McpSectionHostScope, type SettingsOverviewLike } from "./mcp";
 
@@ -67,7 +67,7 @@ afterEach(() => {
 });
 
 test("with this hub selected the section issues the plain MCP calls and never the proxy", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/getLayer", () => ({ mcpConfigs: ["/controller/mcp.json"], mcps: [] }));
   fake.on("evener/host/request", () => {
@@ -82,7 +82,7 @@ test("with this hub selected the section issues the plain MCP calls and never th
 });
 
 test("a remote selection shows THAT host's own MCP lists, never this hub's", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   // The controller's own handlers are booby-trapped: reaching any of them while
   // beta is selected is a host-scoping bug.
@@ -120,7 +120,7 @@ test("a remote selection shows THAT host's own MCP lists, never this hub's", asy
 });
 
 test("a remote MCP write goes through the proxy, never this hub's setLaunchLayer", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/list", () => ({ hosts: [hostRow({ name: "beta", attached: true })] }));
   fake.on("evener/launch/setLayer", () => {
     throw new Error("a remote selection must not write this hub's launch layer");

@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../stores/extensions";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { PluginsDirsSection } from "./pluginsDirs";
 
 beforeEach(() => {
@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 test("renders a heading and the pluginDirs entries, not skillsDirs", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/launch/getLayer", (params) => {
     expect(params).toEqual({ cwd: "/", layer: "global" });
     return { pluginDirs: ["/opt/plugins"], skillsDirs: ["/opt/skills"] };
@@ -29,7 +29,7 @@ test("renders a heading and the pluginDirs entries, not skillsDirs", async () =>
 });
 
 test("saving a new entry writes it to the pluginDirs field, not skillsDirs", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/launch/getLayer", () => ({ pluginDirs: [], skillsDirs: ["/existing-skill"] }));
   fake.on("evener/path/validate", () => ({ path: "/opt/new", valid: true }));
   fake.on("evener/launch/setLayer", (params) => {

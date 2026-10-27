@@ -7,7 +7,7 @@ import { type ArchivedListParams, type ArchivedListResponse, friendlyErrorMessag
 import { deferred } from "@evener/appwire-client/testing/deferred";
 import { completeSession } from "@evener/appwire-client/testing/navigation";
 import { beforeEach, describe, expect, test } from "vitest";
-import { connectFakeClient } from "../connectionTestUtils";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import {
   archivedListKey,
   archivedListStore,
@@ -32,7 +32,7 @@ beforeEach(() => {
 
 describe("the web's archived lists", () => {
   test("read through the connected client", async () => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const seen: ArchivedListParams[] = [];
     fake.on("evener/archived/list", (params) => {
       seen.push(params);
@@ -59,13 +59,13 @@ describe("the web's archived lists", () => {
   });
 
   test("drop every loaded list and the answer the old connection still owes when it is replaced", async () => {
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     const owed = deferred<ArchivedListResponse>();
     first.on("evener/archived/list", (params) => (params.cursor ? owed.promise : page(["local:a"], 2, "cursor-1")));
     await refreshArchivedList("projects", "proj");
     const loadingMore = loadMoreArchivedList("projects", "proj");
 
-    connectFakeClient();
+    connectReadyFakeClient();
     owed.resolve(page(["local:old"], 2));
     await loadingMore;
 

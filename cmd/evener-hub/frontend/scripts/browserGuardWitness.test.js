@@ -32,7 +32,9 @@ describe("shared browser-guard witness failure contract", () => {
   test.each([false, true])("collection rejection is a note with partial policy %s", async (partial) => {
     const original = new Error("8f34d2");
     const transportError = new Error("7c926b");
-    const send = async () => { throw transportError; };
+    const send = async () => {
+      throw transportError;
+    };
     const failure = await witnessFailure({ send }, "null", original, { partial, context: { stage: "s4" } });
 
     expect(witnessOf(failure, original)).toEqual({
@@ -46,7 +48,9 @@ describe("shared browser-guard witness failure contract", () => {
   test("a synchronous transport throw cannot replace the original failure", async () => {
     const original = new Error("27b5e4");
     const detail = "00f32c";
-    const send = () => { throw detail; };
+    const send = () => {
+      throw detail;
+    };
     const failure = await witnessFailure({ send }, "null", original);
 
     expect(witnessOf(failure, original)).toEqual({ unreadable: ["witness"], error: detail });
@@ -62,7 +66,10 @@ describe("shared browser-guard witness failure contract", () => {
   test.each([false, true])("serialization failure retains host context with partial policy %s", async (partial) => {
     const original = new Error("e3ac26");
     const send = async () => response({ unreadable: [], value: 1n });
-    const failure = await witnessFailure({ send }, "null", original, { context: { fixture: "f2", openPaneMs: 14 }, partial });
+    const failure = await witnessFailure({ send }, "null", original, {
+      context: { fixture: "f2", openPaneMs: 14 },
+      partial,
+    });
     const witness = witnessOf(failure, original);
 
     expect(witness).toMatchObject({ fixture: "f2", openPaneMs: 14, unreadable: ["payload"] });
@@ -73,9 +80,10 @@ describe("shared browser-guard witness failure contract", () => {
     vi.useFakeTimers();
     const original = new Error("c9d723");
     let complete;
-    const send = () => new Promise((resolve, reject) => {
-      complete = outcome === "resolve" ? () => resolve(response({ unreadable: [] })) : () => reject("df326b");
-    });
+    const send = () =>
+      new Promise((resolve, reject) => {
+        complete = outcome === "resolve" ? () => resolve(response({ unreadable: [] })) : () => reject("df326b");
+      });
     const pending = witnessFailure({ send }, "null", original, { readMs: 2000 });
     expect(vi.getTimerCount()).toBe(2);
     complete();
@@ -89,7 +97,10 @@ describe("shared browser-guard witness failure contract", () => {
     vi.useFakeTimers();
     const original = new Error("ab725f");
     let complete;
-    const send = () => new Promise((resolve) => { complete = () => resolve(response({ unreadable: [] })); });
+    const send = () =>
+      new Promise((resolve) => {
+        complete = () => resolve(response({ unreadable: [] }));
+      });
     const pending = witnessFailure({ send }, "null", original);
     const settled = vi.fn();
     void pending.then(settled, settled);

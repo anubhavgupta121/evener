@@ -5,7 +5,6 @@ import { act, render, renderHook } from "@testing-library/react";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { createElement, type PropsWithChildren, StrictMode, Suspense, useEffect } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
 import { conversationPaneLifetime } from "../../../shell/paneLifetime";
 import { type OpenPaneRecord, resetWorkspaceStoreForTests, workspaceStore } from "../../../shell/workspace";
 import { connectionStore } from "../../../stores/connection";
@@ -19,6 +18,7 @@ import {
   settleEntryTranscriptForTests,
   threadsStore,
 } from "../../../stores/threads";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES } from "../../../threadTestUtils";
 import { enterAgentCascade, returnFromAgentCascade } from "../../zoom/actions";
 import { useTranscriptScroll } from "./flow/useTranscriptScroll";
@@ -103,7 +103,7 @@ test("loadOlder schedules cached bodies after a bounded opening without a server
     keyRange: IDBKeyRange,
   });
   setProductionEntryCacheForTests(cache);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", (params) => ({
     thread: testThread("ref_a", {
       turns: [
@@ -179,7 +179,7 @@ test.each([
   "an ordinary reader mounted $secondMount promotion cannot adopt or cancel the $sourceType source's demand",
   async ({ sourceType, secondMount }) => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
     let reads = 0;
     let healed = false;
@@ -246,7 +246,7 @@ test.each([
 
 test("secondary inspection cannot cancel its still-mounted source's same-ref demand", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
   let reads = 0;
   let healed = false;
@@ -308,7 +308,7 @@ test.each(["session", "transcript"] as const)(
   "ordinary navigation adopts a genuinely disposed $0 reader's pending demand",
   async (sourceType) => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
     let reads = 0;
     fake.on("thread/turns/list", () => {
@@ -344,7 +344,7 @@ test.each(["session", "transcript"] as const)(
 
 test("a collapsed retained reader keeps pending demand without borrowing another reader's activation", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
   let reads = 0;
   fake.on("thread/turns/list", () => {
@@ -380,7 +380,7 @@ test("a collapsed retained reader keeps pending demand without borrowing another
 
 test("disposing one retained reader preserves independently requested same-ref history", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
   let reads = 0;
   fake.on("thread/turns/list", () => {
@@ -410,7 +410,7 @@ test("disposing one retained reader preserves independently requested same-ref h
 
 test("disposing the last retained reader prevents its failed demand from restarting on a later drill", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "older" }));
   let reads = 0;
   fake.on("thread/turns/list", () => {
@@ -442,7 +442,7 @@ test("model is undefined before the ref is tracked", () => {
 });
 
 test("model reflects the store once ensureThread hydrates it", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a") }));
   const { result } = renderHook(() => useTranscript("ref_a"));
   expect(result.current.model).toBeUndefined();
@@ -460,7 +460,7 @@ test("loadingOlder starts false", () => {
 });
 
 test("loadOlder() fetches thread/turns/list via the model's olderCursor and prepends the page", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", { turns: [{ id: "turn_2", status: "completed", itemsView: "full", items: [] }] }),
     olderCursor: "cursor_1",
@@ -482,7 +482,7 @@ test("loadOlder() fetches thread/turns/list via the model's olderCursor and prep
 });
 
 test("loadingOlder is true while the request is in flight and false once it settles", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -514,7 +514,7 @@ test("loadingOlder is true while the request is in flight and false once it sett
 // state closure lets both through (observed
 // live: the same cursor requested twice); the ref-based guard does not.
 test("two loadOlder() calls in the same tick issue exactly one request", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -541,7 +541,7 @@ test("two loadOlder() calls in the same tick issue exactly one request", async (
 });
 
 test("a second loadOlder() call while one is already in flight does not issue a second request", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -572,7 +572,7 @@ test("a second loadOlder() call while one is already in flight does not issue a 
 });
 
 test("loadOlder() is a harmless no-op when the model has no olderCursor (nothing more to load)", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a") })); // no olderCursor
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -598,7 +598,7 @@ test("olderError starts null", () => {
 });
 
 test("loadOlderReportingError records a failed fetch's message instead of rejecting", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -620,7 +620,7 @@ test("loadOlderReportingError records a failed fetch's message instead of reject
 // The page never arrived, so the resume takes the whole sentence: a reader
 // told the transcript failed would go hunting in the transcript.
 test("a failed auto-resume names the resume, not the page fetch", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -639,7 +639,7 @@ test("a failed auto-resume names the resume, not the page fetch", async () => {
 });
 
 test("a successful fetch leaves olderError null", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", { turns: [{ id: "turn_2", status: "completed", itemsView: "full", items: [] }] }),
     olderCursor: "cursor_1",
@@ -662,7 +662,7 @@ test("a successful fetch leaves olderError null", async () => {
 });
 
 test("a retry after a failure clears the previous error before re-fetching", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", { turns: [{ id: "turn_2", status: "completed", itemsView: "full", items: [] }] }),
     olderCursor: "cursor_1",
@@ -697,7 +697,7 @@ test("a retry after a failure clears the previous error before re-fetching", asy
 // leaving loadingOlder stuck true forever, and does so without ever
 // becoming an unhandled rejection (vitest fails the run on those).
 test("a rejected loadOlder() propagates to the caller and still resets loadingOlder to false", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -718,7 +718,7 @@ afterEach(() => vi.useRealTimers());
 
 test("retains older-page demand through prolonged failure and heals without another gesture", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", { turns: [{ id: "turn_2", status: "completed", itemsView: "full", items: [] }] }),
     olderCursor: "cursor_1",
@@ -753,7 +753,7 @@ test("retains older-page demand through prolonged failure and heals without anot
 
 test.each([false, true])("suspends older-page retries and resumes on return (StrictMode: %s)", async (strict) => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "cursor_1" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -791,7 +791,7 @@ test.each([false, true])("suspends older-page retries and resumes on return (Str
 
 test("jumping live cancels this pane's recovery without cancelling another pane", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
   let attempts = 0;
   fake.on("thread/turns/list", () => {
@@ -838,7 +838,7 @@ test.each(["failure", "unresolved"])(
   "returning Jump to live cancels %s demand after a fulfilled or rejected read",
   async (outcome) => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
     await act(async () => {
       await threadsStore.getState().ensureThread("ref_a");
@@ -874,7 +874,7 @@ test.each(["failure", "unresolved"])(
 
 test("Retry after a permanent failure retains the removed consumer until the returned pane jumps live", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -922,7 +922,7 @@ test.each([
   "returning to a session retains or abandons demand (jump live: $jump, StrictMode: $strict)",
   async ({ jump, strict }) => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", ({ ref }) => ({
       thread: testThread(ref ?? "ref_a", {
         turns: [{ id: "latest", status: "completed", itemsView: "full", items: [] }],
@@ -969,7 +969,7 @@ test.each([
 
 test("jumping live preserves an inactive open transcript's demand across pane record replacement", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -1012,7 +1012,7 @@ test("jumping live preserves an inactive open transcript's demand across pane re
 
 test("returning Jump to live cancels demand before the removed pane's in-flight failure settles", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
   await act(async () => {
     await threadsStore.getState().ensureThread("ref_a");
@@ -1056,7 +1056,7 @@ test.each([false, true])(
   "concurrent workspace readers can cancel an in-flight page after one leaves (first already cancelled: %s)",
   async (cancelFirst) => {
     vi.useFakeTimers();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
     await act(async () => {
       await threadsStore.getState().ensureThread("ref_a");
@@ -1110,7 +1110,7 @@ test.each([false, true])(
   "retains failed demand across client replacement (temporary null: %s)",
   async (clearClient) => {
     vi.useFakeTimers();
-    const first = connectFakeClient();
+    const first = connectReadyFakeClient();
     first.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
     first.on("thread/turns/list", () => {
       throw new Error("temporary");
@@ -1146,7 +1146,7 @@ test.each([false, true])(
 
 test("does not transfer old demand into a different conversation binding at the same ref", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a"), olderCursor: "page" }));
   let attempts = 0;
   fake.on("thread/turns/list", () => {
@@ -1178,7 +1178,7 @@ test("does not transfer old demand into a different conversation binding at the 
 
 test("abandoned first-binding renders cannot retire retained pre-hydration demand", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const waiting = renderHook(() => useTranscript("ref_a"));
   await act(async () => {
     await waiting.result.current.loadOlder();
@@ -1211,7 +1211,7 @@ test("abandoned first-binding renders cannot retire retained pre-hydration deman
 
 test("unavailable history stays pending while a hydrated model with no cursor confirms the end", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({ thread: testThread("ref_a") }));
   const hook = renderHook(() => useTranscript("ref_a"));
   await act(async () => {
@@ -1231,7 +1231,7 @@ test("unavailable history stays pending while a hydrated model with no cursor co
 
 test("a committed ref change routes automatic demand to that ref with another reader still active", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", (params) => {
     if (params.ref === undefined) throw new Error("Expected a ref-bound transcript read.");
     return { thread: testThread(params.ref), olderCursor: "page-1" };
@@ -1283,7 +1283,7 @@ test("a committed ref change routes automatic demand to that ref with another re
 
 test("keeps fulfilled unresolved history quiet and paces geometry demand until it heals", async () => {
   vi.useFakeTimers();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", { turns: [{ id: "turn_2", status: "completed", itemsView: "full", items: [] }] }),
     olderCursor: "cursor_1",
@@ -1332,7 +1332,7 @@ function installEntryPaneRoute(label: string, maxBytes?: number) {
     ...(maxBytes === undefined ? {} : { maxBytes }),
   });
   const fixture = observeProductionEntryForTests(entryCache, REF);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const item = (entry: number, turnId: string) => ({
     type: "agentMessage" as const,
     id: `item-${entry}`,

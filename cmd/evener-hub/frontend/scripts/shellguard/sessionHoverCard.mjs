@@ -346,7 +346,9 @@ async function touchJourney(driver) {
   assertCard(await measureCard(driver), false);
   await driver.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 16, y: 20 }] });
   await driver.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await driver.waitPage("window.__sessionHoverGuard.card() === null", { label: "outside touch dismisses the refreshed card" });
+  await driver.waitPage("window.__sessionHoverGuard.card() === null", {
+    label: "outside touch dismisses the refreshed card",
+  });
 
   await driver.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: point.x, y: point.y }] });
   await driver.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });

@@ -27,7 +27,7 @@ const (
 type aliasParents map[string]string
 
 func (p aliasParents) parent(ref string) (string, string, bool) {
-	ref = hubRefFromTreeNodeID(ref).SessionID
+	ref = hubRefFromTreeNodeID(ref).ThreadID
 	next, ok := p[ref]
 	kind := "subagent"
 	if ref == aliasForkOrigID {

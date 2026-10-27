@@ -173,7 +173,7 @@ function lineBoxesOf(el) {
   return Array.from(range.getClientRects());
 }
 
-window.measure = function () {
+window.measure = () => {
   const host = document.querySelector(".host");
   const transcript = document.getElementById("transcript");
   const footer = document.getElementById("pane-footer");

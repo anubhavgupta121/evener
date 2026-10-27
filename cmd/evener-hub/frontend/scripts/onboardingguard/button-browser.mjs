@@ -19,7 +19,9 @@ try {
       restoreAfterObservation = false;
       observations++;
       assert.equal(await evaluate(send, "window.clicks"), 0, "blocked control was activated");
-      await evaluate(send, `(() => {
+      await evaluate(
+        send,
+        `(() => {
         const old = document.querySelector('button');
         const next = old.cloneNode(true);
         next.disabled = false;
@@ -28,18 +30,24 @@ try {
         next.addEventListener('click', () => window.clicks++);
         old.replaceWith(next);
         document.querySelector('#cover')?.remove();
-      })()`);
+      })()`,
+      );
     }
     return result;
   };
   for (const state of ["disabled", "aria-disabled", "hidden", "covered"]) {
-    await evaluate(send, `(() => {
+    await evaluate(
+      send,
+      `(() => {
       document.body.innerHTML = '<button>fixture-action</button>';
       window.clicks = 0;
       document.querySelector('button').addEventListener('click', () => window.clicks++);
-    })()`);
+    })()`,
+    );
     const pause = async () => {
-      await evaluate(send, `(() => {
+      await evaluate(
+        send,
+        `(() => {
         const b = document.querySelector('button');
         const state = ${JSON.stringify(state)};
         if (state === 'disabled') b.disabled = true;
@@ -51,14 +59,17 @@ try {
           cover.style.cssText = 'position:fixed;inset:0;z-index:100;background:white';
           document.body.append(cover);
         }
-      })()`);
+      })()`,
+      );
       restoreAfterObservation = true;
     };
     await button(driver, pause, "fixture-action");
     assert.equal(await evaluate(send, "window.clicks"), 1, `${state}: replacement activated exactly once`);
   }
   assert.equal(observations, 4);
-  console.log("PASS actual onboarding helper waits through disabled, aria-disabled, hidden and covered DOM replacements");
+  console.log(
+    "PASS actual onboarding helper waits through disabled, aria-disabled, hidden and covered DOM replacements",
+  );
 } finally {
   await driver.stop();
 }

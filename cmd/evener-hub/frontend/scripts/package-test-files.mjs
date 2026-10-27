@@ -17,7 +17,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
-import { isLoadedAtRuntime, moduleSpecifierSites, parseSource, walkImportGraph } from "../../../../scripts/sdk/module-specifiers.mjs";
+import {
+  isLoadedAtRuntime,
+  moduleSpecifierSites,
+  parseSource,
+  walkImportGraph,
+} from "../../../../scripts/sdk/module-specifiers.mjs";
 import { resolveSourceFile } from "../../../../scripts/sdk/resolve-source.mjs";
 import { CONSUMER_TREES, isTestFile, sourceFiles } from "../../../../scripts/sdk/source-files.mjs";
 
@@ -95,7 +100,13 @@ export function describeCwdRelativeReads(files, read, dir) {
             ? node.expression.text
             : null;
         const first = node.arguments[0];
-        if (callee && FS_PATH_FUNCTIONS.has(callee) && first && ts.isStringLiteralLike(first) && cwdRelativeLiteral(first.text)) {
+        if (
+          callee &&
+          FS_PATH_FUNCTIONS.has(callee) &&
+          first &&
+          ts.isStringLiteralLike(first) &&
+          cwdRelativeLiteral(first.text)
+        ) {
           const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line;
           if (!seen.has(line)) {
             seen.add(line);
@@ -178,8 +189,7 @@ export function describeAppImports(files, read, dir) {
     path.join(repoRoot, "mobile-native"),
     path.join(repoRoot, "mobile", "src"),
   ];
-  const intoAppTree = (resolved) =>
-    appTrees.some((tree) => resolved === tree || resolved.startsWith(tree + path.sep));
+  const intoAppTree = (resolved) => appTrees.some((tree) => resolved === tree || resolved.startsWith(tree + path.sep));
   const offenders = [];
   for (const file of files) {
     for (const site of moduleSpecifierSites(ts, parseSource(ts, file, read(file)))) {

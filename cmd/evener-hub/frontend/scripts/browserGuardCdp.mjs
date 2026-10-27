@@ -1132,7 +1132,9 @@ export async function clearViewportOverride(send) {
       }),
       30000,
       "Browser.setWindowBounds",
-    ).then(() => originalViewportWindows.delete(send)).catch(() => {});
+    )
+      .then(() => originalViewportWindows.delete(send))
+      .catch(() => {});
   }
   await withTimeout(send("Emulation.clearDeviceMetricsOverride"), 30000, "Emulation.clearDeviceMetricsOverride").catch(
     () => {},

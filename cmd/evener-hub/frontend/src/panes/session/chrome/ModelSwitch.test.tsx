@@ -6,9 +6,9 @@ import { WireError } from "@evener/appwire-client";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
-import { connectFakeClient } from "../../../connectionTestUtils";
 import { connectionStore } from "../../../stores/connection";
 import { resetThreadsStoreForTests } from "../../../stores/threads";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES } from "../../../threadTestUtils";
 import { Toast } from "../../../widgets";
 import { resetToastStoreForTests } from "../../../widgets/toast/store";
@@ -131,7 +131,7 @@ test("the trigger is disabled when the thread's changeModel capability is unavai
 
 test("a failed turn's idle capabilities re-enable model switching without reload", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   let called: unknown;
   fake.on("thread/model/set", (params) => {
@@ -192,7 +192,7 @@ test.each([
 // daemon has, and it took the switch away from every cold session too.
 test("a mid-turn refusal surfaces as a toast rather than a disabled trigger", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   fake.on("thread/model/set", () => {
     throw new Error("turn turn_1 is active");
@@ -221,7 +221,7 @@ test("a mid-turn refusal surfaces as a toast rather than a disabled trigger", as
 // no client-side pending-model state to hold.
 test("a cold exited session sends the same thread/model/set - the hub owns the resume", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   let called: unknown;
   fake.on("thread/model/set", (params) => {
@@ -243,7 +243,7 @@ test("a cold exited session sends the same thread/model/set - the hub owns the r
 
 test("opening the picker fetches the catalog via listModels and shows a loading state until it resolves", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const box: { resolve: ((r: ModelListResponse) => void) | null } = { resolve: null };
   fake.on("model/list", () => new Promise((resolve) => (box.resolve = resolve)));
 
@@ -257,7 +257,7 @@ test("opening the picker fetches the catalog via listModels and shows a loading 
 
 test("renders every catalog entry as an option immediately once loaded, with no keystroke", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -269,7 +269,7 @@ test("renders every catalog entry as an option immediately once loaded, with no 
 
 test("typing filters the option list by provider/model substring", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -285,7 +285,7 @@ test("typing filters the option list by provider/model substring", async () => {
 
 test("picking an option calls setModel with that option's provider/model and closes the picker", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   let called: unknown;
   fake.on("thread/model/set", (params) => {
@@ -316,7 +316,7 @@ test("picking an option calls setModel with that option's provider/model and clo
 // for friendlyErrorMessage's own contract.
 test("a failed catalog fetch surfaces a friendly message inline, keeping the field and the trigger", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => {
     throw new Error("catalog boom");
   });
@@ -343,7 +343,7 @@ test("a failed catalog fetch surfaces a friendly message inline, keeping the fie
 // detail, never meant for the screen.
 test("a client-unreachable rejection (the reported bug) shows the friendly hub-unreachable sentence, not the raw AppwireClient text", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => {
     throw new Error('AppwireClient: cannot call "model/list" while state is "closed"');
   });
@@ -368,7 +368,7 @@ test("a client-unreachable rejection (the reported bug) shows the friendly hub-u
 // actionable copy instead of the launch-check's own raw text.
 test("a daemon-missing catalog fetch shows actionable copy under the session-start headline", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => {
     throw new WireError("evener launch-check timed out", -32014, { evenerErrorInfo: "hubLaunch" });
   });
@@ -392,7 +392,7 @@ test("a daemon-missing catalog fetch shows actionable copy under the session-sta
 // its Cancel button (parity with the legacy live picker's dismiss affordances).
 test("pressing Escape closes an open picker", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -409,7 +409,7 @@ test("pressing Escape closes an open picker", async () => {
 // neither may dismiss it (it used to close on any scroll).
 test("a scroll does not close the open picker", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -426,7 +426,7 @@ test("a scroll does not close the open picker", async () => {
 // ModelSwitch's own job. Without it, focus falls to <body>.
 test("closing returns focus to the trigger", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -441,7 +441,7 @@ test("closing returns focus to the trigger", async () => {
 
 test("a click outside the open picker closes it", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
 
   render(
@@ -461,7 +461,7 @@ test("a click outside the open picker closes it", async () => {
 
 test("a failed setModel surfaces an error toast - the picker is already closed (optimistic close), no rollback", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   fake.on("thread/model/set", () => {
     throw new Error("switch boom");
@@ -489,7 +489,7 @@ test("a failed setModel surfaces an error toast - the picker is already closed (
 // setThreadModelWithResume). A failed resume is not a failed model change.
 test("a setModel that fails because the session would not start names the start, not the model change", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", () => modelListResponse());
   fake.on("thread/model/set", () => {
     throw new WireError("evener launch-check timed out", -32014, { evenerErrorInfo: "hubLaunch" });
@@ -517,7 +517,7 @@ test("a setModel that fails because the session would not start names the start,
 // open picker re-reads it and shows the new list without being reopened.
 test("an open picker shows the hub's refreshed model list when it is announced", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let response = modelListResponse();
   fake.on("model/list", () => response);
   render(<ModelSwitch sessionRef="ref_a" model={testModel()} />);
@@ -535,7 +535,7 @@ test("an open picker shows the hub's refreshed model list when it is announced",
 // empty successful response until the RPC explicitly requests live discovery.
 test("session picker retry refreshes a cached empty catalogue through the RPC", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("model/list", (params) =>
     params.refresh
       ? modelListResponse()

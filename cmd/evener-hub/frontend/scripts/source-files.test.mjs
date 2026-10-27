@@ -34,7 +34,11 @@ test("it returns the source files a directory holds, skipping the rest", () => {
     "/pkg/sub": [entry("child.tsx"), entry("child.test.ts")],
   };
   const readdir = (dir) => tree[dir] ?? [];
-  assert.deepEqual(sourceFiles("/pkg", { readdir }).sort(), ["/pkg/index.ts", "/pkg/sub/child.test.ts", "/pkg/sub/child.tsx"]);
+  assert.deepEqual(sourceFiles("/pkg", { readdir }).sort(), [
+    "/pkg/index.ts",
+    "/pkg/sub/child.test.ts",
+    "/pkg/sub/child.tsx",
+  ]);
   assert.deepEqual(sourceFiles("/pkg", { readdir, keep: (name) => !name.includes(".test.") }).sort(), [
     "/pkg/index.ts",
     "/pkg/sub/child.tsx",

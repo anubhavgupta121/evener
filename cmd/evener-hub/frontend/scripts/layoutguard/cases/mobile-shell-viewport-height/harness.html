@@ -240,7 +240,7 @@ async function measureFixture(name) {
   };
 }
 
-window.measure = async function () {
+window.measure = async () => {
   const measurements = [];
   for (const fixture of FIXTURES) {
     await showFixture(fixture);

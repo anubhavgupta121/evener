@@ -98,13 +98,11 @@ function assertClosed(snapshot, label, failures) {
   if (snapshot.label !== "Refreshed my memory") {
     failures.push(`${label}: heading=${JSON.stringify(snapshot.label)}, expected "Refreshed my memory"`);
   }
-  if ((snapshot.contentText ?? "").includes("memory index: \"")) {
+  if ((snapshot.contentText ?? "").includes('memory index: "')) {
     failures.push(`${label}: the collapsed row leaked the model-facing text`);
   }
   if (snapshot.docScrollWidth > snapshot.docClientWidth + 1) {
-    failures.push(
-      `${label}: the page scrolls sideways (${snapshot.docScrollWidth}px in ${snapshot.docClientWidth}px)`,
-    );
+    failures.push(`${label}: the page scrolls sideways (${snapshot.docScrollWidth}px in ${snapshot.docClientWidth}px)`);
   }
   if (snapshot.detailsScrollWidth > snapshot.detailsClientWidth + 1) {
     failures.push(
@@ -137,7 +135,7 @@ async function assertAt(cdpEndpoint, vitePort, width) {
     if (!(opened.contentText ?? "").includes("guard checked")) {
       failures.push(`${label}: the formatted body is missing the decoded index`);
     }
-    if ((opened.contentText ?? "").includes("memory index: \"")) {
+    if ((opened.contentText ?? "").includes('memory index: "')) {
       failures.push(`${label}: the formatted body rendered the escaped section text`);
     }
     if (!(opened.sourceText ?? "").includes("- [x] guard checked")) {
@@ -146,7 +144,7 @@ async function assertAt(cdpEndpoint, vitePort, width) {
     if (!(opened.sourceText ?? "").includes("- [ ] guard unchecked")) {
       failures.push(`${label}: the Source lost an unchecked task marker`);
     }
-    if (!(opened.sourceText ?? "").includes("memory index: \"")) {
+    if (!(opened.sourceText ?? "").includes('memory index: "')) {
       failures.push(`${label}: the Source is not the complete original Text`);
     }
     if (opened.detailsScrollWidth > opened.detailsClientWidth + 1) {
@@ -227,9 +225,7 @@ async function main() {
         failed++;
         for (const failure of failures) console.error(`memoryguard FAIL: ${failure}`);
       } else {
-        console.log(
-          `memoryguard ok: ${width}px closed/open geometry, pointer + keyboard, literal Source, no overflow`,
-        );
+        console.log(`memoryguard ok: ${width}px closed/open geometry, pointer + keyboard, literal Source, no overflow`);
       }
     }
 

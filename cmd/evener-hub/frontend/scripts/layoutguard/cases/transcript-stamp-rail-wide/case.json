@@ -15,10 +15,7 @@
     "deviceScaleFactor": 1,
     "mobile": false
   },
-  "widthMatrix": [
-    { "width": 1300, "window": 1920 },
-    { "width": 1112, "window": 1920 }
-  ],
+  "widthMatrix": [{ "width": 1300, "window": 1920 }, { "width": 1112, "window": 1920 }],
   "mutation": {
     "declaration": "agentmessageitem.module.css: the 55-75rem wide-measure override rule's `position: static` removed, leaving the rail engaged in the band",
     "verified": "2026-09-09",

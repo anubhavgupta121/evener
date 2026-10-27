@@ -42,14 +42,19 @@ export default async function assert(measurements) {
   } else if (!supportsShellRule) {
     failures.push(`@supports (height: 100dvh) block is missing its .shell override (loaded block: ${supportsBlock})`);
   } else if (dynamicIndex < 0) {
-    failures.push(`@supports (height: 100dvh) .shell override is missing height: 100dvh (loaded rule: ${supportsShellRule})`);
+    failures.push(
+      `@supports (height: 100dvh) .shell override is missing height: 100dvh (loaded rule: ${supportsShellRule})`,
+    );
   }
 
   for (const measurement of measurements) {
     const fixtureName = measurement.fixture;
     const visibleViewportHeight = measurement.visualViewport?.height ?? measurement.viewport.height;
 
-    if (measurement.viewport.width !== expectedViewport.width || measurement.viewport.height !== expectedViewport.height) {
+    if (
+      measurement.viewport.width !== expectedViewport.width ||
+      measurement.viewport.height !== expectedViewport.height
+    ) {
       failures.push(
         `${fixtureName}: viewport is ${measurement.viewport.width}x${measurement.viewport.height}, expected ${expectedViewport.width}x${expectedViewport.height}`,
       );
@@ -108,7 +113,9 @@ export default async function assert(measurements) {
     ]) {
       if (!box) continue;
       if (box.bottom > visibleViewportHeight + tolerance) {
-        failures.push(`${fixtureName}: ${name} escapes the viewport by ${(box.bottom - visibleViewportHeight).toFixed(1)}px`);
+        failures.push(
+          `${fixtureName}: ${name} escapes the viewport by ${(box.bottom - visibleViewportHeight).toFixed(1)}px`,
+        );
       }
     }
 
@@ -132,7 +139,8 @@ export default async function assert(measurements) {
   return failures.length === 0
     ? {
         pass: true,
-        reason: "session and non-session mobile shell fixtures stay within the visible viewport and .shell keeps its 100vh base fallback plus @supports(100dvh) override contract",
+        reason:
+          "session and non-session mobile shell fixtures stay within the visible viewport and .shell keeps its 100vh base fallback plus @supports(100dvh) override contract",
       }
     : {
         pass: false,

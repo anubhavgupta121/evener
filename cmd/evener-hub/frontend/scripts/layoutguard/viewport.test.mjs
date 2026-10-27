@@ -3,7 +3,9 @@ import { diagnoseRealizedViewport, normalizeViewportSpec } from "./viewport.mjs"
 
 describe("normalizeViewportSpec", () => {
   test("accepts a valid explicit viewport", () => {
-    expect(normalizeViewportSpec({ width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, "mobile-case")).toEqual({
+    expect(
+      normalizeViewportSpec({ width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, "mobile-case"),
+    ).toEqual({
       width: 390,
       height: 844,
       deviceScaleFactor: 2,

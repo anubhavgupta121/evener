@@ -17,9 +17,9 @@ import type {
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectFakeClient } from "../../../../connectionTestUtils";
 import { connectionStore } from "../../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../../stores/extensions";
+import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { resetToastStoreForTests } from "../../../../widgets/toast/store";
 import { LaunchConfigForm } from "./LaunchConfigForm";
 
@@ -33,7 +33,7 @@ beforeEach(() => {
   vi.useRealTimers();
   connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
   resetExtensionsStoreForTests();
-  connectFakeClient();
+  connectReadyFakeClient();
 });
 
 const OK_VALIDATE = async (path: string): Promise<PathValidateResponse> => ({ path, valid: true });

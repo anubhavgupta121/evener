@@ -14,7 +14,6 @@ import userEvent from "@testing-library/user-event";
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { StrictMode, useEffect, useSyncExternalStore } from "react";
 import { afterEach, beforeAll, beforeEach, expect, onTestFinished, test, vi } from "vitest";
-import { connectFakeClient } from "../../connectionTestUtils";
 import { appliedReceipt } from "../../mutationReceiptTestUtils";
 import { activitySidebarStore, resetActivitySidebarStoreForTests } from "../../shell/activitybar/activitySidebarStore";
 import { openAttentionSession, restoreCurrentAttentionEntry } from "../../shell/attentionHistory";
@@ -27,7 +26,7 @@ import * as StatusBarModule from "../../shell/statusbar/StatusBar";
 import { resetMobileViewportForTests } from "../../shell/useIsMobile";
 import { type OpenPaneRecord, resetWorkspaceStoreForTests, workspaceStore } from "../../shell/workspace";
 import { activityPanelStore, resetActivityPanelStoreForTests } from "../../stores/activityPanel";
-import { connectionStore } from "../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../stores/connection";
 import { MutationOutboxIndexedDB } from "../../stores/mutationOutboxIndexedDB";
 import { navigationStore, resetNavigationStoreForTests } from "../../stores/navigation/store";
 import { sessionActivitySnapshot } from "../../stores/sessionActivity";
@@ -86,6 +85,8 @@ import { retainedTranscriptReadView } from "./transcript/transcriptReadView";
 import { resetTranscriptPagingForTests } from "./transcript/useTranscript";
 import "./testing/editorGeometry";
 import { installLocalStorage, MemoryStorage } from "../../storageTestUtils";
+import { readModuleCss } from "../../styles/cssBlock";
+import { connectReadyFakeClient } from "../../testing/connectionTestUtils";
 import { writeSeenWatermark } from "./transcript/flow/seenWatermark";
 import * as useTranscriptScrollModule from "./transcript/flow/useTranscriptScroll";
 
@@ -378,7 +379,7 @@ beforeEach(() => {
   stubSessionSlots();
   globalThis.indexedDB = new IDBFactory();
   globalThis.IDBKeyRange = IDBKeyRange;
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
   resetTranscriptPagingForTests();
   resetAskDockStoreForTests();
@@ -417,7 +418,7 @@ test("the real Session binds its committed pane source across a view remount", a
     stubSessionSlots();
   });
   const encoding = installControlledImageEncoding();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("root"));
   const pane = { id: "source-pane", type: "session" as const, params: { ref: "root" }, slot: "main" as const };
   workspaceStore.setState({ panes: [pane], focusedPaneId: pane.id });
@@ -458,7 +459,7 @@ test("the real Session consumer retains its structured editor and pending images
     stubSessionSlots();
   });
   const encoding = installControlledImageEncoding();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref }) => {
     const threadRef = ref ?? "origin";
     return readResponse(threadRef, {
@@ -753,7 +754,7 @@ test("real same-URL readers preserve the exact owning reader through attention B
     stubSessionSlots();
   });
   const encoding = installControlledImageEncoding();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref }) => {
     if (!ref) throw new Error("thread/read requires a ref");
     return readResponse(ref, { id: `thr_${ref}`, sessionId: `session-${ref}` });
@@ -940,7 +941,7 @@ test.each(["primary", "secondary", "cascade leaf", "focus-only departure"] as co
       vi.restoreAllMocks();
       stubSessionSlots();
     });
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", ({ ref }) => {
       if (!ref) throw new Error("thread/read requires a ref");
       return readResponse(ref, {
@@ -1378,7 +1379,7 @@ test("desktop session panes own separate location and activity footers", async (
   vi.mocked(StatusBarModule.StatusBar).mockRestore();
   onTestFinished(stubSessionSlots);
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref }) => {
     if (ref === undefined) throw new Error("thread/read requires a ref");
     return readResponse(ref, { cwd: `/work/${ref}` });
@@ -1436,7 +1437,7 @@ test("same-session pane menus open Overview from their own instance", async ({ o
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   onTestFinished(stubSessionSlots);
   const ref = "local:duplicate-overview";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse(ref));
   fake.on("evener/thread/activity/read", ({ scope }) => activitySummary(ref, scope));
   fake.on("evener/git/head", () => ({ head: "main" }));
@@ -1481,7 +1482,7 @@ test("mobile omits repo location and the desktop activity footer", async ({ onTe
       removeEventListener: () => {},
     })),
   );
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("local:mobile", { cwd: "/work/mobile" }));
   fake.on("evener/git/head", () => ({ head: "mobile-branch", originUrl: "git@github.com:owner/repo.git" }));
   render(
@@ -1505,7 +1506,7 @@ test.each(["closed", "ended", "notLoaded"] as const)(
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
     const user = userEvent.setup();
     const ref = "local:stop-focus";
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => readResponse(ref, { status: { type: "active" } }));
     fake.on("evener/thread/activity/read", ({ scope }) => activitySummary(ref, scope));
     render(
@@ -1540,7 +1541,7 @@ test.each(["closed", "ended", "notLoaded"] as const)(
 );
 
 test("shows a loading placeholder before the thread hydrates", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const box: { resolve: ((r: ThreadReadResponse) => void) | null } = { resolve: null };
   fake.on("thread/read", () => new Promise<ThreadReadResponse>((resolve) => (box.resolve = resolve)));
 
@@ -1565,7 +1566,7 @@ test("shows a loading placeholder before the thread hydrates", async () => {
 });
 
 test("mounts TopNotesPanel at the top of the session content once hydrated", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => Promise.resolve(readResponse("ref_notes_top")));
 
   render(
@@ -1587,7 +1588,7 @@ test("mounts TopNotesPanel at the top of the session content once hydrated", asy
 // from the deleted case (a REJECTED read carrying the deletion fence's own
 // WireError), which is the next test.
 test("a slow-but-alive ref keeps showing the loading placeholder, never the deleted state", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => new Promise<ThreadReadResponse>(() => {})); // never resolves or rejects
 
   render(
@@ -1614,7 +1615,7 @@ test("a slow-but-alive ref keeps showing the loading placeholder, never the dele
 // replaces it with the transcript once a read lands (Copy Is Not a Test
 // Oracle: no assertion pins the label's wording).
 test("a ref whose index is being rebuilt shows a loading status that recovers with the repair, never a deletion", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let reads = 0;
   fake.on("thread/read", () => {
     reads += 1;
@@ -1671,7 +1672,7 @@ test("a ref whose index is being rebuilt shows a loading status that recovers wi
 test("a repairing ref's loading status differs from a plain in-flight read's", async () => {
   // A plain read that never settles holds the loading face with the flag
   // unset, so its label is the baseline a repair must not repeat.
-  const plain = connectFakeClient();
+  const plain = connectReadyFakeClient();
   plain.on("thread/read", () => new Promise(() => {}));
   const plainView = render(
     <ClientProvider client={plain}>
@@ -1686,7 +1687,7 @@ test("a repairing ref's loading status differs from a plain in-flight read's", a
   // A ref whose every read answers the hub's transcriptIndexRebuilding
   // discriminant stays in the repair window: the flag is set (threads.test.ts
   // pins that lifecycle), and the loading face must answer it.
-  const repairing = connectFakeClient();
+  const repairing = connectReadyFakeClient();
   repairing.on("thread/read", () => {
     throw new WireError("thread history is being rebuilt in the background", -32000, {
       evenerErrorInfo: "transcriptIndexRebuilding",
@@ -1720,7 +1721,7 @@ test("a repairing ref's loading status differs from a plain in-flight read's", a
 // this pane ever gives up. This pane's own probe reads the same wire signal
 // directly instead of trusting that loop to surface it.
 test("a deleted ref shows an honest empty state instead of loading forever, and Close returns to welcome", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => {
     throw new WireError("target has been deleted: local:ref_gone", -32001, {
       evenerErrorInfo: "actionUnavailable",
@@ -1759,7 +1760,7 @@ test("a deleted ref shows an honest empty state instead of loading forever, and 
 // state instead of leaving it on screen. The store keeps the cached model, so
 // the surface has to key off the deletion flag, not "no model".
 test("a deletion fence after hydration replaces a cached transcript with the deleted surface", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_gone", { name: "Soon gone" }));
   render(
     <ClientProvider client={fake}>
@@ -1790,7 +1791,7 @@ test("a deletion fence after hydration replaces a cached transcript with the del
 });
 
 test("shows the thread's live name once hydrated, not the raw ref", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { name: "My session" }));
 
   render(
@@ -1803,7 +1804,7 @@ test("shows the thread's live name once hydrated, not the raw ref", async () => 
 });
 
 test("omits the old live Detail toolbar while transcript and older-history content remain reachable", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     ...readResponse("ref_a", {
       turns: [
@@ -1855,7 +1856,7 @@ test("omits the old live Detail toolbar while transcript and older-history conte
 });
 
 test("falls back to the raw ref as the title when the thread has no name yet", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -1915,7 +1916,7 @@ function setNavigationTitle(ref: string, title: string, topLevel = true, fields:
 // so the session's blue dot clears on the phone too.
 test("opening the pane marks the session's unseen turn seen", async () => {
   setNavigationTitle("ref_a", "Finished work", true, { turn_ended_at: "2026-09-26T11:58:00.123Z", unseen: true });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
   fake.on("evener/session/seen/set", () => ({
     ok: true,
@@ -1944,7 +1945,7 @@ test("opening the pane marks the session's unseen turn seen", async () => {
 // tab. This is that same fallback, applied to the in-pane header.
 test("falls back to the navigation location title as the header when no thread name is known yet", async () => {
   setNavigationTitle("ref_a", "Fix the flaky CI job");
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -1965,7 +1966,7 @@ test("falls back to the navigation location title as the header when no thread n
 // situation each, and each one asserts the OTHER's copy is absent - a single
 // string that happened to satisfy both would be exactly the bug.
 test("a session that has never run invites the first message", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a")); // testThread's default: idle, no turns
 
   render(
@@ -2007,7 +2008,7 @@ async function resumeViaSend(ref: string, text = "resume and continue"): Promise
 test("cold-start skeleton stays through optimistic send and user echo, then ends on the first authoritative frame", async () => {
   vi.mocked(ComposerModule.Composer).mockRestore();
   onTestFinished(stubSessionSlots);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
   render(
@@ -2103,7 +2104,7 @@ test("cold-start skeleton stays through optimistic send and user echo, then ends
 });
 
 test("cold-start skeleton stays through durable outbox settlement after an identified user echo", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
   render(
@@ -2189,7 +2190,7 @@ test("cold-start skeleton stays through durable outbox settlement after an ident
 });
 
 test("cold-start skeleton clears when the first turn terminates without an authoritative frame", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
   render(
@@ -2229,7 +2230,7 @@ test("cold-start skeleton clears when the first turn terminates without an autho
 });
 
 test("an explicitly rejected first send leaves cold-start state for durable recovery", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -2253,7 +2254,7 @@ test("an explicitly rejected first send leaves cold-start state for durable reco
 test.each(["failed", "error", "cancelled"])(
   "a first turn marked %s clears the skeleton even when active flags remain",
   async (status) => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
     render(
@@ -2286,7 +2287,7 @@ test.each(["failed", "error", "cancelled"])(
 test.each(["closed", "systemError"] as const)(
   "the raw terminal thread status %s clears cold-start awaiting state",
   async (status) => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => readResponse("ref_a"));
 
     render(
@@ -2310,7 +2311,7 @@ test.each(["closed", "systemError"] as const)(
 );
 
 test("a later turn never gets the first-turn skeleton", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -2340,7 +2341,7 @@ test("a later turn never gets the first-turn skeleton", async () => {
 });
 
 test("cold-start skeleton is scoped to the session ref and disappears on session change", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref }) => readResponse(ref ?? "ref_a"));
 
   const view = render(
@@ -2361,7 +2362,7 @@ test("cold-start skeleton is scoped to the session ref and disappears on session
 });
 
 test("a session whose first turn is still running says it is waiting, and never asks for a message it already has", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "active" } }));
 
   render(
@@ -2377,7 +2378,7 @@ test("a session whose first turn is still running says it is waiting, and never 
 });
 
 test("renders turns via VirtualList/TurnBlock once hydrated", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -2415,7 +2416,7 @@ function turnFixture(id: string, text: string) {
 
 test("shows the seen divider above the first turn that arrived after the stored watermark", async () => {
   writeSeenWatermark("ref_a", "turn_1");
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", { turns: [turnFixture("turn_1", "first"), turnFixture("turn_2", "second")] }),
   );
@@ -2437,7 +2438,7 @@ test("shows the seen divider above the first turn that arrived after the stored 
 // position; this pins that Session renders no divider when the hook finds
 // none, and that unmounting records the last turn for the next visit.
 test("a first-ever visit shows no divider, and unmounting stores the last turn as the watermark", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", { turns: [turnFixture("turn_1", "first"), turnFixture("turn_2", "second")] }),
   );
@@ -2463,7 +2464,7 @@ test("a first-ever visit shows no divider, and unmounting stores the last turn a
 test("derives the live thread projection once per model revision", async ({ onTestFinished }) => {
   const project = vi.spyOn(appwireClient, "projectThread");
   onTestFinished(() => project.mockRestore());
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { turns: [turnFixture("turn_1", "hello")] }));
 
   render(
@@ -2496,7 +2497,7 @@ test("derives the live thread projection once per model revision", async ({ onTe
 // TurnBlock render, the diagnostic still renders but the recovery button is
 // dark (a shipped, tested feature silently non-functional).
 test("a failed turn's Retry action submits continuation in the real Session tree", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const inputs: unknown[] = [];
   fake.on("turn/start", ({ input, clientMutationId }) => {
     inputs.push(input);
@@ -2546,7 +2547,7 @@ test("a failed turn's Retry action submits continuation in the real Session tree
 });
 
 test("ensureThread fires exactly once when the client is already ready at mount time", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -2606,7 +2607,7 @@ test("unmounting before the client ever becomes ready calls neither ensureThread
 });
 
 test("releaseThread fires exactly once on unmount", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   const { unmount } = render(
@@ -2624,7 +2625,7 @@ test("releaseThread fires exactly once on unmount", async () => {
 });
 
 test("StrictMode's mount-unmount-remount double-invoke nets out to exactly one tracked pane, cleanly released", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -2643,7 +2644,7 @@ test("StrictMode's mount-unmount-remount double-invoke nets out to exactly one t
 });
 
 test("survives unmount/remount mid-stream: durable state lives in the store, not component state", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     versionedReadResponse("ref_a", {
       turns: [{ id: "turn_1", status: "inProgress", itemsView: "full", items: [] }],
@@ -2730,7 +2731,7 @@ test("survives unmount/remount mid-stream: durable state lives in the store, not
 });
 
 test("Cadence's dot reflects the thread's live status via cadenceStateFor, and updates on a live status change", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "active" } }));
 
   render(
@@ -2763,7 +2764,7 @@ test("Cadence's frame trace grows as live notifications arrive, sourced from the
   // Only the interval and the clock are faked (FAKE_CLOCK_ONLY), so the
   // storage and the transcript's frames keep running on real scheduling.
   vi.useFakeTimers(FAKE_CLOCK_ONLY);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -2828,7 +2829,7 @@ function stubScrolledAway(el: HTMLElement) {
 }
 
 test("scrolled away: a live item arriving shows the real NewContentPill, wired through the real VirtualList", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     versionedReadResponse("ref_a", {
       turns: [
@@ -2882,7 +2883,7 @@ test("scrolled away: a live item arriving shows the real NewContentPill, wired t
 });
 
 test("scrolled away with NO new content: the jump-to-latest pill still appears, and clicking it pins the scroll root to its true bottom", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -2926,7 +2927,7 @@ test("scrolled away with NO new content: the jump-to-latest pill still appears, 
 });
 
 test("scrolled away: a turn FAILING while unseen upgrades the real pill to the error variant", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     versionedReadResponse("ref_a", {
       turns: [
@@ -2987,7 +2988,7 @@ test("scrolled away: a turn FAILING while unseen upgrades the real pill to the e
 });
 
 test("clicking the real NewContentPill clears it", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -3059,7 +3060,7 @@ test("clicking the real NewContentPill clears it", async () => {
 // beside the composer, never inside the transcript's floating overlay.
 test("the liveness line renders in the reserved footer beside the composer, never inside the transcript's floating overlay", async () => {
   vi.useFakeTimers(FAKE_CLOCK_ONLY);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", { status: { type: "active" }, turns: [turnFixture("turn_1", "hi")] }),
   );
@@ -3098,7 +3099,7 @@ test("the liveness line renders in the reserved footer beside the composer, neve
 // Retry - not as a toast, which is reserved for actions the user actually
 // initiated.
 test("a failed older-page fetch surfaces inline with a retry instead of failing silently", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", {
       turns: [
@@ -3136,7 +3137,7 @@ test("the live older control loads cached bodies without a server cursor after a
     keyRange: IDBKeyRange,
   });
   setProductionEntryCacheForTests(cache);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", (params) => ({
     thread: testThread("ref_a", {
       turns: [
@@ -3219,7 +3220,7 @@ test("the live older control loads cached bodies without a server cursor after a
 });
 
 test("older turns load with no click at all once the paging trigger fires", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", {
       turns: [
@@ -3255,7 +3256,7 @@ test("older turns load with no click at all once the paging trigger fires", asyn
 });
 
 test("folds a result-only partial turn with its older call and earlier fragment", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => ({
     thread: testThread("ref_a", {
       turns: [
@@ -3341,7 +3342,7 @@ test("folds a result-only partial turn with its older call and earlier fragment"
 });
 
 test("replaces stale item cursor content with a fresh read without a retry row", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let reads = 0;
   fake.on("thread/turns/list", () => {
     throw new WireError("cursor was replaced", -32001, { evenerErrorInfo: "transcriptItemCursorStale" });
@@ -3390,7 +3391,7 @@ test("replaces stale item cursor content with a fresh read without a retry row",
 // --- Composer / SessionChrome placement ----------------------------------
 
 test("mounts Composer with inline session controls and no standalone footer chrome", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a"));
 
   render(
@@ -3407,7 +3408,7 @@ test("mounts Composer with inline session controls and no standalone footer chro
 });
 
 test("mounts Composer even when the transcript is empty (no turns yet) - the composer is always available to send the first message", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a")); // testThread's default has no turns
 
   render(
@@ -3431,7 +3432,7 @@ test("mounts Composer even when the transcript is empty (no turns yet) - the com
 // invitation to send a first message. A transcript whose only turn is that
 // synthetic prelude must count as empty the same way zero turns does.
 test("treats a transcript whose only turn is the synthetic prelude (turn_system) as empty, not as content", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -3471,7 +3472,7 @@ test("treats a transcript whose only turn is the synthetic prelude (turn_system)
 // boilerplate stays visible right where it belongs - above the
 // conversation, exactly as it always has for every session that has run.
 test("does not treat the prelude turn as empty once a real turn exists alongside it", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -3515,8 +3516,7 @@ test("does not treat the prelude turn as empty once a real turn exists alongside
 // virtual list must be able to shrink - a missing min-width: 0 on any flex
 // link pins the whole column to its widest child.
 test("the transcript flex chain carries min-width: 0", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const css = readFileSync(join(here, "session.module.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readModuleCss(import.meta.url, "session.module.css");
   for (const cls of ["transcriptContent", "transcriptList"]) {
     const rule = css.match(new RegExp(`\\.${cls} \\{([^}]*)\\}`));
     expect(rule, `session.module.css must define .${cls}`).not.toBeNull();
@@ -3567,7 +3567,7 @@ test("speaker geometry is declared only in tokens.css, not in session or turnblo
 // stick-to-bottom reacting to a live turn that arrives right after the
 // dormant -> real transition.
 test("a dormant session's transcript follows new content the instant its first real turn arrives, wired through the real VirtualList", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     versionedReadResponse("ref_a", {
       status: { type: "active" },
@@ -3674,7 +3674,7 @@ test("a dormant session's transcript follows new content the instant its first r
 // proven in Composer.test.tsx; here the composer is the stubbed slot, which
 // is exactly what lets this test pin "the dock is NOT the composer's child".
 test("a pending ask_user batch renders as the transcript's last row, not inside the composer", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
   render(
@@ -3770,7 +3770,7 @@ test("a pending ask counts the dock row in the scroll coordinator's rendered row
       return realUseTranscriptScroll(options);
     });
   try {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => versionedReadResponse("ref_a"));
 
     render(
@@ -3871,7 +3871,7 @@ function liveSurfaceThread(): Partial<Thread> {
 test("a dormant live session keeps an idle drain in the QueueStrip", async () => {
   vi.mocked(ComposerModule.Composer).mockRestore();
   onTestFinished(stubSessionSlots);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -3927,7 +3927,7 @@ test("a dormant live session keeps an idle drain in the QueueStrip", async () =>
 // (humanNoteDrafts.ts). A hold parked on a restart-required session waits
 // with the queue, not as a ghost promising delivery.
 test("a restart-required session renders no held ghost for a seeded hold", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       status: { type: "restartRequired" },
@@ -3969,7 +3969,7 @@ test("a restart-required session renders no held ghost for a seeded hold", async
 test("Stop keeps a dormant session's unattempted row in local queue ownership", async () => {
   vi.mocked(ComposerModule.Composer).mockRestore();
   onTestFinished(stubSessionSlots);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       turns: [
@@ -4032,7 +4032,7 @@ test("Stop keeps a dormant session's unattempted row in local queue ownership", 
 });
 
 test("a dormant session announces held delivery after transcript reflection", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       evener: {
@@ -4094,7 +4094,7 @@ test("a dormant session announces held delivery after transcript reflection", as
 });
 
 test("a dormant session keeps the held outcome region through final rejected ghost departure", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       evener: {
@@ -4147,7 +4147,7 @@ test("a dormant session keeps the held outcome region through final rejected gho
 // resumeRequired, or a restart-blocking recovery obligation. No ghost, no
 // announcements, no live-edge row while either fence stands.
 test("a resume-required live session renders no held ghost", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       evener: {
@@ -4185,7 +4185,7 @@ test("a resume-required live session renders no held ghost", async () => {
 });
 
 test("a recovery-fenced live session renders no held ghost", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("ref_a", {
       evener: {
@@ -4229,7 +4229,7 @@ test("a recovery-fenced live session renders no held ghost", async () => {
 });
 
 test("a held steer renders as the live-edge trailing row, under the AskDock when both exist", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => versionedReadResponse("ref_a", liveSurfaceThread()));
 
   render(
@@ -4307,7 +4307,7 @@ test("a held steer renders as the live-edge trailing row, under the AskDock when
 });
 
 test("no trailing row renders when neither an ask nor held steering exists", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", liveSurfaceThread()));
 
   render(
@@ -4331,7 +4331,7 @@ test("a held steer without an ask still counts in renderedRowCount (the one-row-
       return realUseTranscriptScroll(options);
     });
   try {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => readResponse("ref_a", liveSurfaceThread()));
 
     render(
@@ -4369,7 +4369,7 @@ test("heldEpoch bumps on arrival only - never on removal", async () => {
       return realUseTranscriptScroll(options);
     });
   try {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     fake.on("thread/read", () => readResponse("ref_a", liveSurfaceThread()));
     // The hydrated session dispatches the seeded steer at once, and the steer
     // stays held while the daemon has not answered: the test holds that
@@ -4415,7 +4415,7 @@ test("heldEpoch bumps on arrival only - never on removal", async () => {
 });
 
 test("held steering renders only on a live surface: a notLoaded session shows no ghost", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { ...liveSurfaceThread(), status: { type: "notLoaded" } }));
 
   render(
@@ -4440,7 +4440,7 @@ test("held steering renders only on a live surface: a notLoaded session shows no
 // scroll remount would re-announce unchanged text (the AskDockAnnouncements
 // pattern; steering-ghost spec §2).
 test("the held-steer announcements region lives outside the virtual list", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", liveSurfaceThread()));
 
   render(
@@ -4465,7 +4465,7 @@ test("the held-steer announcements region lives outside the virtual list", async
 });
 
 test("an incompatible session shows a plain degraded notice with no buttons", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "restartRequired" } }));
   render(
     <ClientProvider client={fake}>
@@ -4495,7 +4495,7 @@ const emitDaemonGoneResync = (client: FakeClient) =>
   });
 
 test("picks up a daemon exit automatically on evener/thread/resync", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let exited = false;
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: exited ? "idle" : "restartRequired" } }));
   render(
@@ -4521,7 +4521,7 @@ test("picks up a daemon exit automatically on evener/thread/resync", async () =>
 // The replacement connection carries no notification here - only its plain
 // thread/read answers - which is the missed-notification case.
 test("a reconnect recovers the degraded pane without any resync notification", async () => {
-  const first = connectFakeClient();
+  const first = connectReadyFakeClient();
   first.on("thread/read", ({ requestGeneration }) => ({
     ...versionedReadResponse("ref_a", { status: { type: "restartRequired" } }),
     requestGeneration,
@@ -4663,7 +4663,7 @@ test("a fenced remote session's Send drives the resume and then dispatches", asy
 // (which the Resume action reconciles).
 test("a merely-resumable local session shows no standalone Resume notice", async () => {
   vi.useFakeTimers(FAKE_CLOCK_ONLY);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:resume-only-notice";
   fake.on("thread/read", () =>
     readResponse(ref, {
@@ -4712,7 +4712,7 @@ test("a merely-resumable local session shows no standalone Resume notice", async
 });
 
 test("a daemon exit clears the notice without closing its pane", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let replaced = false;
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: replaced ? "idle" : "restartRequired" } }));
   render(
@@ -4734,7 +4734,7 @@ test("a failed notice resume surfaces as the composer toast, not an inline error
   resetToastStoreForTests();
   onTestFinished(stubSessionSlots);
   vi.mocked(ComposerModule.Composer).mockRestore();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => {
     const response = readResponse("ref_a", { status: { type: "notLoaded" } });
     response.thread.evener.resumeRequired = true;
@@ -4762,7 +4762,7 @@ test("a failed notice resume surfaces as the composer toast, not an inline error
 });
 
 test.each([false, true])("restart-required empty transcript suppresses first-send UI (pending=%s)", async (pending) => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "restartRequired" } }));
   render(
     <ClientProvider client={fake}>
@@ -4918,7 +4918,7 @@ test("a newer draft typed during the notice's Resume follows the resumed identit
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   const stableRef = "remote:notice-stable";
   const currentRef = "remote:notice-current";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let resumeRequested!: () => void;
   const requested = new Promise<void>((resolve) => {
     resumeRequested = resolve;
@@ -4991,7 +4991,7 @@ test("a newer draft typed before the resume lands follows the pane to the resume
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   const stableRef = "local:draft-stable";
   const currentRef = "local:draft-current";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let resumeRequested!: () => void;
   const requested = new Promise<void>((resolve) => {
     resumeRequested = resolve;
@@ -5065,7 +5065,7 @@ test("a Stop on the resumed identity cancels the stale post-resume publish", asy
   onTestFinished(stubSessionSlots);
   const stableRef = "local:stable-a";
   const currentRef = "local:current-b";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let currentReadStarted!: () => void;
   const readStarted = new Promise<void>((resolve) => {
     currentReadStarted = resolve;
@@ -5156,7 +5156,7 @@ test("a Stop on the resumed identity while the resume RPC is in flight cancels t
   onTestFinished(stubSessionSlots);
   const stableRef = "local:stable-a";
   const currentRef = "local:current-b";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let resumeRequested!: () => void;
   const requested = new Promise<void>((resolve) => {
     resumeRequested = resolve;
@@ -5224,7 +5224,7 @@ test("a Stop on the resumed identity before the resume RPC leaves suppresses the
   onTestFinished(stubSessionSlots);
   const stableRef = "local:stable-a";
   const currentRef = "local:current-b";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", (params) => {
     if (params.ref === currentRef) return readResponse(currentRef, { status: { type: "idle" } });
     return readResponse(stableRef, {
@@ -5280,7 +5280,7 @@ test("a Stop on the resumed identity before the resume RPC leaves suppresses the
 });
 
 test("offers explicit resume after restart even without pending messages", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const resumeTransport = vi.spyOn(fake, "resumeThread");
   let status = "restartRequired";
   fake.on("thread/read", ({ requestGeneration }) => ({
@@ -5314,7 +5314,7 @@ test("offers explicit resume after restart even without pending messages", async
 test.each(["success", "refused"])(
   "failed initial read has confirmed recovery without navigation: %s",
   async (outcome) => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:unconfirmed";
     let stopped = false;
     fake.on("thread/read", () => {
@@ -5372,7 +5372,7 @@ test.each(["success", "refused"])(
 
 test.each(["success", "refused"])("hydrated restart recovery works without navigation: %s", async (outcome) => {
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:incompatible-root";
   let status = "restartRequired";
   fake.on("thread/read", ({ requestGeneration }) => ({
@@ -5449,7 +5449,7 @@ test.each(["success", "refused"])("hydrated restart recovery works without navig
 test("confirmed force stop refreshes the session and surfaces the Send face", async ({ onTestFinished }) => {
   onTestFinished(stubSessionSlots);
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:force-stop-resume";
   setNavigationTitle(ref, "Force stop recovery");
   let status = "restartRequired";
@@ -5491,7 +5491,7 @@ test("confirmed force stop refreshes the session and surfaces the Send face", as
 test.each(["notLoaded", "active", "idle"])(
   "explicitly resumes a %s session before reconciling its uncertain send",
   async (recoveryStatus) => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let status = "restartRequired";
     let mutationId = "";
     let resumed = false;
@@ -5578,7 +5578,7 @@ test.each(["notLoaded", "active", "idle"])(
 );
 
 test("keeps recovery failure visible on a compatible session until reconciliation succeeds", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "idle" } }));
   render(
     <ClientProvider client={fake}>
@@ -5598,7 +5598,7 @@ test("keeps recovery failure visible on a compatible session until reconciliatio
 // renders no recovery banner - the write-stall banner already covers the
 // honest state while a send is actually stalled.
 test("a storage-blocked ref does not render the recovery banner", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { status: { type: "idle" } }));
   render(
     <ClientProvider client={fake}>
@@ -5619,7 +5619,7 @@ test("a storage-blocked ref does not render the recovery banner", async () => {
 // Send-resumes face (unlike the resume-required notice), while Send is what the
 // pane offers and the fence's standalone Resume control stays gone.
 test("a reconciliation-failed Send-resumes face keeps its recovery notice", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:reconciliation-failed-face";
   fake.on("thread/read", () =>
     readResponse(ref, {
@@ -5650,7 +5650,7 @@ test("a reconciliation-failed Send-resumes face keeps its recovery notice", asyn
 // pane. The notice belongs only to a child that actually has work its owner
 // must reconcile.
 test.each(["active", "idle"])("a retained %s child with nothing uncertain shows no owner alert", async (status) => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("local:quiet-child", {
       status: { type: status },
@@ -5678,7 +5678,7 @@ test.each(["active", "idle"])("retained %s child preserves uncertainty until its
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   const mutationId = await seedPendingSend("local:retained-child");
   await mutationStorage.markUnknown(mutationId, "blockedUnknown");
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let resumed = false;
   let owned = true;
   fake.on("thread/read", ({ requestGeneration }) => ({
@@ -5749,7 +5749,7 @@ test.each(["idle", "active"])(
   "hydrated %s session keeps recovery when subsequent reads stall without navigation",
   async (status) => {
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:retained-unresponsive";
     let stopped = false;
     let transcriptReads = 0;
@@ -5798,7 +5798,7 @@ test.each(["idle", "active"])(
 );
 
 test("a fresh client offers Send for a server-fenced stopped session", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:stopped-on-another-client";
   let resumed = false;
   fake.on("thread/read", () => {
@@ -5829,7 +5829,7 @@ test.each(["pending", "failed"])(
   "saved session retains confirmed recovery when resumed daemon read is %s",
   async (outcome) => {
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:saved-resume-stall";
     let daemonStarted = false;
     let rejectRead: (error: Error) => void = () => {};
@@ -5897,7 +5897,7 @@ test.each(["pending", "failed"])(
 test("recovery rejection blocks durable dispatch and surfaces the Send face", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   try {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:failed-stop-recovery";
     // Advancing the discovery clock does not finish its IndexedDB-backed
     // hydration. This store publication is the reconciliation completion edge.
@@ -5995,7 +5995,7 @@ test.each(["pending", "failed"])(
   "saved Send exposes confirmed recovery when automatic resume is %s",
   async (outcome) => {
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const refresh = vi.spyOn(threadsStore.getState(), "refreshThread");
     onTestFinished(() => refresh.mockRestore());
     const ref = "local:saved-auto-resume";
@@ -6089,7 +6089,7 @@ test.each(["model", "compact"])(
   "saved %s action retains recovery while automatic resume stalls without navigation",
   async (action) => {
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:saved-action";
     let daemonStarted = false;
     let stopped = false;
@@ -6164,7 +6164,7 @@ test.each(["idle", "active"])(
   "independent nested fork keeps confirmed recovery during stalled %s reads",
   async (status) => {
     vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     const ref = "local:original-fork";
     setNavigationTitle(ref, "Original fork", false);
     let stopped = false;
@@ -6231,7 +6231,7 @@ test.each(["idle", "active"])(
 test("a fenced notLoaded session keeps force stop reachable in the pane footer", async () => {
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   vi.mocked(ComposerModule.Composer).mockRestore();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:fenced-not-loaded";
   setNavigationTitle(ref, "Fenced saved session");
   let stopped = false;
@@ -6315,7 +6315,7 @@ test.each([
 ])("exactly one activity-discovery owner mounts for $label", async ({ send, resumeRequired }) => {
   vi.mocked(SessionChromeModule.SessionChrome).mockRestore();
   vi.mocked(ComposerModule.Composer).mockRestore();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:owner-invariant";
   setNavigationTitle(ref, "Owner invariant");
   const activityRefs: unknown[] = [];
@@ -6357,7 +6357,7 @@ test("visible retained transcript resolves qualified job and stable delegate row
     jobId = `job_${owner}_000000000123`,
     delegateId = "dlg_034HQ2kSDXfKFq1mm3idL1",
     otherJob = `job_${owner}_000000000456`;
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readOnlyEntityThread(ref, `Own ${jobId} and ${delegateId}. Other ${otherJob}.`));
   fake.on("evener/thread/activity/read", ({ scope }) => activitySummary(ref, scope));
   fake.on("evener/thread/jobs/list", ({ scope }) => ({
@@ -6455,7 +6455,7 @@ test("a cascade column's resume reaches an ordinary view of the same ref when it
   const sourceRef = "local:root";
   const ref = "local:child";
   const resumed = "local:child-resumed";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref: readRef }) => transcriptRead(readRef));
 
   // Two retained views of `ref`: the cascade pane embedding it (its column is
@@ -6548,7 +6548,7 @@ test("a resume survives a collapsed column in another cascade until that cascade
   const sourceRef = "local:root";
   const ref = "local:child";
   const resumed = "local:child-resumed";
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", ({ ref: readRef }) => transcriptRead(readRef));
 
   const cascadeParams = (leaf: string) => ({
@@ -6633,7 +6633,7 @@ test("a cold focused conversation can demand its first needs-you page before the
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   const manifestGate = deferred<void>();
   const pageRequests: Array<{ offset?: number; limit?: number }> = [];
@@ -6689,7 +6689,7 @@ test("a focused conversation can retry needs-you after its manifest read fails",
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   let manifestReads = 0;
   const pageRequests: Array<{ offset?: number; limit?: number }> = [];
@@ -6733,7 +6733,7 @@ test("a reconnect does not flash an empty needs-you control while its manifest r
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const firstClient = connectFakeClient();
+  const firstClient = connectReadyFakeClient();
   firstClient.on("thread/read", () => attentionRead("ref_a"));
   firstClient.on("evener/navigation/read", (params) => {
     if (params.resource !== "manifest") throw new Error(`unexpected navigation resource ${params.resource}`);
@@ -6809,7 +6809,7 @@ test("a focused draft stays visible and composition suppression clears without l
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   installNeedsYouRows(["ref_a", "ref_b"]);
   const pane = attentionSession();
@@ -6851,7 +6851,7 @@ test("the measured attention stack becomes transcript end clearance", async ({ o
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   installNeedsYouRows(["ref_a", "ref_b"]);
   // Give the floating stack a measured height without disturbing the
@@ -6890,7 +6890,7 @@ test("the measured clearance does not toggle New Content or move an end-followin
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   installNeedsYouRows(["ref_a", "ref_b"]);
   // The floating stack's own measured height is what FlowOverlay reports and
@@ -6971,7 +6971,7 @@ test("a pending question suppresses the control and returns automatically", asyn
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   installNeedsYouRows(["ref_a", "ref_b"]);
   const pane = attentionSession("question-pane");
@@ -7000,7 +7000,7 @@ test("a pending approval suppresses the control and returns when it resolves", a
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => approvalRead("ref_a"));
   fake.on("evener/sandbox/escalation/resolve", () => ({}));
   installNeedsYouRows(["ref_a", "ref_b"]);
@@ -7032,7 +7032,7 @@ test("a dormant transcript gets the same attention affordance without a fake tra
     vi.restoreAllMocks();
     stubSessionSlots();
   });
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("ref_a", { turns: [] }));
   installNeedsYouRows(["ref_a", "ref_b"]);
   const pane = attentionSession("dormant-pane");
@@ -7063,7 +7063,7 @@ test("the mobile stack host offers attention navigation over its focused session
     stubSessionSlots();
   });
   onTestFinished(installMobileViewport());
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => attentionRead("ref_a"));
   installNeedsYouRows(["ref_a", "ref_b"]);
   const pane = attentionSession("mobile-attention-pane");

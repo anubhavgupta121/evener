@@ -1,15 +1,5 @@
 import { constants } from "node:fs";
-import {
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  readlink,
-  realpath,
-  rm,
-  symlink,
-} from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -41,7 +31,11 @@ async function copyTree(source, destination, { omittedRootEntries = new Set(), d
         const target = await readlink(sourcePath);
         const resolvedTarget = path.resolve(path.dirname(sourcePath), target);
         const realTarget = await realpath(sourcePath);
-        if (path.isAbsolute(target) || !isInside(dependencyRoot, resolvedTarget) || !isInside(dependencyRoot, realTarget)) {
+        if (
+          path.isAbsolute(target) ||
+          !isInside(dependencyRoot, resolvedTarget) ||
+          !isInside(dependencyRoot, realTarget)
+        ) {
           throw new Error(`private editorial fixture refuses escaping dependency symlink: ${relative} -> ${target}`);
         }
         await symlink(target, destinationPath);

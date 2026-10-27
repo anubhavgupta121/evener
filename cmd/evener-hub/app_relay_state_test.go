@@ -251,3 +251,20 @@ func TestHubRelayRetiringAHandleClosesItOnceIdle(t *testing.T) {
 		t.Fatalf("idle handle not closed and removed: cancelled=%v removed=%v", *cancelled, handle.removed)
 	}
 }
+
+func TestHubRelayStartRejectsAnUnaddressableThreadWithoutPublishing(t *testing.T) {
+	r := newHubRelay(nil, hubcore.WebConfig{}, nil)
+	thread := appwire.Thread{ID: "thread-1"}
+
+	err := r.startRelayOnce(context.Background(), nil, appwire.ThreadReadParams{Ref: "not-a-ref"}, thread)
+	if err == nil {
+		t.Fatal("start with an unparseable ref succeeded")
+	}
+	if len(r.relayed) != 0 || len(r.pending) != 0 || len(r.canonical) != 0 {
+		t.Fatalf("a rejected start left registrations: %v %v %v", r.relayed, r.pending, r.canonical)
+	}
+
+	if err := r.startRelayOnce(context.Background(), nil, appwire.ThreadReadParams{}, appwire.Thread{}); err != nil {
+		t.Fatalf("start for a thread with no ID should be a no-op, got %v", err)
+	}
+}

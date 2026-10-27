@@ -318,10 +318,7 @@ test("passes a guard's custom Vite config through to the wrapper", async () => {
     viteConfigFile: "scripts/editorial-preview.vite.config.mjs",
   });
   try {
-    assert.deepEqual(children[0].args, [
-      "scripts/browserguard-vite.mjs",
-      "scripts/editorial-preview.vite.config.mjs",
-    ]);
+    assert.deepEqual(children[0].args, ["scripts/browserguard-vite.mjs", "scripts/editorial-preview.vite.config.mjs"]);
   } finally {
     const cleanup = guard.cleanup();
     for (const child of children) child.exit();
@@ -1184,7 +1181,10 @@ test("the first-stderr delay is measured from Chrome's own output", async (conte
   reapOnTeardown(context, guard, children);
 
   assert.equal(guard.getChromeFirstStderrDelay(), null);
-  children[1].stderr.emit("data", "[3036:3072:0911/063804.935306:ERROR:dbus/bus.cc:405] Failed to connect to the bus\n");
+  children[1].stderr.emit(
+    "data",
+    "[3036:3072:0911/063804.935306:ERROR:dbus/bus.cc:405] Failed to connect to the bus\n",
+  );
   assert.ok(
     Number.isInteger(guard.getChromeFirstStderrDelay()) && guard.getChromeFirstStderrDelay() >= 0,
     `expected a measured delay, got ${guard.getChromeFirstStderrDelay()}`,

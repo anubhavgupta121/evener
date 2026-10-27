@@ -2,7 +2,7 @@
 
 import type { HostRow, LaunchOptionSchemaResponse } from "@evener/appwire-client";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { connectFakeClient } from "../connectionTestUtils";
+import { connectReadyFakeClient } from "../testing/connectionTestUtils";
 import { connectionStore } from "./connection";
 import { hostsStore } from "./hosts";
 import {
@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 test("the local hub resolves to the controller's own store and issues the plain call", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/launch/schema", () => schema("local"));
   fake.on("evener/host/request", () => {
     throw new Error("the local hub must never route through the proxy");
@@ -73,7 +73,7 @@ test("the local hub resolves to the controller's own store and issues the plain 
 });
 
 test("a remote host's schema is read through evener/host/request", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/request", () => schema("beta") as never);
 
   const result = await launchConfigStoreForHost("beta").getState().schema();
@@ -88,7 +88,7 @@ test("a remote host's schema is read through evener/host/request", async () => {
 // package's schemaCache would serve host A's schema for host B. Per-host
 // instances each cache their own.
 test("each host's schema cache is its own - no cross-host schema is served", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const byHost: Record<string, LaunchOptionSchemaResponse> = { beta: schema("beta"), gamma: schema("gamma") };
   fake.on("evener/host/request", (params) => byHost[(params as { host: string }).host] as never);
 
@@ -102,7 +102,7 @@ test("each host's schema cache is its own - no cross-host schema is served", asy
 });
 
 test("a remote host's setLayer goes through the proxy, never this hub's setLayer", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/request", () => ({ effective: {}, layers: {}, provenance: {} }) as never);
   fake.on("evener/launch/setLayer", () => {
     throw new Error("a remote selection must not write this hub's launch layer");
@@ -119,7 +119,7 @@ test("a remote host's setLayer goes through the proxy, never this hub's setLayer
 });
 
 test("resetLaunchConfigHostStoresForTests drops the per-host schema cache", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let calls = 0;
   fake.on("evener/host/request", () => {
     calls += 1;
@@ -141,7 +141,7 @@ test("resetLaunchConfigHostStoresForTests drops the per-host schema cache", asyn
 test.each([{ address: "new.example:22" }, { address: "old.example:22", incarnationId: "replacement" }])(
   "a host re-registered under the same name does not serve the previous registration's cached schema (%j)",
   async (replacement) => {
-    const fake = connectFakeClient();
+    const fake = connectReadyFakeClient();
     let reads = 0;
     fake.on("evener/host/request", () => {
       reads += 1;
@@ -168,7 +168,7 @@ test.each([{ address: "new.example:22" }, { address: "old.example:22", incarnati
 // re-registration. Rebuilding on one would throw away the schema cache and
 // re-read it for a host whose settings never moved.
 test("a live-state change on an unchanged registration keeps the instance and its cache", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let reads = 0;
   fake.on("evener/host/request", () => {
     reads += 1;
@@ -206,7 +206,7 @@ test("a live-state change on an unchanged registration keeps the instance and it
 // link mounts before the picker's own list read lands). That first answer
 // identifies the instance; it does not invalidate it and force a second read.
 test("a host resolved before the registry answered is kept when the registry identifies it", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let reads = 0;
   fake.on("evener/host/request", () => {
     reads += 1;
@@ -229,7 +229,7 @@ test("a host resolved before the registry answered is kept when the registry ide
 // such registration. Nothing is kept for it, and what a caller is handed refuses
 // rather than reading or writing a hub the registry does not know.
 test("a host the registry reports gone keeps no instance and refuses instead of dialing", async () => {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("evener/host/request", () => schema("beta") as never);
   hostsStore.setState({ load: { phase: "ready", hosts: [hostRow({ name: "beta", address: "beta.example:22" })] } });
   await launchConfigStoreForHost("beta").getState().schema();

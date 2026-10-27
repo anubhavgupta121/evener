@@ -17,7 +17,9 @@ export default function assert(measurement) {
     );
   }
   if (summaryLong.noteLines <= SUMMARY_CLAMP_LINES) {
-    failures.push(`collapsed summary: fixture note has only ${summaryLong.noteLines} lines; it no longer exceeds the clamp`);
+    failures.push(
+      `collapsed summary: fixture note has only ${summaryLong.noteLines} lines; it no longer exceeds the clamp`,
+    );
   }
   if (summaryLong.visibleLines !== SUMMARY_CLAMP_LINES) {
     failures.push(
@@ -25,7 +27,9 @@ export default function assert(measurement) {
     );
   }
   if (summaryLong.clipped <= 0) {
-    failures.push(`collapsed summary: ${summaryLong.noteLines}-line note is not clipped (scrollHeight - clientHeight = ${summaryLong.clipped})`);
+    failures.push(
+      `collapsed summary: ${summaryLong.noteLines}-line note is not clipped (scrollHeight - clientHeight = ${summaryLong.clipped})`,
+    );
   }
   if (failures.length > 0) return { pass: false, reason: failures.join("; ") };
   return {

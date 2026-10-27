@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 
+	"primeradiant.com/evener/agent/activitybound"
+
 	"primeradiant.com/evener/agent/internal/jobstore"
 	"primeradiant.com/evener/appwire"
 )
@@ -91,7 +93,7 @@ func (read *sessionActivityRead) watchesPage(ctx context.Context, params appwire
 			for _, history := range jm.watchHistory {
 				if history.id == key.ID {
 					row.Watch.Deliveries = max(row.Watch.Deliveries, history.deliveries)
-					row.Watch.EndReason = truncateActivityText(history.endReason, activityMaxDelegateProseRunes)
+					row.Watch.EndReason = activitybound.Truncate(history.endReason, activityMaxDelegateProseRunes)
 					row.Watch.Active = false
 					row.State = appwire.SessionWatchStateEnded
 				}
@@ -122,9 +124,9 @@ func projectRetainedSessionWatch(owner, receiver string, record *jobstore.WatchR
 	cfg := &watchConfig{id: record.WatchID, target: record.Target, sourcePublic: record.Source, createdAt: index.Created[record.WatchID]}
 	if snapshot := index.Configs[record.WatchID]; snapshot != nil {
 		cfg.target = snapshot.Target
-		cfg.outputMatch = truncateActivityText(snapshot.OutputMatch, activityMaxDelegateProseRunes)
+		cfg.outputMatch = activitybound.Truncate(snapshot.OutputMatch, activityMaxDelegateProseRunes)
 		cfg.progressIntervalMS = snapshot.ProgressIntervalMS
-		cfg.note = truncateActivityText(snapshot.Note, activityMaxDelegateProseRunes)
+		cfg.note = activitybound.Truncate(snapshot.Note, activityMaxDelegateProseRunes)
 		cfg.events = snapshot.Events
 		cfg.triggerEvery = snapshot.Every
 		cfg.wildcardEvents = slices.Contains(snapshot.Events, "*")
@@ -141,9 +143,9 @@ func projectRetainedSessionWatch(owner, receiver string, record *jobstore.WatchR
 		}
 	}
 	info := watchInfoFromStatus(watchStatusInfoFromConfig(cfg))
-	info.SendTo = truncateActivityText(record.SendTo, activityMaxLabelRunes)
+	info.SendTo = activitybound.Truncate(record.SendTo, activityMaxLabelRunes)
 	info.Active = false
-	info.EndReason = truncateActivityText(record.EndReason, activityMaxDelegateProseRunes)
+	info.EndReason = activitybound.Truncate(record.EndReason, activityMaxDelegateProseRunes)
 	info.Deliveries = max(record.Deliveries, index.DeliveryCounts[record.WatchID])
 	info.DeliveryTimes = append([]string(nil), index.DeliveryTimes[record.WatchID]...)
 	for i := range info.Cadence {
@@ -156,9 +158,9 @@ func projectRetainedSessionWatch(owner, receiver string, record *jobstore.WatchR
 	return appwire.SessionWatch{SourceRef: encodeRef("", owner), OwnerRef: encodeRef("", receiver), ReceiverRef: encodeRef("", receiver), State: state, Watch: info}
 }
 func watchInfoFromStatus(status WatchStatusInfo) appwire.EvenerWatchInfo {
-	result := appwire.EvenerWatchInfo{ID: status.ID, Source: truncateActivityText(status.Source, activityMaxLabelRunes), Target: truncateActivityText(status.Target, activityMaxLabelRunes), SendTo: truncateActivityText(status.SendTo, activityMaxLabelRunes), Note: truncateActivityText(status.Note, activityMaxDelegateProseRunes), OutputMatch: truncateActivityText(status.OutputMatch, activityMaxDelegateProseRunes), Events: append([]string(nil), status.Events...), WildcardEvents: status.WildcardEvents, Deliveries: status.Deliveries, DeliveryTimes: append([]string(nil), status.DeliveryTimes...), CreatedAt: status.CreatedAt, Active: status.Active, EndReason: truncateActivityText(status.EndReason, activityMaxDelegateProseRunes)}
+	result := appwire.EvenerWatchInfo{ID: status.ID, Source: activitybound.Truncate(status.Source, activityMaxLabelRunes), Target: activitybound.Truncate(status.Target, activityMaxLabelRunes), SendTo: activitybound.Truncate(status.SendTo, activityMaxLabelRunes), Note: activitybound.Truncate(status.Note, activityMaxDelegateProseRunes), OutputMatch: activitybound.Truncate(status.OutputMatch, activityMaxDelegateProseRunes), Events: append([]string(nil), status.Events...), WildcardEvents: status.WildcardEvents, Deliveries: status.Deliveries, DeliveryTimes: append([]string(nil), status.DeliveryTimes...), CreatedAt: status.CreatedAt, Active: status.Active, EndReason: activitybound.Truncate(status.EndReason, activityMaxDelegateProseRunes)}
 	for _, cadence := range status.Cadence {
-		result.Cadence = append(result.Cadence, appwire.EvenerWatchCadence{Kind: cadence.Kind, Seconds: cadence.Seconds, DerivedNextFireAt: cadence.DerivedNextFireAt, Every: cadence.Every, Filter: truncateActivityText(cadence.Filter, activityMaxLabelRunes)})
+		result.Cadence = append(result.Cadence, appwire.EvenerWatchCadence{Kind: cadence.Kind, Seconds: cadence.Seconds, DerivedNextFireAt: cadence.DerivedNextFireAt, Every: cadence.Every, Filter: activitybound.Truncate(cadence.Filter, activityMaxLabelRunes)})
 	}
 	return result
 }

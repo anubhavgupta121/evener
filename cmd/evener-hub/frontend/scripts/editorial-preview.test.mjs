@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { lstat, mkdir, mkdtemp, opendir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -61,12 +61,12 @@ test("private editorial fixture canonicalizes a symlinked temporary parent", asy
 test("private editorial fixture owns lock-matching source, packages, and fonts", async () => {
   const privateNodeModules = path.join(frontend, "node_modules");
   assert.equal((await lstat(privateNodeModules)).isSymbolicLink(), false);
-  assert.deepEqual(await readFile(path.join(frontend, "package-lock.json")), await readFile(path.join(sourceFrontend, "package-lock.json")));
+  assert.deepEqual(
+    await readFile(path.join(frontend, "package-lock.json")),
+    await readFile(path.join(sourceFrontend, "package-lock.json")),
+  );
 
-  for (const relative of [
-    "vite/package.json",
-    "@ibm/plex-sans/fonts/complete/woff2/IBMPlexSans-Text.woff2",
-  ]) {
+  for (const relative of ["vite/package.json", "@ibm/plex-sans/fonts/complete/woff2/IBMPlexSans-Text.woff2"]) {
     const source = path.join(fixture.sourceNodeModules, relative);
     const copy = path.join(privateNodeModules, relative);
     assert.deepEqual(await readFile(copy), await readFile(source), relative);
@@ -82,7 +82,11 @@ test("private editorial fixture owns lock-matching source, packages, and fonts",
     assert(path.relative(privateNodeModules, link).split(path.sep).includes(".bin"), link);
     const target = await realpath(link);
     const relativeTarget = path.relative(privateNodeModules, target);
-    assert(relativeTarget === "" || (!relativeTarget.startsWith(`..${path.sep}`) && relativeTarget !== ".." && !path.isAbsolute(relativeTarget)), `${link} -> ${target}`);
+    assert(
+      relativeTarget === "" ||
+        (!relativeTarget.startsWith(`..${path.sep}`) && relativeTarget !== ".." && !path.isAbsolute(relativeTarget)),
+      `${link} -> ${target}`,
+    );
   }
 
   const privateFont = path.join(privateNodeModules, "@ibm/plex-sans/fonts/complete/woff2/IBMPlexSans-Text.woff2");
@@ -95,7 +99,15 @@ test("private editorial fixture owns lock-matching source, packages, and fonts",
 
 test("production editorial config still refuses a shared writable install", async () => {
   await assert.rejects(
-    resolveConfig({ root: fixture.sharedFrontend, configFile: fixture.sharedConfigFile, configLoader: "runner", logLevel: "silent" }, "serve"),
+    resolveConfig(
+      {
+        root: fixture.sharedFrontend,
+        configFile: fixture.sharedConfigFile,
+        configLoader: "runner",
+        logLevel: "silent",
+      },
+      "serve",
+    ),
     { message: "Editorial preview requires its own npm ci, not a shared writable install" },
   );
 });
@@ -135,14 +147,16 @@ test("normal app-route reloads remain fixture-backed; backend and outside files 
     configFile,
     configLoader: "runner",
     cacheDir: path.join(scratch, "vite-cache"),
-    plugins: [{
-      name: "editorial-http-routing-only",
-      configResolved(config) {
-        // React adds optimizer includes during resolution; clear them here.
-        config.optimizeDeps.noDiscovery = true;
-        config.optimizeDeps.include = [];
+    plugins: [
+      {
+        name: "editorial-http-routing-only",
+        configResolved(config) {
+          // React adds optimizer includes during resolution; clear them here.
+          config.optimizeDeps.noDiscovery = true;
+          config.optimizeDeps.include = [];
+        },
       },
-    }],
+    ],
     server: { port },
     logLevel: "silent",
   });
@@ -216,7 +230,9 @@ test("browserguard wrapper serves a passed fixture config on its announced port"
   const announced = new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) =>
-      reject(new Error(`wrapper exited before readiness (code ${code ?? "unknown"}, signal ${signal ?? "none"}): ${stderr}`)),
+      reject(
+        new Error(`wrapper exited before readiness (code ${code ?? "unknown"}, signal ${signal ?? "none"}): ${stderr}`),
+      ),
     );
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -261,7 +277,10 @@ test("browserguard wrapper serves a passed fixture config on its announced port"
   );
   const cacheDir = await realpath(path.join(frontend, ".vite-cache"));
   const relativeCache = path.relative(fixture.root, cacheDir);
-  assert(!relativeCache.startsWith(`..${path.sep}`) && relativeCache !== ".." && !path.isAbsolute(relativeCache), cacheDir);
+  assert(
+    !relativeCache.startsWith(`..${path.sep}`) && relativeCache !== ".." && !path.isAbsolute(relativeCache),
+    cacheDir,
+  );
   completedIsolationCases += 1;
 });
 

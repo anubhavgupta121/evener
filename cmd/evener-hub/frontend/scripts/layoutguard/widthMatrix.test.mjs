@@ -17,9 +17,7 @@ describe("normalizeWidthMatrix", () => {
   });
 
   test("rejects a non-array widthMatrix", () => {
-    expect(() => normalizeWidthMatrix({ width: 320 }, "bad-shape")).toThrow(
-      "bad-shape: widthMatrix must be an array",
-    );
+    expect(() => normalizeWidthMatrix({ width: 320 }, "bad-shape")).toThrow("bad-shape: widthMatrix must be an array");
   });
 
   test("rejects an empty widthMatrix", () => {
@@ -33,7 +31,7 @@ describe("normalizeWidthMatrix", () => {
       "missing-width: widthMatrix[1].width must be a finite positive number, got undefined",
     );
     expect(() => normalizeWidthMatrix([{ width: 320 }, { width: "480" }], "string-width")).toThrow(
-      "string-width: widthMatrix[1].width must be a finite positive number, got \"480\"",
+      'string-width: widthMatrix[1].width must be a finite positive number, got "480"',
     );
     expect(() => normalizeWidthMatrix([{ width: 320 }, { width: Number.NaN }], "nan-width")).toThrow(
       "nan-width: widthMatrix[1].width must be a finite positive number, got NaN",
@@ -55,14 +53,18 @@ describe("injectWidthMatrix", () => {
 
   test("splices the normalized matrix into the harness source at the placeholder", () => {
     const source = `<script>\n${placeholder}\n</script>`;
-    const result = injectWidthMatrix(source, [{ width: 320 }, { width: 900, shortModel: true }], "compact-session-footer");
-    expect(result).toBe(
-      `<script>\nconst fixtures = [{"width":320},{"width":900,"shortModel":true}];\n</script>`,
+    const result = injectWidthMatrix(
+      source,
+      [{ width: 320 }, { width: 900, shortModel: true }],
+      "compact-session-footer",
     );
+    expect(result).toBe(`<script>\nconst fixtures = [{"width":320},{"width":900,"shortModel":true}];\n</script>`);
   });
 
   test("throws a clear error when the case declares a widthMatrix but the harness has no placeholder", () => {
-    expect(() => injectWidthMatrix("<script>const fixtures = [];</script>", [{ width: 320 }], "no-placeholder")).toThrow(
+    expect(() =>
+      injectWidthMatrix("<script>const fixtures = [];</script>", [{ width: 320 }], "no-placeholder"),
+    ).toThrow(
       "no-placeholder: case.json declares widthMatrix but harness.html has no __LAYOUTGUARD_WIDTH_MATRIX__ placeholder",
     );
   });
