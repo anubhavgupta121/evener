@@ -746,6 +746,13 @@ describe("transcript display legacy adapters", () => {
     expect(hasTranscriptDisplayLocal("desktop")).toBe(false);
   });
 
+  test("a single layout key does not prove migration finished, so the old keys stay", () => {
+    localStorage.setItem(KEY("showCost"), "1");
+    localStorage.setItem(KEY("transcriptDisplay.desktop"), "encoded");
+    expect(migrateLegacyTranscriptDisplay()).toBeUndefined();
+    expect(readLegacyPreference("showCost")).toBe("1");
+  });
+
   test("clearing both layout overrides after migration does not resurrect the old flags", () => {
     localStorage.setItem(KEY("showCost"), "1");
     expect(migrateLegacyTranscriptDisplay()).toBeDefined();
