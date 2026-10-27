@@ -39,8 +39,6 @@ import type {
 import { acquireThreadSubscription, hydrateThread, isStaleCursorError } from "@evener/appwire-client";
 import type { MobileConversation } from "../../../mobile-native/src/projectedRows";
 import { projectConversation } from "../../../mobile-native/src/projectedRows";
-import type { ActivityView } from "./activity";
-import { createActivityService } from "./activity";
 
 // The bounded read page limit, centralized so every caller uses the same
 // constant. The retained item cap lives with the shared projection helpers
@@ -114,7 +112,6 @@ export interface ConversationServiceOptions<ReadLease = unknown> {
 
 export interface ConversationReadProjection {
 	conversation: MobileConversation;
-	activity: ActivityView;
 	olderCursor: string | null;
 	hasEarlierItems?: boolean;
 	hasLaterItems?: boolean;
@@ -476,7 +473,6 @@ export function createConversationService<ReadLease = unknown>(
 	// time (see the option's own comment). A null/undefined answer keeps the
 	// show-everything default.
 	const displayConfig = (): TranscriptDisplayConfigV1 | undefined => options.resolveDisplayConfig?.() ?? undefined;
-	const activityService = createActivityService();
 
 	// Current thread identity and capabilities, set by open() / readProjection().
 	// Mutations check these before reaching the wire; a re-read on
@@ -657,11 +653,10 @@ export function createConversationService<ReadLease = unknown>(
 			const publish = (async (): Promise<ConversationReadProjection> => {
 				const response: ThreadReadResponse = await read;
 				// Compute ALL response-derived projection work BEFORE committing the
-				// pair — a throw in hydration, projectConversation or activity
-				// projection (or a malformed response) leaves ref+capabilities
-				// null/fail-closed. Only commit the
-				// pair after all projection succeeds and the epoch is still current;
-				// a stale successful result returns without committing.
+				// pair — a throw in hydration or projectConversation (or a
+				// malformed response) leaves ref+capabilities null/fail-closed. Only
+				// commit the pair after all projection succeeds and the epoch is still
+				// current; a stale successful result returns without committing.
 				const thread = readWithPushedCapabilities(response.thread, epoch);
 				const readInstanceId = nonemptyString(
 					response.thread.evener.instanceId ?? response.thread.id,
@@ -675,7 +670,6 @@ export function createConversationService<ReadLease = unknown>(
 					undefined,
 					displayConfig(),
 				);
-				const activity = activityService.projectActivity(thread);
 				const olderCursor = response.olderCursor ?? null;
 				const caps = extractCapabilities(thread.evener.capabilities);
 				const readModelScope = { harness: thread.source, cwd: thread.cwd };
@@ -692,7 +686,6 @@ export function createConversationService<ReadLease = unknown>(
 				if (openEpoch === epoch) await reconcileRead(readLease, response);
 				return {
 					conversation,
-					activity,
 					olderCursor,
 					hasEarlierItems: thread.turns?.some((turn) => turn.hasEarlierItems === true) ?? false,
 					hasLaterItems: thread.turns?.some((turn) => turn.hasLaterItems === true) ?? false,
@@ -867,7 +860,6 @@ export function createConversationService<ReadLease = unknown>(
 				undefined,
 				displayConfig(),
 			);
-			const activity = activityService.projectActivity(thread);
 			const caps = extractCapabilities(thread.evener.capabilities);
 			modelScope = { harness: thread.source, cwd: thread.cwd };
 			instanceId = replacementInstance;
@@ -875,7 +867,7 @@ export function createConversationService<ReadLease = unknown>(
 			ref = response.ref;
 			capabilities = caps;
 			opening = null;
-			return { conversation, activity, olderCursor: null };
+			return { conversation, olderCursor: null };
 		},
 
 		async forkFromTurn(transcriptEntryIndex) {
