@@ -2,8 +2,8 @@ package delegatestore
 
 import (
 	"encoding/json"
-	"reflect"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
