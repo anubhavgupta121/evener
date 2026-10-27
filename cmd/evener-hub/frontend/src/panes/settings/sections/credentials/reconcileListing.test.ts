@@ -1,6 +1,6 @@
 import type { InstanceListResponse } from "@evener/appwire-client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { connectionStore } from "../../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { confirmListingState } from "./reconcileListing";
@@ -8,12 +8,12 @@ import { confirmListingState } from "./reconcileListing";
 const EMPTY: InstanceListResponse = { instances: [], availableProviders: [] };
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetCredentialsStoreForTests();
 });
 
 afterEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
 });
 
 describe("confirmListingState", () => {
@@ -54,7 +54,7 @@ describe("confirmListingState", () => {
     const fake = connectReadyFakeClient();
     fake.on("evener/instance/list", () => EMPTY);
     await credentialsStore.getState().fetch();
-    connectionStore.setState({ state: "idle", client: null });
+    resetConnectionStoreForTests();
 
     const confirmed = await confirmListingState(() => true);
 

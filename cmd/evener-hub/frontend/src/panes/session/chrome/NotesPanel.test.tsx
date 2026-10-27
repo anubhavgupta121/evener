@@ -11,7 +11,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useStore } from "zustand";
 import { resetWorkspaceStoreForTests, workspaceStore } from "../../../shell/workspace";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { editHumanNote, resetHumanNoteDrafts, syncHumanNote } from "../../../stores/humanNoteDrafts";
 import { MutationOutboxIndexedDB } from "../../../stores/mutationOutboxIndexedDB";
 import { resetPendingUrlRemovals } from "../../../stores/pendingUrlRemovals";
@@ -332,7 +332,7 @@ test("a definite refusal stays visible and keeps its draft across close and reop
 });
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
   resetWorkspaceStoreForTests();
   // Draft records persist across renders by design, and most tests here

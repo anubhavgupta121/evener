@@ -7,7 +7,7 @@ import { createElement, type PropsWithChildren, StrictMode, Suspense, useEffect 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { conversationPaneLifetime } from "../../../shell/paneLifetime";
 import { type OpenPaneRecord, resetWorkspaceStoreForTests, workspaceStore } from "../../../shell/workspace";
-import { connectionStore } from "../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../stores/connection";
 import { activityDelegate } from "../../../stores/sessionActivityTestUtils";
 import { SessionEntryCache } from "../../../stores/sessionEntryCache";
 import { observeProductionEntryForTests } from "../../../stores/testing/entryProductionHarness";
@@ -80,7 +80,7 @@ function mountWorkspaceTranscript(ref: string, paneId: string, strict = false, p
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
   resetTranscriptPagingForTests();
   resetWorkspaceStoreForTests();

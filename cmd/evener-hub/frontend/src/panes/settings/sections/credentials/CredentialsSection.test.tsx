@@ -19,7 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { captureNewTabs, NEW_TAB_POLICY, openedNewTab } from "../../../../shell/openInNewTab.testSupport";
 import { resetAuthStatusesStoreForTests } from "../../../../stores/authStatuses";
-import { connectionStore } from "../../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { setMutationClientIdentityForTests } from "../../../../stores/mutationClientIdentity";
 import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
@@ -101,7 +101,7 @@ async function openSheet(user: ReturnType<typeof userEvent.setup>, name: string)
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetCredentialsStoreForTests();
   resetAuthStatusesStoreForTests();
   resetToastStoreForTests();
@@ -112,7 +112,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -1940,7 +1940,7 @@ describe("Clear / Clear stored key / Remove confirm dialogs", () => {
     // Dropped connection during the clear: the logout succeeded, and the
     // follow-up listing read rejecting must not report "Clear failed".
     await act(async () => {
-      connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+      resetConnectionStoreForTests();
     });
     await act(async () => {
       logout({

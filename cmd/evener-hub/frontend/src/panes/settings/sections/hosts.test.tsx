@@ -11,7 +11,7 @@ import { type FakeClient, gateSettlements } from "@evener/appwire-client/testing
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import { connectionStore } from "../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../stores/connection";
 import { hostOpsStore } from "../../../stores/hostOps";
 import { hostsStore } from "../../../stores/hosts";
 import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
@@ -69,7 +69,7 @@ function planFixture(overrides: Partial<HostPlan> = {}): HostPlan {
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   hostsStore.getState().resetForTests();
   hostOpsStore.getState().resetForTests();
 });

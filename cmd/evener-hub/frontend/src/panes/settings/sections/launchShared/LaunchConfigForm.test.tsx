@@ -7,7 +7,7 @@ import type {
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectionStore } from "../../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../../stores/connection";
 import { resetExtensionsStoreForTests } from "../../../../stores/extensions";
 import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { Toast } from "../../../../widgets";
@@ -28,13 +28,9 @@ function saveStatus(): HTMLElement {
   return screen.getByTestId("launch-config-status");
 }
 
-// The path-kind rows render PathField, whose completion loader is the
-// extensions store's own completePaths - so opening one needs a connected
-// client behind it.
-
 beforeEach(() => {
   vi.useRealTimers();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetExtensionsStoreForTests();
 });
 

@@ -24,7 +24,6 @@ import {
 import { act, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { createConversationService } from "../../mobile/src/services/conversation";
-import { createActivityStore } from "../../mobile/src/state/activity";
 import { createConversationStore } from "../../mobile/src/state/conversation";
 import { palettes } from "./design/tokens";
 import { MAX_ITEM_BYTES, projectConversation } from "./projectedRows";
@@ -40,7 +39,6 @@ import { projectNativeTranscript } from "./transcriptPresentation";
 vi.mock("react-native", async () => ({
 	...(await import("./renderNative.testkit")).nativeModuleMock(),
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 vi.mock("react-native-safe-area-context", () => ({ SafeAreaView: "SafeAreaView" }));
 vi.mock("react-native-enriched-markdown", () => ({ EnrichedMarkdownText: "EnrichedMarkdownText" }));
 vi.mock("react-native-gesture-handler", async () =>
@@ -422,9 +420,8 @@ describe("shared-notes snapshots", () => {
 		client.on("thread/unsubscribe", () => ({}));
 		const service = createConversationService(client, { now: () => T0, resolveDisplayConfig: () => config });
 		const store = createConversationStore({ displayConfig: config });
-		const activity = createActivityStore();
 		try {
-			await store.getState().openProjected(service, activity.getState(), "ref-1");
+			await store.getState().openProjected(service, "ref-1");
 			expect(store.getState().status).toBe("open");
 			const conversation = store.getState().conversation;
 			if (!conversation) throw new Error("no stored conversation");

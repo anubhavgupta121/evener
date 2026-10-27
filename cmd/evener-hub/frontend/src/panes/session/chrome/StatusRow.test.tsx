@@ -6,7 +6,7 @@ import { effortLabel, hydrateThread } from "@evener/appwire-client";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetThreadsStoreForTests } from "../../../stores/threads";
 import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES } from "../../../threadTestUtils";
@@ -82,7 +82,7 @@ function runningModel(overrides: Partial<ThreadModel> = {}): ThreadModel {
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
   // Toasts are module state and outlive cleanup(); without this a toast from
   // an earlier test here is still on screen when "a failed setReasoningEffort call surfaces an error

@@ -5,7 +5,7 @@ import type { SandboxEscalationRequested, Thread, ThreadReadResponse } from "@ev
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import { connectionStore } from "../../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../../stores/connection";
 import { resetThreadsStoreForTests, threadsStore } from "../../../../stores/threads";
 import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
 import { ALL_CAPABILITIES as CAPABILITIES } from "../../../../threadTestUtils";
@@ -64,10 +64,6 @@ function readResponse(ref: string, overrides: Partial<Thread> = {}): ThreadReadR
   return { thread: testThread(ref, overrides) };
 }
 
-// connectFakeClient wires a fresh FakeClient through connectionStore
-// directly - the threads store's own requireClient() rides that, not React
-// context, so no <ClientProvider> is needed anywhere in this file.
-
 function readResponseWithEscalation(ref: string, escalation: SandboxEscalationRequested): ThreadReadResponse {
   return readResponse(ref, {
     evener: { ref, capabilities: CAPABILITIES, queue: { revision: 0 }, pendingEscalations: [escalation] },
@@ -75,7 +71,7 @@ function readResponseWithEscalation(ref: string, escalation: SandboxEscalationRe
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
 });
 

@@ -34,8 +34,6 @@ import type {
 	TurnStartResponse,
 } from "@evener/appwire-client";
 import * as projectModule from "../../../mobile-native/src/projectedRows";
-import type { createActivityService } from "./activity";
-import * as activityModule from "./activity";
 import { createConversationService, type LiveConversationService } from "./conversation";
 
 // Script the same lifecycle-capable client surface used by native consumers.
@@ -1060,7 +1058,6 @@ describe("ConversationService", () => {
 			resolve(makeReadResponse(makeThread()));
 			const hydrated = await hydration;
 			expect(hydrated.conversation.capabilities.send).toBe(false);
-			expect(hydrated.activity.capabilities.send).toBe(false);
 			await expect(service.send([{ type: "text", text: "not idle" }])).rejects.toThrow();
 			expect(client.calls.filter((c) => c.method === "turn/start")).toHaveLength(0);
 		});
@@ -1330,18 +1327,13 @@ describe("ConversationService", () => {
 			});
 		});
 
-		it("returns ConversationReadProjection with conversation, activity, olderCursor", async () => {
+		it("returns ConversationReadProjection with conversation and olderCursor", async () => {
 			const { service } = setup({ olderCursor: "older-abc" });
 			await service.open("ref-1");
 			const result = await service.readProjection("ref-1");
 			expect(result).toBeDefined();
 			expect(result?.conversation).toBeDefined();
 			expect(result?.conversation.threadId).toBe("thread-1");
-			expect(result?.activity).toBeDefined();
-			expect(result?.activity.tasks).toEqual([]);
-			expect(result?.activity.work).toEqual([]);
-			expect(result?.activity.usage).toBeDefined();
-			expect(result?.activity.capabilities).toBeDefined();
 			expect(result?.olderCursor).toBe("older-abc");
 		});
 
@@ -1350,10 +1342,10 @@ describe("ConversationService", () => {
 			await service.open("ref-1");
 			const result = await service.readProjection("ref-1");
 			expect(result).toBeDefined();
-			// The result must not carry a raw Thread — only conversation + activity.
+			// The result must not carry a raw Thread — only the conversation projection.
 			const keys = Object.keys(result ?? {});
 			expect(keys).not.toContain("thread");
-			expect(keys).toEqual(expect.arrayContaining(["conversation", "activity", "olderCursor"]));
+			expect(keys).toEqual(expect.arrayContaining(["conversation", "olderCursor"]));
 		});
 
 		it("does not send cursor to thread/read (cursor belongs to thread/turns/list)", async () => {
@@ -1365,37 +1357,6 @@ describe("ConversationService", () => {
 			expect(call).toBeDefined();
 			const params = call?.params as Record<string, unknown>;
 			expect(params).not.toHaveProperty("cursor");
-		});
-
-		it("activity contains sanitized tasks/work/usage from the thread", async () => {
-			const thread = makeThread({
-				evener: {
-					ref: "ref-1",
-					capabilities: ALL_TRUE_CAPS,
-					queue: { revision: 0 },
-					tasks: { total: 5, done: 2 },
-					usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
-					diagnostics: {
-						jobs: [
-							{
-								jobId: "job-1",
-								jobType: "shell",
-								status: "running",
-								outputBytes: 1024,
-							},
-						],
-					},
-				},
-			});
-			const { service } = setup({ thread });
-			await service.open("ref-1");
-			const result = await service.readProjection("ref-1");
-			expect(result?.activity.tasks).toHaveLength(3);
-			const doneGroup = result?.activity.tasks.find((g) => g.status === "done");
-			expect(doneGroup?.count).toBe(2);
-			expect(result?.activity.work).toHaveLength(1);
-			expect(result?.activity.work[0]?.label).toBe("shell");
-			expect(result?.activity.usage.totalTokens).toBe(150);
 		});
 	});
 
@@ -1911,39 +1872,37 @@ describe("ConversationService", () => {
 			}
 		});
 
-		it("readProjection: activity projection throw leaves pair null — all operations fail before wire", async () => {
-			// Spy on createActivityService BEFORE creating the service so the
-			// service captures the mock at construction time.
-			const spy = vi.spyOn(activityModule, "createActivityService").mockImplementation(
-				() =>
-					({
-						projectActivity: () => {
-							throw new Error("activity projection boom");
-						},
-					}) as unknown as ReturnType<typeof createActivityService>,
-			);
-			const { client, service } = setup();
-			try {
-				await service.open("ref-1");
-				await expect(service.readProjection("ref-2")).rejects.toThrow("activity projection boom");
-				// Pair null: send throws before wire.
-				client.on(
-					"turn/start",
-					() =>
-						({
-							turn: { id: "t1", itemsView: "default", status: "running" },
-							receipt: makeReceipt(),
-						}) as TurnStartResponse,
-				);
-				await expect(service.send(textInput("hello"))).rejects.toThrow();
-				expect(client.calls.find((c) => c.method === "turn/start")).toBeUndefined();
-				// requireRef-only also fails.
-				client.on("thread/reasoning-effort/set", () => EMPTY_RESPONSE);
-				await expect(service.setReasoningEffort("high")).rejects.toThrow();
-				expect(client.calls.find((c) => c.method === "thread/reasoning-effort/set")).toBeUndefined();
-			} finally {
-				spy.mockRestore();
-			}
+		it("readProjection: an activity hierarchy violation in the thread does not block reads or controls", async () => {
+			const orphan = {
+				runGeneration: 1,
+				delegateId: "dlg-orphan",
+				parentDelegateId: "dlg-missing",
+				ownerSessionId: "sess-root",
+				rootSessionId: "sess-root",
+				childSessionId: "sess-child",
+				transcriptRef: "local:abc",
+				type: "subagent",
+				lifecycle: "running",
+				phase: "running",
+				status: "running",
+				resumable: true,
+				projectionRevision: 1,
+				needsAttention: false,
+			};
+			const thread = makeThread({
+				evener: {
+					ref: "ref-1",
+					capabilities: ALL_TRUE_CAPS,
+					queue: { revision: 0 },
+					diagnostics: { delegates: [orphan] },
+				},
+			});
+			const { client, service } = setup({ thread });
+			await service.open("ref-1");
+			await expect(service.readProjection("ref-1")).resolves.toBeDefined();
+			client.on("thread/reasoning-effort/set", () => EMPTY_RESPONSE);
+			await service.setReasoningEffort("high");
+			expect(client.calls.find((c) => c.method === "thread/reasoning-effort/set")).toBeDefined();
 		});
 
 		it("readProjection: malformed response (null thread) throw leaves pair null", async () => {

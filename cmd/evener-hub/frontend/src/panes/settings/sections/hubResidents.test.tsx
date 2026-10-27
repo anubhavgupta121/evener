@@ -15,7 +15,7 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectionStore } from "../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../stores/connection";
 import { daemonResidentsStore, resetDaemonResidentsStoreForTests } from "../../../stores/daemonResidents";
 import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { HubResidents } from "./hubResidents";
@@ -36,7 +36,7 @@ const IDENTITY_FIXTURE: DaemonIdentity = {
 };
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetDaemonResidentsStoreForTests();
 });
 

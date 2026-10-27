@@ -49,7 +49,6 @@ vi.mock("@react-navigation/native", () => ({
 	useNavigation: () => navigation,
 	usePreventRemove: () => {},
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 
 const palette = paletteFor("light");
 const HUB = "hub-1";

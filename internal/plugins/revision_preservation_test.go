@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+
+	"primeradiant.com/evener/gittest"
 )
 
 // publishedRevisionFixture keeps the original install's files and directory
@@ -89,7 +91,7 @@ func TestPublishedRevisionSurvivesRevisit(t *testing.T) {
 		t.Fatalf("upgrade did not advance: %+v", middle)
 	}
 	middleTree := snapshotMigrationTree(t, middle.InstallPath)
-	gitIn(t, f.source, "reset", "--hard", oldSHA)
+	gittest.Run(t, f.source, "reset", "--hard", oldSHA)
 	revisit, err := f.manager.Upgrade(context.Background(), "widget", "acme")
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +194,7 @@ func TestPublishedRevisionSurvivesPublicationFailure(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					gitIn(t, f.source, "reset", "--hard", f.entry.GitCommitSha)
+					gittest.Run(t, f.source, "reset", "--hard", f.entry.GitCommitSha)
 				}
 				fault.inject(t, f) // package-wide seams: these subtests must stay serial.
 				var err error

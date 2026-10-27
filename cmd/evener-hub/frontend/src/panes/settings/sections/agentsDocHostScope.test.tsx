@@ -7,7 +7,7 @@ import {
   resetAgentsDocHostInstancesForTests,
   resetAgentsDocStoreForTests,
 } from "../../../stores/agentsDoc";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { hostsStore } from "../../../stores/hosts";
 import { resetSettingsHostForTests, setSettingsHost } from "../../../stores/settingsHost";
 import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
@@ -43,7 +43,7 @@ function editor(): HTMLTextAreaElement {
 }
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetAgentsDocStoreForTests();
   resetAgentsDocHostInstancesForTests();
   resetToastStoreForTests();
@@ -56,7 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetAgentsDocHostInstancesForTests();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   window.history.pushState({}, "", "/");
 });
 

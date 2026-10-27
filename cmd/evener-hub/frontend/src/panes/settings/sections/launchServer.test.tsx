@@ -2,7 +2,7 @@ import type { LaunchConfigLayer, LaunchConfigResolved, LaunchOptionSchemaRespons
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { connectionStore } from "../../../stores/connection";
+import { resetConnectionStoreForTests } from "../../../stores/connection";
 import { resetLaunchConfigStoreForTests } from "../../../stores/launchConfig";
 import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { LaunchServerSection } from "./launchServer";
@@ -26,12 +26,12 @@ const LAYER: LaunchConfigLayer = { agent: "evener" };
 const RESOLVED: LaunchConfigResolved = { effective: LAYER, layers: { global: LAYER }, provenance: { agent: "global" } };
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetLaunchConfigStoreForTests();
 });
 
 afterEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   cleanup();
 });
 

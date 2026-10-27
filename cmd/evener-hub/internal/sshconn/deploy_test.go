@@ -19,6 +19,7 @@ import (
 	"primeradiant.com/evener/buildinfo"
 	"primeradiant.com/evener/cmd/evener-hub/internal/hostreg"
 	"primeradiant.com/evener/execsupport/shellquote"
+	"primeradiant.com/evener/gittest"
 	"primeradiant.com/evener/internal/remoteinstall"
 )
 
@@ -1137,10 +1138,10 @@ func TestVerifyBuildSourceRevisionMustMatchController(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "cmd", "evener"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, root, "init", "-q")
-	gitIn(t, root, "add", ".")
-	gitIn(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
-	short := gitIn(t, root, "rev-parse", "HEAD")[:7]
+	gittest.Run(t, root, "init", "-q")
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
+	short := gittest.Run(t, root, "rev-parse", "HEAD")[:7]
 
 	orig := buildinfo.GitSHA
 	t.Cleanup(func() { buildinfo.GitSHA = orig })
@@ -1153,8 +1154,8 @@ func TestVerifyBuildSourceRevisionMustMatchController(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("second\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, root, "add", ".")
-	gitIn(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "second")
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "second")
 	_, err := verifyBuildSource(root)
 	if err == nil {
 		t.Fatal("verifyBuildSource accepted a checkout at a revision other than the controller's build")
@@ -1184,10 +1185,10 @@ func TestVerifyBuildRevisionRefusesDirtyController(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "cmd", "evener"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, root, "init", "-q")
-	gitIn(t, root, "add", ".")
-	gitIn(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
-	short := gitIn(t, root, "rev-parse", "HEAD")[:7]
+	gittest.Run(t, root, "init", "-q")
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
+	short := gittest.Run(t, root, "rev-parse", "HEAD")[:7]
 
 	origSHA, origDirty := buildinfo.GitSHA, buildinfo.GitDirty
 	t.Cleanup(func() { buildinfo.GitSHA, buildinfo.GitDirty = origSHA, origDirty })
@@ -1234,19 +1235,6 @@ func TestDeployTargetRefusesMultilineCommandV(t *testing.T) {
 	}
 }
 
-// gitIn runs a git command in dir for the build-source tests, failing on error.
-// The env overrides keep it independent of the developer's global git config.
-func gitIn(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // clearBuildSHA makes the build-source revision check a no-op for tests that
 // build from a throwaway checkout with no git history, independent of whether
 // the test binary itself carries buildinfo ldflags.
@@ -1275,10 +1263,10 @@ func TestVerifyBuildRevisionRefusesDirtySource(t *testing.T) {
 	if err := os.WriteFile(tracked, []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, root, "init", "-q")
-	gitIn(t, root, "add", ".")
-	gitIn(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
-	short := gitIn(t, root, "rev-parse", "HEAD")[:7]
+	gittest.Run(t, root, "init", "-q")
+	gittest.Run(t, root, "add", ".")
+	gittest.Run(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "first")
+	short := gittest.Run(t, root, "rev-parse", "HEAD")[:7]
 
 	orig := buildinfo.GitSHA
 	t.Cleanup(func() { buildinfo.GitSHA = orig })
@@ -1302,7 +1290,7 @@ func TestVerifyBuildRevisionRefusesDirtySource(t *testing.T) {
 	}
 
 	// An untracked file is part of what `go build` compiles, so it counts too.
-	gitIn(t, root, "checkout", "--", "tracked.txt")
+	gittest.Run(t, root, "checkout", "--", "tracked.txt")
 	if err := os.WriteFile(filepath.Join(root, "untracked.go"), []byte("package extra\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

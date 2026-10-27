@@ -21,7 +21,7 @@ import (
 	"primeradiant.com/evener/llm"
 )
 
-func TestSession_FollowUp_ProcessesAfterCompletion(t *testing.T) {
+func TestSession_QueuedInput_ProcessesAfterCompletion(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	c := llm.NewClient()
@@ -38,7 +38,7 @@ func TestSession_FollowUp_ProcessesAfterCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if err := sess.FollowUp("do second"); err != nil {
+	if err := sess.Enqueue(context.Background(), "do second"); err != nil {
 		t.Fatal(err)
 	}
 	ctx := tripwireCtx(t)
@@ -1818,7 +1818,6 @@ func TestSelectDrainNextActionRunsASkillOnlyQueuedEntry(t *testing.T) {
 		{"skill-only entry runs", drainInputs{QueuedSkills: 1}, runQueued, false},
 		{"skill-only entry runs while awaiting", drainInputs{Awaiting: true, QueuedSkills: 1}, runQueued, true},
 		{"skill-only entry outranks a notification", drainInputs{NotificationsPending: true, QueuedSkills: 2}, runQueued, false},
-		{"a follow-up still outranks it", drainInputs{FollowUp: "follow", QueuedSkills: 1}, runFollowUp, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

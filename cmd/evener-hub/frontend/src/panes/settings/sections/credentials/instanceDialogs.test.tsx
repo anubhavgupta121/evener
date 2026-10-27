@@ -9,7 +9,7 @@ import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { connectionStore } from "../../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../../stores/connection";
 import { credentialsStore, resetCredentialsStoreForTests } from "../../../../stores/credentials";
 import { setMutationClientIdentityForTests } from "../../../../stores/mutationClientIdentity";
 import { connectReadyFakeClient } from "../../../../testing/connectionTestUtils";
@@ -70,7 +70,7 @@ const VERTEX_EXPRESS = provider({
 });
 
 beforeEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetCredentialsStoreForTests();
   // Each test reads the toasts its own actions raised.
   resetToastStoreForTests();
@@ -80,7 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   cleanup();
 });
 
@@ -447,7 +447,7 @@ describe("AddInstanceDialog", () => {
     await waitFor(() => expect(alertReason()).toBe("unconfirmed"));
 
     await act(async () => {
-      connectionStore.setState({ state: "idle", client: null });
+      resetConnectionStoreForTests();
     });
     await user.click(screen.getByRole("button", { name: "Check again" }));
     // The dropped connection makes the read reject, which is an unapplied
@@ -1469,7 +1469,7 @@ describe("ApiKeyDialog", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     // Dropped connection during the save: the credential write succeeded, and
     // the follow-up listing read rejecting must not turn it into "Save failed".
-    connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+    resetConnectionStoreForTests();
     await act(async () =>
       save({ provider: "work", supported: true, signedIn: true, activeSource: "store", hasStoredOAuth: false }),
     );
