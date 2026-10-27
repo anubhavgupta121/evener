@@ -776,25 +776,25 @@ func validateNavigationIdentity(kind, value string, allowEmpty bool) error {
 	}
 	return nil
 }
-func navigationRef(id string) (hubapi.Ref, error) {
+func navigationRef(id string) (appwire.Ref, error) {
 	if err := validateNavigationIdentity("session ID", id, false); err != nil {
-		return hubapi.Ref{}, err
+		return appwire.Ref{}, err
 	}
 	refText := id
 	if !strings.Contains(id, ":") {
-		refText = hubapi.LocalRef(id).String()
+		refText = appwire.LocalRef(id).String()
 	}
-	ref, err := hubapi.ParseRef(refText)
+	ref, err := appwire.ParseRef(refText)
 	if err != nil {
-		return hubapi.Ref{}, fmt.Errorf("malformed navigation session identity %q: %w", id, err)
+		return appwire.Ref{}, fmt.Errorf("malformed navigation session identity %q: %w", id, err)
 	}
 	if len(ref.String()) > maxNavigationIdentityBytes {
-		return hubapi.Ref{}, fmt.Errorf("navigation ref exceeds %d bytes", maxNavigationIdentityBytes)
+		return appwire.Ref{}, fmt.Errorf("navigation ref exceeds %d bytes", maxNavigationIdentityBytes)
 	}
 	return ref, nil
 }
 
-func navigationNodeRef(node hubcore.TreeNode) (hubapi.Ref, error) {
+func navigationNodeRef(node hubcore.TreeNode) (appwire.Ref, error) {
 	if node.Ref != "" {
 		return navigationRef(node.Ref)
 	}
@@ -1216,8 +1216,8 @@ func navigationAliasLocation(id, kind string, root hubapi.NavigationSessionLocat
 	}
 	summary := hubapi.NavigationSessionSummary{
 		Ref:       ref.String(),
-		HostID:    ref.HostID,
-		SessionID: ref.SessionID,
+		HostID:    ref.SourceID,
+		SessionID: ref.ThreadID,
 		State:     "ended",
 		Kind:      kind,
 		Children:  hubapi.NavigationArray[hubapi.NavigationSessionSummary]{},
@@ -1640,8 +1640,8 @@ func (p navigationProjector) projectShallow(node hubcore.TreeNode) hubapi.Naviga
 	live := p.projection.isLive(node.ID, ref.String()) && hubcore.NormalizeState(node.State) != "ended"
 	return hubapi.NavigationSessionSummary{
 		Ref:       ref.String(),
-		HostID:    ref.HostID,
-		SessionID: ref.SessionID,
+		HostID:    ref.SourceID,
+		SessionID: ref.ThreadID,
 		Title:     truncateNavigationRunes(node.Title, maxNavigationTitleRunes),
 		// project is an IDENTITY on the wire, not a rendered label: the web codec
 		// validates it with identity(value.project, true) and the hub schema mirrors
@@ -1665,7 +1665,7 @@ func (p navigationProjector) projectShallow(node hubcore.TreeNode) hubapi.Naviga
 		LastMessage:       appwire.Excerpt(node.LastMessage, appwire.MaxMessageExcerptRunes),
 		ModelName:         navigationModelName(node.Model),
 		Dormant:           node.Dormant,
-		Offline:           p.projection.sourceOffline(ref.HostID),
+		Offline:           p.projection.sourceOffline(ref.SourceID),
 		Archived:          node.Archived,
 		UpdatedAt:         optionalTime(node.UpdatedAt),
 		Subagents:         navigationSubagentTally(node.Subagents),
@@ -1835,8 +1835,8 @@ func (p navigationProjection) sessionFavorite(id, ref string) bool {
 // row's own (source, session id) pair is assigned to, or "" when no durable
 // section holds it. Callers pass the row's canonical ref, which already
 // carries the source, so no lookup can fall back to a bare ID.
-func (p navigationProjection) pinSectionIDFor(ref hubapi.Ref) string {
-	assignment, ok := p.inputs.PinAssignments[hubcore.SessionPinKey(ref.HostID, ref.SessionID)]
+func (p navigationProjection) pinSectionIDFor(ref appwire.Ref) string {
+	assignment, ok := p.inputs.PinAssignments[hubcore.SessionPinKey(ref.SourceID, ref.ThreadID)]
 	if !ok || !p.pinSectionIDs[assignment.SectionID] {
 		return ""
 	}
@@ -1847,18 +1847,18 @@ func (p navigationProjection) pinSectionIDFor(ref hubapi.Ref) string {
 // marker for it (S4). The marker is keyed by the row's own ref, the one a
 // client marks it by, so a live session's Live, project and pin rows, which
 // share that ref, agree.
-func (p navigationProjection) unseen(ref hubapi.Ref, turnEndedAt time.Time) bool {
-	return p.inputs.SessionSeen.Unseen(hubcore.SessionPinKey(ref.HostID, ref.SessionID), turnEndedAt)
+func (p navigationProjection) unseen(ref appwire.Ref, turnEndedAt time.Time) bool {
+	return p.inputs.SessionSeen.Unseen(hubcore.SessionPinKey(ref.SourceID, ref.ThreadID), turnEndedAt)
 }
 
 // seenThrough is a live row's seen-through mark (hubcore
 // SessionSeenSnapshot.SeenThrough), nil for a row that isn't live or with no
 // seen store.
-func (p navigationProjection) seenThrough(ref hubapi.Ref, live bool) *time.Time {
+func (p navigationProjection) seenThrough(ref appwire.Ref, live bool) *time.Time {
 	if !live {
 		return nil
 	}
-	return optionalTime(p.inputs.SessionSeen.SeenThrough(hubcore.SessionPinKey(ref.HostID, ref.SessionID)))
+	return optionalTime(p.inputs.SessionSeen.SeenThrough(hubcore.SessionPinKey(ref.SourceID, ref.ThreadID)))
 }
 
 func cloneNavigationSummary(summary hubapi.NavigationSessionSummary) hubapi.NavigationSessionSummary {

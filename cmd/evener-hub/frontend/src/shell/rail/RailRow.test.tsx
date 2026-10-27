@@ -46,7 +46,7 @@ import type {
 import { RailTickProvider } from "./railNow";
 import { RailRenderObserver } from "./railRenderObserver";
 
-const RAIL_CSS = readModuleCss(import.meta.url, "RailRow.module.css").replace(/\/\*[\s\S]*?\*\//g, " ");
+const RAIL_CSS = readModuleCss(import.meta.url, "RailRow.module.css");
 
 function nestedRuleBlock(css: string, selector: string): string {
   const selectorStart = css.indexOf(selector);

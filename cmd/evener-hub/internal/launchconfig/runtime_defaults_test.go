@@ -290,3 +290,45 @@ func TestSchemaBuiltinsMatchAgentDefaults(t *testing.T) {
 		t.Errorf("non_interactive should have no BuiltinDefaultBool (per-launch only, not layer-settable), got %v", got.BuiltinDefaultBool)
 	}
 }
+
+// layerFieldName is the Layer field a schema row names.
+func layerFieldName(t *testing.T, key string) string {
+	t.Helper()
+	for _, f := range layerFields() {
+		if layerFieldKey(f) == key {
+			return f.Name
+		}
+	}
+	t.Fatalf("schema row %q names no Layer field", key)
+	return ""
+}
+
+// Every schema row that declares a builtin default or an env fallback must be
+// applied to its Layer field with the matching provenance, so adding a row
+// cannot silently leave the floor unapplied.
+func TestApplyRuntimeDefaultsAppliesEveryDeclaredFloor(t *testing.T) {
+	for _, opt := range LaunchOptionSchema() {
+		hasBuiltin := opt.BuiltinDefault != "" || opt.BuiltinDefaultInt != nil || opt.BuiltinDefaultBool != nil
+		if !hasBuiltin && opt.EnvFallback == nil {
+			continue
+		}
+		t.Run(opt.Field, func(t *testing.T) {
+			getenv := envOf(nil)
+			wantSource := LayerBuiltin
+			if opt.EnvFallback != nil {
+				getenv = envOf(map[string]string{opt.EnvFallback.Name: "from-env"})
+				wantSource = LayerEnv
+			}
+			got := ApplyRuntimeDefaults(Resolved{}, getenv, []LaunchOption{opt})
+			applied := reflect.ValueOf(got.Effective).FieldByName(layerFieldName(t, opt.Field))
+			// A builtin false/zero is a non-nil pointer, so the pointer kinds
+			// check presence rather than value.
+			if applied.Kind() == reflect.Pointer && applied.IsNil() || applied.Kind() != reflect.Pointer && applied.IsZero() {
+				t.Fatalf("%s not applied to the effective layer", opt.Field)
+			}
+			if got.Provenance[opt.Field] != wantSource {
+				t.Fatalf("provenance[%s] = %q, want %q", opt.Field, got.Provenance[opt.Field], wantSource)
+			}
+		})
+	}
+}

@@ -199,17 +199,22 @@ func defaultConfigRoot(env func(string) (string, bool)) string {
 	return userdirs.ConfigRoot(xdg, func() (string, error) { return home, nil })
 }
 
-// defaultStateRoot mirrors cmdutil.DefaultStateRoot: $XDG_STATE_HOME/evener,
-// else ~/.local/state/evener.
+// defaultStateRoot resolves the registry's state root from its injected
+// environment function (userdirs.StateRoot), so tests do not depend on the
+// process environment. It is empty when neither XDG_STATE_HOME nor HOME is
+// there: a registry with no state root runs from the embedded catalog and has
+// no runtime cache or OAuth records. Callers that need the state root
+// (cmdutil.LoadRegistry) resolve it themselves and report the error.
 func defaultStateRoot(env func(string) (string, bool)) string {
-	if base, ok := env("XDG_STATE_HOME"); ok && base != "" {
-		return filepath.Join(base, "evener")
+	xdg, _ := env("XDG_STATE_HOME")
+	root, err := userdirs.StateRoot(xdg, func() (string, error) {
+		home, _ := env("HOME")
+		return home, nil
+	})
+	if err != nil {
+		return ""
 	}
-	home, _ := env("HOME")
-	if home == "" {
-		home = "."
-	}
-	return filepath.Join(home, ".local", "state", "evener")
+	return root
 }
 
 // Load assembles the registry from the embedded snapshot, the curated
@@ -1237,7 +1242,7 @@ func (r *Registry) maybeStartRefresh(o *options) {
 	if v, _ := o.env("EVENER_OFFLINE"); v == "1" {
 		offline = true
 	}
-	if offline {
+	if offline || o.stateRoot == "" {
 		return
 	}
 	if _, meta, ok := readCache(o.stateRoot); ok && time.Since(meta.FetchedAt) < cacheMaxAge {
