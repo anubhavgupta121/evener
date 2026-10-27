@@ -72,7 +72,6 @@
 // this app. Not a gap this task introduces.
 
 import {
-  dualWriteLegacyPreferences,
   encodeLocalConfig,
   type LegacyPreferenceKey,
   type LegacyPreferenceValues,
@@ -195,23 +194,11 @@ function removeRaw(name: string): void {
   }
 }
 
-// These adapters deliberately name the only compatibility keys that the
-// transcript-display store may touch. Callers cannot use them to turn this
+// This adapter deliberately names the only compatibility keys that the
+// transcript-display store may read, for the one-time migration. Callers cannot use them to turn this
 // module into a general localStorage wrapper.
 export function readLegacyPreference(key: LegacyPreferenceKey): string | null {
   return readRaw(key);
-}
-
-export function hasLegacyPreference(key: LegacyPreferenceKey): boolean {
-  return readLegacyPreference(key) !== null;
-}
-
-export function writeLegacyBooleanPreference(key: LegacyPreferenceKey, value: boolean): void {
-  writeBool(key, value);
-}
-
-export function removeLegacyPreference(key: LegacyPreferenceKey): void {
-  removeRaw(key);
 }
 
 export function readTranscriptDisplayLocal(layout: TranscriptViewportClass): string | null {
@@ -248,11 +235,6 @@ export function migrateLegacyTranscriptDisplay(): TranscriptDisplayConfigV1 | un
   writeTranscriptDisplayConfig("desktop", config);
   writeTranscriptDisplayConfig("mobile", config);
   return config;
-}
-
-/** Keep old transcript consumers in sync without changing their 1/0 wire. */
-export function dualWriteTranscriptDisplayLegacy(config: TranscriptDisplayConfigV1): void {
-  dualWriteLegacyPreferences(config, writeLegacyBooleanPreference);
 }
 
 // "1"/"0", not JS's "true"/"false": every boolean this store persists

@@ -1,10 +1,9 @@
-import { decodeLocalConfig, makeTranscriptDisplayConfig } from "@evener/appwire-client";
+import { decodeLocalConfig } from "@evener/appwire-client";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { installLocalStorage, MemoryStorage } from "../storageTestUtils";
 import {
   clampSidebarWidth,
-  dualWriteTranscriptDisplayLegacy,
   hasTranscriptDisplayLocal,
   initPrefs,
   migrateLegacyTranscriptDisplay,
@@ -17,7 +16,6 @@ import {
   SIDEBAR_WIDTH_MAX,
   SIDEBAR_WIDTH_MIN,
   usePrefsStore,
-  writeLegacyBooleanPreference,
 } from "./prefs";
 
 beforeAll(() => {
@@ -738,36 +736,11 @@ describe("transcript display legacy adapters", () => {
     expect(readLegacyPreference("transcriptHookExitsNormal")).toBe("1");
   });
 
-  test("guarded bool writes use literal 1/0 and removal targets only the layout key", () => {
-    writeLegacyBooleanPreference("showCost", true);
-    expect(localStorage.getItem(KEY("showCost"))).toBe("1");
-    writeLegacyBooleanPreference("showCost", false);
-    expect(localStorage.getItem(KEY("showCost"))).toBe("0");
-
+  test("removal targets only the layout key", () => {
+    localStorage.setItem(KEY("showCost"), "0");
     localStorage.setItem(KEY("transcriptDisplay.desktop"), "encoded");
     removeTranscriptDisplayLocal("desktop");
     expect(localStorage.getItem(KEY("transcriptDisplay.desktop"))).toBeNull();
     expect(localStorage.getItem(KEY("showCost"))).toBe("0");
-  });
-
-  test("dual-write adapter writes exact 1/0 values for all legacy keys", () => {
-    dualWriteTranscriptDisplayLegacy(
-      makeTranscriptDisplayConfig(
-        { kind: "preset", level: "activity" },
-        {
-          roundTimings: true,
-          tokenCounts: false,
-          estimatedCost: true,
-          promptEvents: true,
-          hookExits: "all",
-        },
-      ),
-    );
-    expect(localStorage.getItem(KEY("transcriptRoundTimings"))).toBe("1");
-    expect(localStorage.getItem(KEY("transcriptTokenCounts"))).toBe("0");
-    expect(localStorage.getItem(KEY("transcriptHookExitsAll"))).toBe("1");
-    expect(localStorage.getItem(KEY("transcriptHookExitsNormal"))).toBe("0");
-    expect(localStorage.getItem(KEY("transcriptPromptLoaded"))).toBe("1");
-    expect(localStorage.getItem(KEY("showCost"))).toBe("1");
   });
 });

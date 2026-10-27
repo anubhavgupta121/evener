@@ -698,7 +698,7 @@ test("preserves an explicit Tools-equivalent Custom through local and hub persis
   expect(transcriptDisplayStore.getState().hub.desktop?.config.content.kind).toBe("custom");
 });
 
-test("migration runs before local load, keeps old keys, and dual-writes literal booleans", () => {
+test("migration runs before local load and keeps old keys; later edits leave them untouched", () => {
   storage.setItem("evener.prefs.transcriptRoundTimings", "0");
   storage.setItem("evener.prefs.transcriptTokenCounts", "1");
   storage.setItem("evener.prefs.showCost", "1");
@@ -719,13 +719,13 @@ test("migration runs before local load, keeps old keys, and dual-writes literal 
     { kind: "preset", level: "chat" },
     { tokenCounts: true, estimatedCost: true, hookExits: "all" },
   );
+  const legacyBefore = legacyKeys.map((key) => storage.getItem(key));
   transcriptDisplayStore.getState().setLocal("desktop", desktopEdited);
-  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(["1", "0", "0", "0", "1", "0"]);
   transcriptDisplayStore.getState().setLocal("mobile", mobileEdited);
-  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(["0", "1", "1", "0", "0", "1"]);
+  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyBefore);
 });
 
-test("clearLocal removes the persisted key, broadcasts null, follows the hub, and dual-writes its flags", () => {
+test("clearLocal removes the persisted key, broadcasts null, and follows the hub", () => {
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
   resetTranscriptDisplayStoreForTests();
   initTranscriptDisplay();
@@ -743,7 +743,7 @@ test("clearLocal removes the persisted key, broadcasts null, follows the hub, an
   expect(transcriptDisplayStore.getState().local.desktop).toBeUndefined();
   expect(transcriptDisplayStore.getState().effective("desktop")).toEqual(hub);
   expect(active.posted.at(-1)).toMatchObject({ config: null, fingerprint: null, layout: "desktop" });
-  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(["1", "0", "0", "0", "1", "0"]);
+  expect(legacyKeys.map((key) => storage.getItem(key))).toEqual(legacyKeys.map(() => null));
 });
 
 test("keeps an in-memory local change and warns when browser storage is blocked", () => {
