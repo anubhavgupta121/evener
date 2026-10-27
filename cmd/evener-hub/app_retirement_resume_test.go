@@ -1160,10 +1160,7 @@ func TestResumeAfterConfirmedRetirementRecordsLifecycle(t *testing.T) {
 		writeRendezvous(t, runDir, entry)
 		return entry, nil
 	}}
-	past := hubcore.NewPastIndex(filepath.Join(root, "projects", "*"))
-	if _, err := past.Rebuild(); err != nil {
-		t.Fatal(err)
-	}
+	past := newRebuiltPastIndex(t, filepath.Join(root, "projects", "*"))
 
 	locks := hubcore.NewResumeLocks()
 	if err := locks.PersistForceStop([]string{requested, target}, target); err != nil {

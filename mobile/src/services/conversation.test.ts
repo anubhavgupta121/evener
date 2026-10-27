@@ -191,6 +191,18 @@ function textInput(text: string): InputItem[] {
 	return [{ type: "text", text }];
 }
 
+// Scripts turn/start to answer with the standard running turn and receipt.
+function scriptTurnStart(client: FakeAppwireClient): void {
+	client.on(
+		"turn/start",
+		() =>
+			({
+				turn: { id: "t1", itemsView: "default", status: "running" },
+				receipt: makeReceipt(),
+			}) as TurnStartResponse,
+	);
+}
+
 // --- service tests ------------------------------------------------------------
 
 describe("ConversationService", () => {
@@ -729,14 +741,7 @@ describe("ConversationService", () => {
 	describe("mutations — all V1 actions", () => {
 		it("send calls turn/start with clientMutationId and input", async () => {
 			const { client, service } = setup();
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await service.open("ref-1");
 			const receipt = await service.send(textInput("hello"));
 			expect(receipt.clientMutationId).toBe("cmid-1");
@@ -1111,14 +1116,7 @@ describe("ConversationService", () => {
 				},
 			});
 			// The malformed push changed nothing: send is still allowed.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await service.send(textInput("hello"));
 			expect(client.calls.filter((c) => c.method === "turn/start")).toHaveLength(1);
 		});
@@ -1167,14 +1165,7 @@ describe("ConversationService", () => {
 				},
 			});
 			const { client, service } = setup({ thread });
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await service.open("ref-1");
 			await expect(service.send(textInput("hello"))).rejects.toThrow();
 			const call = client.calls.find((c) => c.method === "turn/start");
@@ -1418,14 +1409,7 @@ describe("ConversationService", () => {
 			service.close();
 
 			// After close, the service is fail-closed: send throws before wire.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await expect(service.send(textInput("hello"))).rejects.toThrow();
 			expect(client.calls.find((c) => c.method === "turn/start")).toBeUndefined();
 		});
@@ -1470,14 +1454,7 @@ describe("ConversationService", () => {
 			// Start open("ref-B") — clears ref+caps before awaiting B's read.
 			const openPromise = service.open("ref-B");
 			// While B's read is in flight, the pair is cleared/fail-closed.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await expect(service.send(textInput("hello"))).rejects.toThrow();
 			expect(client.calls.find((c) => c.method === "turn/start")).toBeUndefined();
 			// Let B's open complete.
@@ -1495,14 +1472,7 @@ describe("ConversationService", () => {
 			});
 			await expect(service.open("ref-2")).rejects.toThrow();
 			// Service is fail-closed: send throws before wire (no valid ref/caps).
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await expect(service.send(textInput("hello"))).rejects.toThrow();
 			expect(client.calls.find((c) => c.method === "turn/start")).toBeUndefined();
 		});
@@ -1545,14 +1515,7 @@ describe("ConversationService", () => {
 			await openAPromise;
 
 			// The pair must be B's: send reaches wire with ref-B (capsB.send=true).
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			const receipt = await service.send(textInput("hello"));
 			expect(receipt).toBeDefined();
 			const startCall = client.calls.find((c) => c.method === "turn/start");
@@ -1952,14 +1915,7 @@ describe("ConversationService", () => {
 			});
 			await expect(service.readProjection("ref-2")).rejects.toThrow();
 			// Pair null: send throws before wire.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await expect(service.send(textInput("hello"))).rejects.toThrow();
 			expect(client.calls.find((c) => c.method === "turn/start")).toBeUndefined();
 		});
@@ -2005,14 +1961,7 @@ describe("ConversationService", () => {
 			// A's result is returned (stale successful result returns).
 			expect(convA.threadId).toBe("thread-A");
 			// B's pair is committed: send reaches wire with ref-B (capsB.send=true).
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			const receipt = await service.send(textInput("hello"));
 			expect(receipt).toBeDefined();
 			const startCall = client.calls.find((c) => c.method === "turn/start");
@@ -2060,14 +2009,7 @@ describe("ConversationService", () => {
 			// A's result is returned (stale successful result returns).
 			expect(resultA.conversation.threadId).toBe("thread-A");
 			// B's pair is committed: send reaches wire with ref-B.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			const receipt = await service.send(textInput("hello"));
 			expect(receipt).toBeDefined();
 			const startCall = client.calls.find((c) => c.method === "turn/start");
@@ -2138,14 +2080,7 @@ describe("ConversationService", () => {
 			service: ReturnType<typeof createConversationService>,
 			client: FakeAppwireClient,
 		) {
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			client.on("turn/queue", () => ({ receipt: makeReceipt("queue") }) as TurnQueueResponse);
 			client.on("turn/interrupt", () => ({ receipt: makeReceipt("interrupt") }) as TurnInterruptResponse);
 			client.on("thread/compact/start", () => EMPTY_RESPONSE);
@@ -2235,14 +2170,7 @@ describe("ConversationService", () => {
 			const { sharedNotes: _omitted, ...legacyCaps } = ALL_TRUE_CAPS;
 			const thread = makeThreadWithCaps(legacyCaps);
 			const { client, service } = setup({ thread });
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			await service.open("ref-1");
 			// A capability-gated action still reaches the wire.
 			await service.send(textInput("hello"));
@@ -2347,14 +2275,7 @@ describe("ConversationService", () => {
 			const conv = await service.open("ref-2");
 			expect(conv.threadId).toBe("thread-1");
 			// Operations reach the wire.
-			client.on(
-				"turn/start",
-				() =>
-					({
-						turn: { id: "t1", itemsView: "default", status: "running" },
-						receipt: makeReceipt(),
-					}) as TurnStartResponse,
-			);
+			scriptTurnStart(client);
 			const receipt = await service.send(textInput("hello"));
 			expect(receipt).toBeDefined();
 			const startCall = client.calls.find((c) => c.method === "turn/start");

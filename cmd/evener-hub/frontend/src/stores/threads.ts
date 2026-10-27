@@ -806,6 +806,12 @@ interface EntryTranscriptRoute {
   // down. A remount of the same route may serve this view without racing a
   // disk recertification against the lookup deadline.
   lastLocalOpenUsable?: boolean;
+  // True when the most recent open's bounded lookup expired before the local
+  // read answered (openEntryTranscript's deadline branch): the recorded window
+  // was never served nor refused, so a held pane's display can still be
+  // body-suppressed with no demand cursor. Distinguishes that strand from the
+  // fast recovery-needed answers a repository without a usable record returns.
+  localOpenDeadlineMissed?: boolean;
 }
 
 const productionEntryRoutes = new Map<string, EntryTranscriptRoute>();
@@ -954,11 +960,12 @@ function holdsCompleteForegroundWindow(model: ThreadModel | undefined): boolean 
   );
 }
 
-async function openEntryTranscript(ref: string): Promise<boolean> {
+async function openEntryTranscript(ref: string, recovery = false): Promise<boolean> {
   const fixture = entryTranscriptRoute(ref);
   if (!fixture || fixture.ref !== ref || !fixture.repository) return true;
   const repository = fixture.repository;
   const openingToken = beginEntryTranscriptLocalOpening(ref);
+  fixture.localOpenDeadlineMissed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     fixture.reader ??= fixture.repository.attachReader();
@@ -1001,11 +1008,18 @@ async function openEntryTranscript(ref: string): Promise<boolean> {
       : await Promise.race([
           reader.openLocal(200),
           new Promise<undefined>((resolve) => {
-            timer = setTimeout(() => {
-              reader.dispose();
-              if (fixture.reader === reader) fixture.reader = undefined;
-              resolve(undefined);
-            }, SESSION_CACHE_LOOKUP_DEADLINE_MS);
+            timer = setTimeout(
+              () => {
+                reader.dispose();
+                if (fixture.reader === reader) fixture.reader = undefined;
+                resolve(undefined);
+                // A recovery attempt outlasts the lookup deadline on purpose:
+                // a read that answers slower than the deadline but successfully
+                // must be allowed to finish, or a consistently slow cache
+                // strands the pane behind a race it can only keep losing.
+              },
+              recovery ? sessionCacheStalledOpenMs : SESSION_CACHE_LOOKUP_DEADLINE_MS,
+            );
           }),
         ]);
     if (!result) {
@@ -1059,6 +1073,11 @@ async function openEntryTranscript(ref: string): Promise<boolean> {
         return true;
       }
       fixture.lastLocalOpenStatus = "recovery-needed";
+      // Only the bounded-lookup deadline miss is the stranding strand a
+      // tracked re-open can heal; an established restore that stalled past
+      // its own settled-opening window hands to source recovery instead
+      // (the #4954 stalled-open contract), and must not arm this chain.
+      if (!stalled) fixture.localOpenDeadlineMissed = true;
       if (openingOwned()) fixture.lastLocalOpenUsable = false;
       return false;
     }
@@ -1209,6 +1228,143 @@ async function openCachedEntryTranscript(ref: string, generation: number): Promi
   });
   route.cachedOpening = opening;
   await opening;
+}
+
+// A foreground acquisition whose bounded local opening missed its lookup
+// deadline returns with the repository's recorded display standing in for the
+// pane: body-suppressed and without a local demand cursor, because only a
+// successful open promotes recorded bodies into the display — a fresh server
+// read republishes the recorded projection and cannot restore them. One miss
+// self-heals inside ensureThread (the authoritative read publishes, and the
+// success arm's second open promotes the recorded window). Two misses in a
+// row — the sustained-slow-cache case the 250ms lookup deadline makes
+// possible — used to leave the pane that way permanently: nothing re-opened
+// the record, so the thread store's documented bounded source recovery (S02:
+// "the accepted baseline restores display, older paging and live updates")
+// never ran. A tracked re-open closes the gap, and it must RE-ARM: its own
+// open reads the same slow cache and can miss the same deadline again, so a
+// fixed number of attempts just strands the pane one attempt later (the
+// whole-suite third-miss failure this re-arm closes). Each attempt is bounded
+// by the stalled-open window rather than the lookup deadline (a read that
+// answers slowly but successfully must still finish), and only an attempt's
+// completion decides the next one — an event-completion chain, not a timer
+// loop — so it stops at the
+// first successful open, when the foreground holder releases, or when the
+// route retires, or once the storage chain has had its paced retry: a fast
+// recovery-needed refusal, or a second missed stalled window, hands to
+// source recovery once instead of re-arming against storage that may never
+// answer. One tracked chain covers every attempt, deduplicated per live
+// route, and is registered in trackedHydrationCompletions so a caller
+// awaiting the acquisition's completion (including
+// settleEntryTranscriptForTests) also awaits the display's convergence.
+// The route a pending recovery belongs to, keyed by ref: a recovery opened for
+// a retired route must never suppress a fresh acquisition's recovery, and a
+// released-then-reacquired pane (same ref, new route) still gets its own.
+const pendingOpeningRecoveries = new Map<string, EntryTranscriptRoute>();
+
+// The recovery chain's whole-span registration per ref, so a concurrent
+// hydration can compose with it instead of displacing it. Tracked separately
+// from trackedHydrationCompletions because a plain hydration's registration
+// may be superseded by a newer attempt, while the chain's span may not.
+const openingRecoveryCompletions = new Map<string, Promise<void>>();
+
+function scheduleEntryOpeningRecovery(ref: string): void {
+  const route = entryTranscriptRoute(ref);
+  if (!route || route.ref !== ref) return;
+  if (pendingOpeningRecoveries.get(ref) === route) return;
+  if ((refCounts.get(ref) ?? 0) <= 0) return; // no live foreground holder to recover for
+  if (route.localOpenDeadlineMissed !== true) return; // the open refused fast or handed to another path: not this chain's strand
+  // The chain exists to promote recorded bodies into a display that is still
+  // body-suppressed; a display another path (main's source recovery, a newer
+  // open) already healed needs no re-open churn against storage that may
+  // never answer.
+  if (holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) return;
+  pendingOpeningRecoveries.set(ref, route);
+  const recovery = (async () => {
+    let stalledAttempts = 0;
+    for (;;) {
+      const opened = await openEntryTranscript(ref, true);
+      if (opened) return;
+      if (entryTranscriptRoute(ref) !== route) return; // a retired route's recovery must not outlive it
+      if ((refCounts.get(ref) ?? 0) <= 0) return; // holder released: nothing left to recover for
+      // Another path healed the display mid-chain only while the repository
+      // still backs that display: a pending attempt whose timeout disposed the
+      // shared reader lets the repository reclaim its bodies without
+      // publishing, so the store's snapshot alone can be a stale complete view
+      // the next publication would prune. Require the resident range too, and
+      // a reclaimed repository re-opens instead of ending recovery on it.
+      if (
+        holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref)) &&
+        route.repository?.holdsResidentForegroundRange()
+      )
+        return;
+      if (route.localOpenDeadlineMissed === true && stalledAttempts < 1) {
+        // The attempt missed the deadline again under sustained slowness; the
+        // pane is still stranded and held, so give the storage chain one
+        // more paced attempt before turning to the source.
+        stalledAttempts += 1;
+        continue;
+      }
+      // The attempt refused fast instead of missing the deadline — storage
+      // answered a recovery-needed outright, and a transient repository error
+      // takes openLocal's catch, which resolves without arming another
+      // attempt — or it missed its second stalled window and the cache is not
+      // answering at all. A pane that is still suppressed must not strand
+      // behind a marker no later open will set, or behind storage that may
+      // never answer: hand to source recovery once, the same sequence a
+      // stalled restore hands to (#4954), and let the ordinary owner-scoped
+      // paths own the rest.
+      route.repository?.beginFreshBaseline();
+      publishEntryTranscriptModel(ref);
+      let sourceReadFailed = false;
+      try {
+        const client = await requireReadyClient();
+        const epoch = readyEpoch;
+        if (entryTranscriptRoute(ref) !== route) return;
+        if ((refCounts.get(ref) ?? 0) <= 0) return;
+        // The chain's own registration spans this read and the re-open after
+        // it; the tracked read joins under it rather than displacing it, so
+        // a consumer that starts waiting mid-read still captures a promise
+        // covering the entire recovery.
+        await refreshTrackedThread(client, epoch, ref, false, true, undefined, undefined, "foreground", false);
+      } catch {
+        // A failed source read keeps the ordinary owner-scoped retry — the
+        // owned hydration lifecycle schedules it — and the re-open below
+        // promotes the view a successful read restored, so a failed one has
+        // nothing to promote.
+        sourceReadFailed = true;
+      }
+      if (sourceReadFailed) {
+        return;
+      }
+      if (entryTranscriptRoute(ref) !== route) return;
+      if ((refCounts.get(ref) ?? 0) <= 0) return;
+      // Mirror the raced recovery's full sequence: the read that replaced
+      // the view is followed by the local re-open that promotes its
+      // restored bodies into the display. A source response that already
+      // healed the display needs no further cache read to converge.
+      if (!holdsCompleteForegroundWindow(threadsStore.getState().threads.get(ref))) {
+        await openEntryTranscript(ref, true);
+      }
+      return;
+    }
+  })().then(
+    () => undefined,
+    () => undefined,
+  );
+  // The chain's registration is the recovery's whole span; it is also
+  // recorded in openingRecoveryCompletions so a concurrent refresh can compose
+  // with it instead of displacing it. A superseded hydration's registration
+  // may still be displaced by a newer hydration — the newer attempt owns the
+  // ref's convergence — but the recovery chain's span is not a hydration and
+  // must survive every one.
+  openingRecoveryCompletions.set(ref, recovery);
+  trackedHydrationCompletions.set(ref, recovery);
+  void recovery.then(() => {
+    if (pendingOpeningRecoveries.get(ref) === route) pendingOpeningRecoveries.delete(ref);
+    if (openingRecoveryCompletions.get(ref) === recovery) openingRecoveryCompletions.delete(ref);
+    if (trackedHydrationCompletions.get(ref) === recovery) trackedHydrationCompletions.delete(ref);
+  });
 }
 
 function releaseEntryTranscriptReader(ref: string, releaseDisplay = false): void {
@@ -6608,6 +6764,7 @@ async function refreshTrackedThread(
   beforePublish?: () => void,
   reopenOnlyClientMutationId?: string,
   intent: HydrationIntent = "foreground",
+  registerCompletion = true,
 ): Promise<number | undefined> {
   // The scheduler can join an existing repository end read. Apply the same
   // owner fence as refreshTrackedThreadNow before joining, so a released ref
@@ -6623,6 +6780,8 @@ async function refreshTrackedThread(
       beforePublish,
       reopenOnlyClientMutationId,
       intent,
+      undefined,
+      registerCompletion,
     );
   let attempt: number | undefined;
   const residency = transcriptResidency();
@@ -6641,6 +6800,7 @@ async function refreshTrackedThread(
         reopenOnlyClientMutationId,
         intent,
         signal,
+        registerCompletion,
       );
     },
     // Recovery needs a fresh read, even when its pending publication claim was
@@ -6660,6 +6820,7 @@ async function refreshTrackedThreadNow(
   reopenOnlyClientMutationId?: string,
   intent: HydrationIntent = "foreground",
   signal?: AbortSignal,
+  registerCompletion = true,
 ): Promise<number | undefined> {
   // Returns the tracked-hydration attempt this refresh began, or undefined
   // when it never began one (an unowned ref, or an in-flight non-targeted
@@ -6702,14 +6863,34 @@ async function refreshTrackedThreadNow(
     if (isDiscardedReadResult(pending, result.model)) return pending.baseModel ?? null;
     return publishAndReconcileThreadHydration(ref, pending, result, reopenOnlyClientMutationId, intent);
   });
-  const completion = hydration.then(
-    () => undefined,
-    () => undefined,
-  );
-  trackedHydrationCompletions.set(ref, completion);
-  void completion.then(() => {
-    if (trackedHydrationCompletions.get(ref) === completion) trackedHydrationCompletions.delete(ref);
-  });
+  // A tracked read normally publishes its own settlement in
+  // trackedHydrationCompletions so waiting consumers await its convergence.
+  // A caller that already holds a wider registration for this ref — the
+  // opening-recovery chain registers its whole span — must keep that wider
+  // promise as the one consumers capture mid-read, so this read joins under
+  // it instead of displacing it.
+  if (registerCompletion) {
+    // Compose with the opening-recovery chain's registration when one is
+    // outstanding rather than displacing it: the chain's span is wider than
+    // this hydration, and a consumer that starts waiting while this read runs
+    // must still span the recovery behind it. Hydration-only registrations
+    // still displace each other — the newer attempt owns the ref's
+    // convergence. The compose is allSettled on purpose: a rejected hydration
+    // is the failed refresh's own concern and must not settle the composed
+    // completion while the chain's span is still pending, or a waiting
+    // consumer resumes before recovery establishes the display and cursor.
+    const outstandingRecovery = openingRecoveryCompletions.get(ref);
+    const completion = outstandingRecovery
+      ? Promise.allSettled([hydration, outstandingRecovery]).then(() => undefined)
+      : hydration.then(
+          () => undefined,
+          () => undefined,
+        );
+    trackedHydrationCompletions.set(ref, completion);
+    void completion.then(() => {
+      if (trackedHydrationCompletions.get(ref) === completion) trackedHydrationCompletions.delete(ref);
+    });
+  }
   const hasPublishedModel = threadsStore.getState().threads.has(ref);
   // A failed targeted predecessor may already have removed `previous`.
   // Keep the newest targeted read adoptable by the still-active initial
@@ -7278,7 +7459,7 @@ export const threadsStore = createStore<ThreadsStoreState>(() => ({
         try {
           const model = await inflight;
           if (model) {
-            await openEntryTranscript(ref);
+            if (!(await openEntryTranscript(ref))) scheduleEntryOpeningRecovery(ref);
             return;
           }
         } catch (err) {
@@ -8833,6 +9014,7 @@ export function resetThreadsStoreForTests(): void {
   // under the default factory (the seam's own close-and-reattach).
   setCacheChannelFactoryForTests(defaultCacheChannelFactory);
   trackedHydrationCompletions.clear();
+  openingRecoveryCompletions.clear();
   pendingThreadHydrations.clear();
   pendingMutationReconciliations.clear();
   watchRefCounts.clear();
