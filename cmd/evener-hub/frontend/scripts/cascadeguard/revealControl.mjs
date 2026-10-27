@@ -16,19 +16,11 @@ export function revealControl(container, refusedSelector) {
   // 4 is Node.DOCUMENT_POSITION_FOLLOWING. The numeric constant keeps the
   // serialized function independent of globals and of a browsing context.
   const DOCUMENT_POSITION_FOLLOWING = 4;
-  const inactiveVisible =
-    fold !== undefined &&
-    [...container.querySelectorAll("[data-activity-anchor]")].some(
-      (node) => !!(fold.compareDocumentPosition(node) & DOCUMENT_POSITION_FOLLOWING),
-    );
+  const inactiveVisible = fold !== undefined && [...container.querySelectorAll("[data-activity-anchor]")]
+    .some((node) => !!(fold.compareDocumentPosition(node) & DOCUMENT_POSITION_FOLLOWING));
   if (fold && !inactiveVisible) return fold;
-  return (
-    buttons.find(
-      (button) =>
-        usable(button) &&
-        (button.textContent.trim().startsWith("Show ") || button.textContent.trim() === "Load more subagents"),
-    ) ?? null
-  );
+  return buttons.find((button) => usable(button)
+    && (button.textContent.trim().startsWith("Show ") || button.textContent.trim() === "Load more subagents")) ?? null;
 }
 
 // The one-page-turn expression `reveal` evaluates. It re-checks the target on

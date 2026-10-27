@@ -22,14 +22,11 @@ test("Overview journeys isolate outgoing saved child views and dispose failed fi
     old = await connectPage(endpoint, target.id);
     const origin = `http://127.0.0.1:${guard.vitePort}`;
     await navigateTo(old, `${origin}/shellguard.html`, {
-      bootExpression: "typeof window.settledShell !== 'undefined'",
-      bootLabel: "shell fixture",
+      bootExpression: "typeof window.settledShell !== 'undefined'", bootLabel: "shell fixture",
     });
     await evaluate(old.send, "window.settledShell");
     const contexts = (await browser.send("Target.getBrowserContexts")).result.browserContextIds;
-    await evaluate(
-      old.send,
-      `(async () => {
+    await evaluate(old.send, `(async () => {
       const { activitySidebarStore: store } = await import('/src/shell/activitybar/activitySidebarStore.ts');
       store.getState().retarget('local:overview-child');
       store.getState().openWith('about');
@@ -42,8 +39,7 @@ test("Overview journeys isolate outgoing saved child views and dispose failed fi
       window.addEventListener('storage', event => {
         if (event.key === null) location.href = 'about:blank';
       }, { once: true });
-    })()`,
-    );
+    })()`);
     const { result, failures } = await overviewOnPage(endpoint, guard.vitePort, viewport, "dark", "close");
     // The outgoing fixture must really retain its closed About preference.
     // Isolation must not suppress its save to make the next journey pass.
@@ -59,17 +55,11 @@ test("Overview journeys isolate outgoing saved child views and dispose failed fi
     assert.deepEqual((await browser.send("Target.getBrowserContexts")).result.browserContextIds, contexts);
 
     const setupFailure = new Error("injected fixture setup failure");
-    await assert.rejects(
-      overviewOnPage(endpoint, guard.vitePort, viewport, "light", "escape", () => {
-        throw setupFailure;
-      }),
-      (error) => error === setupFailure,
-    );
-    assert.deepEqual(
-      (await browser.send("Target.getBrowserContexts")).result.browserContextIds,
-      contexts,
-      "failed fixture disposes its browser context",
-    );
+    await assert.rejects(overviewOnPage(endpoint, guard.vitePort, viewport, "light", "escape", () => {
+      throw setupFailure;
+    }), error => error === setupFailure);
+    assert.deepEqual((await browser.send("Target.getBrowserContexts")).result.browserContextIds, contexts,
+      "failed fixture disposes its browser context");
     old.close();
     old = null;
     await closePage(endpoint, target.id);

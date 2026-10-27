@@ -58,10 +58,7 @@ function fixture(files) {
 function rewrite(root) {
   try {
     // Piping the child's stderr keeps it off the test runner's output; the thrown error still carries it.
-    return {
-      status: 0,
-      output: execFileSync(process.execPath, [script, "--root", root], { encoding: "utf8", stdio: "pipe" }),
-    };
+    return { status: 0, output: execFileSync(process.execPath, [script, "--root", root], { encoding: "utf8", stdio: "pipe" }) };
   } catch (error) {
     return { status: error.status, output: `${error.stdout ?? ""}${error.stderr ?? ""}` };
   }
@@ -120,6 +117,7 @@ test("the mobile-native/scripts tools are rewritten like every other consumer", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
 
 test("an inline type member and a value member of the same export merge to the value form", () => {
   // Two statements that both land on the package root, naming one export two
@@ -250,7 +248,8 @@ test("a subpath the exports map gives as a string shorthand is rewritten too", (
   // as "state/mutation/index.js", the subpath read as unpublished, and the run
   // refused. Both forms have to yield the same module id.
   const root = fixture({
-    "mobile/src/outbox.ts": 'import { enqueue } from "../../appwire-client/typescript/state/mutation";\nenqueue();\n',
+    "mobile/src/outbox.ts":
+      'import { enqueue } from "../../appwire-client/typescript/state/mutation";\nenqueue();\n',
   });
   try {
     const run = rewrite(root);

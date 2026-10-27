@@ -28,10 +28,7 @@ export default function assert(measurement) {
   const regimes = measurement.map((m) => `${m.mode}:${m.viewportWidth}`).sort();
   // sort() is alphabetical: "desktop:920" sorts before "phone:390".
   if (regimes.length !== 2 || regimes[0] !== "desktop:920" || regimes[1] !== "phone:390") {
-    return {
-      pass: false,
-      reason: `expected the phone(390) and desktop(920) regime frames, measured [${regimes.join(", ")}] - an iframe failed to load or render`,
-    };
+    return { pass: false, reason: `expected the phone(390) and desktop(920) regime frames, measured [${regimes.join(", ")}] - an iframe failed to load or render` };
   }
   for (const m of measurement) {
     const { mode, turn, probe, think, loader, notification } = m;
@@ -46,10 +43,7 @@ export default function assert(measurement) {
     // No seat escapes the turn's box, in either regime.
     for (const { row, slot } of rows) {
       if (slot.left < turn.left - 1) {
-        return {
-          pass: false,
-          reason: `${mode}: the ${row} row's slot escapes the turn's box (slot.left=${slot.left.toFixed(1)} < turn.left=${turn.left.toFixed(1)}) - a pull is eating padding that does not exist`,
-        };
+        return { pass: false, reason: `${mode}: the ${row} row's slot escapes the turn's box (slot.left=${slot.left.toFixed(1)} < turn.left=${turn.left.toFixed(1)}) - a pull is eating padding that does not exist` };
       }
     }
 
@@ -57,58 +51,40 @@ export default function assert(measurement) {
       // The rail: every slot starts at the turn's left edge.
       for (const { row, slot } of rows) {
         if (Math.abs(slot.left - turn.left) > 1) {
-          return {
-            pass: false,
-            reason: `${mode}: the ${row} row's slot does not sit at the rail's origin (slot.left=${slot.left.toFixed(1)}, turn.left=${turn.left.toFixed(1)}) - its gutter pull is off`,
-          };
+          return { pass: false, reason: `${mode}: the ${row} row's slot does not sit at the rail's origin (slot.left=${slot.left.toFixed(1)}, turn.left=${turn.left.toFixed(1)}) - its gutter pull is off` };
         }
       }
       // One column: all three slot centres coincide.
       const centres = rows.map((r) => r.slot.left + r.slot.width / 2);
       const spread = Math.max(...centres) - Math.min(...centres);
       if (spread > 1) {
-        return {
-          pass: false,
-          reason: `${mode}: the three icon seats do not share one avatar column (slot centres ${centres.map((c) => c.toFixed(1)).join(", ")}, spread ${spread.toFixed(1)}px)`,
-        };
+        return { pass: false, reason: `${mode}: the three icon seats do not share one avatar column (slot centres ${centres.map((c) => c.toFixed(1)).join(", ")}, spread ${spread.toFixed(1)}px)` };
       }
       // Text at the content edge on every row.
       for (const { row, text } of rows) {
         if (Math.abs(text.left - probe.left) > 1) {
-          return {
-            pass: false,
-            reason: `${mode}: the ${row} row's text starts at ${text.left.toFixed(1)}, not the content edge ${probe.left.toFixed(1)} - its pull/slot arithmetic has drifted`,
-          };
+          return { pass: false, reason: `${mode}: the ${row} row's text starts at ${text.left.toFixed(1)}, not the content edge ${probe.left.toFixed(1)} - its pull/slot arithmetic has drifted` };
         }
       }
       // The slot-to-text gap is the speaker gap (10px) on every row.
       for (const { row, slot, text } of rows) {
         const gap = text.left - slot.right;
         if (gap < 9 || gap > 11) {
-          return {
-            pass: false,
-            reason: `${mode}: the ${row} row's slot-to-text gap is ${gap.toFixed(1)}px, not the speaker gap's 10px - the margin-right/gap netting is off`,
-          };
+          return { pass: false, reason: `${mode}: the ${row} row's slot-to-text gap is ${gap.toFixed(1)}px, not the speaker gap's 10px - the margin-right/gap netting is off` };
         }
       }
     } else {
       // Phone: no pull. Every slot leads its line inline at the content edge.
       for (const { row, slot } of rows) {
         if (Math.abs(slot.left - probe.left) > 1) {
-          return {
-            pass: false,
-            reason: `${mode}: the ${row} row's slot is not leading the line inline at the content edge (slot.left=${slot.left.toFixed(1)}, content edge=${probe.left.toFixed(1)}) - the gutter pull must not apply below the breakpoint`,
-          };
+          return { pass: false, reason: `${mode}: the ${row} row's slot is not leading the line inline at the content edge (slot.left=${slot.left.toFixed(1)}, content edge=${probe.left.toFixed(1)}) - the gutter pull must not apply below the breakpoint` };
         }
       }
       // The text follows one full gutter (slot + margin + gap = 34px).
       for (const { row, slot, text } of rows) {
         const lead = text.left - slot.left;
         if (Math.abs(lead - 34) > 1) {
-          return {
-            pass: false,
-            reason: `${mode}: the ${row} row's text leads its slot by ${lead.toFixed(1)}px, not the one-gutter 34px (slot 24px + margin + gap)`,
-          };
+          return { pass: false, reason: `${mode}: the ${row} row's text leads its slot by ${lead.toFixed(1)}px, not the one-gutter 34px (slot 24px + margin + gap)` };
         }
       }
     }
@@ -116,7 +92,6 @@ export default function assert(measurement) {
 
   return {
     pass: true,
-    reason:
-      "all three rail seats share the avatar column above the breakpoint with their text at the content edge and a 10px speaker gap, lead inline below it, and never escape the turn's box",
+    reason: "all three rail seats share the avatar column above the breakpoint with their text at the content edge and a 10px speaker gap, lead inline below it, and never escape the turn's box",
   };
 }

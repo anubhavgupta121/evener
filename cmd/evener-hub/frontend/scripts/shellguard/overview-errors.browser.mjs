@@ -13,7 +13,7 @@ import { overviewOnPage } from "./run.mjs";
 const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const viewport = { width: 1400, height: 900 };
 
-test("Overview retains real late browser errors after successful or throwing trusted interactions", async (t) => {
+test("Overview retains real late browser errors after successful or throwing trusted interactions", async t => {
   const guard = await startBrowserGuard({ frontend, profilePrefix: "overview-errors-" });
   try {
     const endpoint = await waitForBrowserReady(guard);
@@ -30,15 +30,9 @@ test("Overview retains real late browser errors after successful or throwing tru
           const marker = `overview-late-${kind}-${throwInteraction}`;
           let observed;
           const { result, failures } = await overviewOnPage(
-            endpoint,
-            guard.vitePort,
-            viewport,
-            "light",
-            null,
-            async (send) => {
-              await evaluate(
-                send,
-                `(() => {
+            endpoint, guard.vitePort, viewport, "light", null,
+            async send => {
+              await evaluate(send, `(() => {
                 window.__overviewErrorSeen = new Promise(resolve => {
                   window.addEventListener(${JSON.stringify(kind)}, event => {
                     resolve({ type: event.type, inputTrusted: window.__overviewErrorInputTrusted,
@@ -58,8 +52,7 @@ test("Overview retains real late browser errors after successful or throwing tru
                   }
                   ${kind === "error" ? `throw new Error(${JSON.stringify(marker)});` : `void Promise.reject(new Error(${JSON.stringify(marker)}));`}
                 });
-              })()`,
-              );
+              })()`);
               // Await the actual browser event, not a sleep or fabricated list.
               observed = evaluate(send, "window.__overviewErrorSeen");
               return { afterInteraction: observed };
@@ -73,18 +66,12 @@ test("Overview retains real late browser errors after successful or throwing tru
           assert.ok(witness.errors[0].includes(marker));
           assert.equal(result.errors.length, 1, "late browser error must be exposed in the result");
           assert.ok(result.errors[0].includes(marker));
-          assert.equal(failures.filter((failure) => failure.startsWith("page error:")).length, 1);
-          assert.ok(failures.some((failure) => failure.startsWith("page error:") && failure.includes(marker)));
+          assert.equal(failures.filter(failure => failure.startsWith("page error:")).length, 1);
+          assert.ok(failures.some(failure => failure.startsWith("page error:") && failure.includes(marker)));
           assert.equal(failures.length, throwInteraction ? 2 : 1);
           if (throwInteraction) {
             assert.equal(result.keyboard, undefined);
-            assert.ok(
-              failures.some(
-                (failure) =>
-                  failure.startsWith("trusted interaction:") &&
-                  failure.includes(" has no visible selected-radio focus:"),
-              ),
-            );
+            assert.ok(failures.some(failure => failure.startsWith("trusted interaction:") && failure.includes(" has no visible selected-radio focus:")));
           } else {
             assert.equal(result.keyboard.status, true);
           }
@@ -93,14 +80,12 @@ test("Overview retains real late browser errors after successful or throwing tru
     }
 
     await t.test("an error already measured is reported only once", async () => {
-      const { result, failures } = await overviewOnPage(endpoint, guard.vitePort, viewport, "light", null, (send) =>
-        evaluate(
-          send,
-          `new Promise(resolve => {
+      const { result, failures } = await overviewOnPage(
+        endpoint, guard.vitePort, viewport, "light", null,
+        send => evaluate(send, `new Promise(resolve => {
           window.addEventListener('error', () => resolve(true), { once: true });
           setTimeout(() => { throw new Error('overview-before-measure'); }, 0);
-        })`,
-        ),
+        })`),
       );
       assert.equal(result.keyboard.status, true);
       assert.equal(result.errors.length, 1);

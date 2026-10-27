@@ -418,7 +418,7 @@ function measureFrame({ fixture, frame }) {
   };
 }
 
-window.measure = async () => {
+window.measure = async function () {
   await Promise.all(frames.map(({ frame, fixture }) => waitForFrameReady(frame, fixture)));
   return frames.map((frameInfo) => measureFrame(frameInfo));
 };

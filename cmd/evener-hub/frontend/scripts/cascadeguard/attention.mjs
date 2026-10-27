@@ -193,10 +193,8 @@ function intersects(a, b) {
 function inside(boxValue, viewport, label, slack = 0.5) {
   assert.ok(boxValue, `${label} has a measured box`);
   assert.ok(
-    boxValue.left >= -slack &&
-      boxValue.top >= -slack &&
-      boxValue.right <= viewport.width + slack &&
-      boxValue.bottom <= viewport.height + slack,
+    boxValue.left >= -slack && boxValue.top >= -slack &&
+      boxValue.right <= viewport.width + slack && boxValue.bottom <= viewport.height + slack,
     `${label} fits the ${viewport.width}x${viewport.height} viewport, got ${q(boxValue)}`,
   );
 }
@@ -229,12 +227,8 @@ export async function attentionJourney(ctx) {
   function needsYouWire() {
     const requests = new Map();
     for (const frame of frames) {
-      if (
-        frame.direction === "Network.webSocketFrameSent" &&
-        frame.method === "evener/navigation/read" &&
-        frame.params?.resource === "section" &&
-        frame.params?.section === "needs_you"
-      ) {
+      if (frame.direction === "Network.webSocketFrameSent" && frame.method === "evener/navigation/read" &&
+        frame.params?.resource === "section" && frame.params?.section === "needs_you") {
         requests.set(frame.id, frame.params);
       }
     }
@@ -273,8 +267,7 @@ export async function attentionJourney(ctx) {
 
   async function waitFocused(ref, label) {
     const wantURL = `/s/${encodeURIComponent(ref)}`;
-    return wait(
-      `(() => {
+    return wait(`(() => {
       const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
       if (!body) return null;
       const actual = body.dataset.paneScaffold.slice('session:'.length);
@@ -284,9 +277,7 @@ export async function attentionJourney(ctx) {
       return actual === ${q(ref)} && location.pathname === ${q(wantURL)} && paneId && token
         ? { ref: actual, url: location.pathname, paneId, token, length: history.length, tabs: document.querySelectorAll('.dv-tab').length }
         : null;
-    })()`,
-      label,
-    );
+    })()`, label);
   }
 
   // The attention list dismisses on any outer scroll or resize (NextNeedsYou
@@ -309,17 +300,13 @@ export async function attentionJourney(ctx) {
 
   async function controlVisible(scope = null, options = {}) {
     const where = scope ?? "";
-    return wait(
-      `(() => {
+    return wait(`(() => {
       const root = ${where === "" ? "document" : `document.querySelector(${q(where)})`};
       const next = root?.querySelector('[data-testid="next-needs-you-next"]');
       const r = next?.getBoundingClientRect();
       if (!next || !r || r.width <= 0 || r.height <= 0) return null;
       return next.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) ? true : null;
-    })()`,
-      "the floating attention control is visible and hit-testable",
-      options,
-    );
+    })()`, "the floating attention control is visible and hit-testable", options);
   }
   async function probeControl(label, extra = {}) {
     const probe = { label, at: new Date().toISOString(), ...extra, ...(await read(probeExpr())) };
@@ -345,43 +332,30 @@ export async function attentionJourney(ctx) {
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    throw new Error(
-      `${label}, measured control geometry never settled; last ${JSON.stringify({
-        control: last?.control,
-        next: last?.next,
-        more: last?.more,
-        stack: last?.stack,
-        clearance: last?.clearanceHeight,
-      })}`,
-    );
+    throw new Error(`${label}, measured control geometry never settled; last ${JSON.stringify({
+      control: last?.control, next: last?.next, more: last?.more, stack: last?.stack, clearance: last?.clearanceHeight,
+    })}`);
   }
 
   // A genuine native wheel over the reader, so "away reading" is the user's
   // own input and not a scrollTop assignment.
   async function wheelAway(portExpr, deltaY) {
-    const point = await wait(
-      `(() => {
+    const point = await wait(`(() => {
       const port = ${portExpr};
       const r = port?.getBoundingClientRect();
       if (!r || r.width <= 0 || r.height <= 0) return null;
       const x = r.x + r.width / 2, y = r.y + r.height / 2;
       return port.contains(document.elementFromPoint(x, y)) ? { x, y, scrollTop: port.scrollTop } : null;
-    })()`,
-      "native wheel targets the focused source reader",
-    );
+    })()`, "native wheel targets the focused source reader");
     await driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     await driver.send("Input.dispatchMouseEvent", { type: "mouseWheel", deltaX: 0, deltaY, x: point.x, y: point.y });
-    await wait(
-      `(${portExpr})?.scrollTop !== ${point.scrollTop}`,
-      "native wheel moves the source reader away from the end",
-    );
+    await wait(`(${portExpr})?.scrollTop !== ${point.scrollTop}`, "native wheel moves the source reader away from the end");
   }
   // A point inside the reader that is not a control. The floating stack can
   // span most of a narrow pane, so a fixed bottom-left offset can land on the
   // Next button and navigate instead of just blurring the editor.
   async function readerClickPoint(portExpr) {
-    return wait(
-      `(() => {
+    return wait(`(() => {
       const port = ${portExpr};
       const r = port?.getBoundingClientRect();
       if (!r || r.width < 20 || r.height < 20) return null;
@@ -394,63 +368,42 @@ export async function attentionJourney(ctx) {
         return { x, y };
       }
       return null;
-    })()`,
-      "the reader has a non-activating point clear of the floating control",
-    );
+    })()`, "the reader has a non-activating point clear of the floating control");
   }
 
   // A real pointer press on the control's Next button, held without a release.
   // Found, hit-tested and activated in one page turn, so a control that shifts
   // between a measured coordinate and a later press still receives the press.
   async function pressNext() {
-    await wait(
-      `(() => {
+    await wait(`(() => {
       const button = document.querySelector(${q(NEXT)});
       const r = button?.getBoundingClientRect();
       if (!button || !r || r.width <= 0 || r.height <= 0) return null;
       if (!button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))) return null;
       button.click();
       return true;
-    })()`,
-      "the floating Next control has a press target",
-    );
+    })()`, "the floating Next control has a press target");
     return null;
   }
   async function nativePressNext() {
-    const point = await wait(
-      `(() => {
+    const point = await wait(`(() => {
       const button = document.querySelector(${q(NEXT)});
       const r = button?.getBoundingClientRect();
       if (!button || !r || r.width <= 0 || r.height <= 0) return null;
       const x = r.x + r.width / 2, y = r.y + r.height / 2;
       return button.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
-    })()`,
-      "the floating Next control has a native press target",
-    );
+    })()`, "the floating Next control has a native press target");
     await driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
-    await driver.send("Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      x: point.x,
-      y: point.y,
-      button: "left",
-      clickCount: 1,
-    });
+    await driver.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
     return point;
   }
   async function releaseAt(point) {
-    await driver.send("Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      x: point.x,
-      y: point.y,
-      button: "left",
-      clickCount: 1,
-    });
+    await driver.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
   }
   // Found, hit-tested and activated in one page turn: the floating control can
   // shift between a measured coordinate and a later press (#3804).
   async function activate(selector, label) {
-    await wait(
-      `(() => {
+    await wait(`(() => {
       const button = document.querySelector(${q(selector)});
       // A control at the end of a long list (Load more below 50 rows) sits
       // outside the list's own scrollport; scroll it into view first, as a
@@ -461,28 +414,18 @@ export async function attentionJourney(ctx) {
       if (!button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))) return null;
       button.click();
       return true;
-    })()`,
-      label,
-    );
+    })()`, label);
   }
 
   // ---- enter the attention fixture -------------------------------------
 
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 900,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
   // The earlier phone/desktop host switch leaves the saved desktop grid with a
   // squeezed focused group (measured: 200px at a 1000px viewport). Focus the
   // source in place; the geometry matrix below records the pane's real width
   // with every measurement rather than pretending it is the viewport.
   await driver.openSession(rootRef);
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(rootRef))})?.querySelector('[role="textbox"]') !== null`,
-    "the source conversation is mounted before the attention tier is released",
-  );
+  await wait(`document.querySelector(${q(driver.composerSelector(rootRef))})?.querySelector('[role="textbox"]') !== null`, "the source conversation is mounted before the attention tier is released");
 
   // The attention sessions do not exist until now: the cascade journey ahead
   // of this point ran with the needs_you queue this guard's baseline had
@@ -512,22 +455,13 @@ export async function attentionJourney(ctx) {
   await driver.completeSkill(rootRef, "cascade-source");
   await holdCanvasCompletion();
   await upload("staged.png");
-  await wait(
-    "window.__cascadeEncode?.encoded && window.__cascadeEncode.release !== null",
-    "the native canvas encoded the staged PNG and holds its completion",
-  );
-  await wait(
-    'document.querySelector(\'[role="img"][aria-label="staged.png (still processing)"]\') !== null',
-    "the pending image tile is the original marker",
-  );
+  await wait("window.__cascadeEncode?.encoded && window.__cascadeEncode.release !== null", "the native canvas encoded the staged PNG and holds its completion");
+  await wait('document.querySelector(\'[role="img"][aria-label="staged.png (still processing)"]\') !== null', "the pending image tile is the original marker");
   // The draft is read only once its staged attachment marker exists: the marker
   // is part of the structured draft the round trip must preserve byte for byte.
   const draft = await driver.composerState(rootRef);
   assert.deepEqual(draft.chips, ["/cascade-source"], "the attention source draft carries a real catalog skill atom");
-  assert.ok(
-    draft.text.includes("[image 1]"),
-    `the structured draft carries its staged image marker, got ${draft.text}`,
-  );
+  assert.ok(draft.text.includes("[image 1]"), `the structured draft carries its staged image marker, got ${draft.text}`);
   const pendingTiles = (await driver.composerState(rootRef)).tiles;
 
   // Blur the editor exactly as a person does: click the reader. The attention
@@ -536,13 +470,10 @@ export async function attentionJourney(ctx) {
   const readerPoint = await readerClickPoint(sourcePortExpr);
   await driver.clickAt(readerPoint.x, readerPoint.y);
   await controlVisible(null);
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const editor = document.querySelector(${q(driver.composerSelector(rootRef))})?.querySelector('[role="textbox"]');
     return editor ? (editor.contains(document.activeElement) || document.activeElement === editor) === false : null;
-  })()`,
-    "a plain reader click leaves the source editor unfocused, keeping the control available",
-  );
+  })()`, "a plain reader click leaves the source editor unfocused, keeping the control available");
   driver.milestone("attention-control-visible-unfocused", { refs: fixture.attentionRefs.length });
 
   await wheelAway(sourcePortExpr, -900);
@@ -553,39 +484,27 @@ export async function attentionJourney(ctx) {
 
   // An independent pane the hops must not disturb: the real cascade inspector
   // the source's Agents footer opens, in its own group.
-  const agentsPoint = await wait(
-    `(() => {
+  const agentsPoint = await wait(`(() => {
     const button = ${driver.paneScopeExpr(rootRef)}?.querySelector('button[aria-label^="Agents,"]');
     const r = button?.getBoundingClientRect();
     if (!r || r.width <= 0 || r.height <= 0) return null;
     const x = r.x + r.width / 2, y = r.y + r.height / 2;
     return button.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
-  })()`,
-    "the source Agents control has a native target",
-  );
+  })()`, "the source Agents control has a native target");
   await driver.clickAt(agentsPoint.x, agentsPoint.y);
-  await wait(
-    `document.querySelector('[data-testid="activity-sidebar"]') !== null`,
-    "the source Agents collection is open",
-  );
+  await wait(`document.querySelector('[data-testid="activity-sidebar"]') !== null`, "the source Agents collection is open");
   await ctx.drill(fixture.edges[0], 1);
   const inspectorPaneId = fixture.inspectorPaneId;
-  assert.ok(
-    inspectorPaneId && inspectorPaneId !== sourcePaneId,
-    "inspection is an independent pane, not the source record",
-  );
+  assert.ok(inspectorPaneId && inspectorPaneId !== sourcePaneId, "inspection is an independent pane, not the source record");
 
   // Return focus to the source without touching the inspector.
-  const focusPoint = await wait(
-    `(() => {
+  const focusPoint = await wait(`(() => {
     const port = ${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="transcript-virtual-list"]');
     const r = port?.getBoundingClientRect();
     if (!r || r.width <= 0 || r.height <= 0) return null;
     const x = r.x + r.width / 2, y = r.y + r.height / 2;
     return port.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
-  })()`,
-    "the source reader accepts a native focus click",
-  );
+  })()`, "the source reader accepts a native focus click");
   await driver.clickAt(focusPoint.x, focusPoint.y);
   await controlVisible(null);
 
@@ -595,8 +514,7 @@ export async function attentionJourney(ctx) {
   assert.ok(needsYouWire(), "the SPA read the hub's needs_you page before the first hop");
   const nextLabelBefore = await read(`document.querySelector(${q(NEXT)})?.getAttribute('aria-label') ?? null`);
   await pressNext();
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
@@ -604,26 +522,19 @@ export async function attentionJourney(ctx) {
     return ref !== ${q(rootRef)} && location.pathname === '/s/' + encodeURIComponent(ref) &&
       pane.querySelector('[data-testid="statusbar"] [data-pane-id]') &&
       history.state && history.state.__evenerAttention ? { ref, url: location.pathname, length: history.length } : null;
-  })()`,
-    "the first attention hop moves URL, focused pane and history entry together",
-  );
+  })()`, "the first attention hop moves URL, focused pane and history entry together");
   const jumped = await focused();
   assert.notEqual(jumped.ref, rootRef, "Next never stays on its own session");
   const pageAfterFirst = needsYouWire();
   assert.ok(pageAfterFirst?.rows.length, "the SPA received the hub's real needs_you page");
-  assert.ok(
-    nextLabelBefore === "Next needs you" || nextLabelBefore?.startsWith("Next needs you: "),
-    `the control names its destination, got ${nextLabelBefore}`,
-  );
+  assert.ok(nextLabelBefore === "Next needs you" || nextLabelBefore?.startsWith("Next needs you: "),
+    `the control names its destination, got ${nextLabelBefore}`);
   // Go created every ref below through the real daemon; the hop must land on
   // one of them, not on an invented or unrelated session.
   assert.ok(fixture.attentionRefs.includes(jumped.ref), "the first hop lands on a real fixture needs-you session");
   assert.equal(jumped.length, historyBefore + 1, "each hop pushes exactly one history entry");
   assert.ok(jumped.token, "the destination entry carries the runtime attention token");
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(jumped.ref))}) !== null`,
-    "the destination conversation mounts its composer",
-  );
+  await wait(`document.querySelector(${q(driver.composerSelector(jumped.ref))}) !== null`, "the destination conversation mounts its composer");
   const destinationFocused = await read(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     const ref = body?.dataset.paneScaffold.slice('session:'.length);
@@ -639,119 +550,79 @@ export async function attentionJourney(ctx) {
 
   // Second hop.
   await pressNext();
-  const second = await wait(
-    `(() => {
+  const second = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
     return ref !== ${q(jumped.ref)} && ${q(fixture.attentionRefs)}.includes(ref) && location.pathname === '/s/' + encodeURIComponent(ref) &&
       history.state && history.state.__evenerAttention ? { ref, url: location.pathname, length: history.length, paneId: body.parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId } : null;
-  })()`,
-    "the second hop lands on the hub page's second row with URL and pane agreeing",
-  );
+  })()`, "the second hop lands on the hub page's second row with URL and pane agreeing");
   assert.equal(second.length, historyBefore + 2, "the second hop pushes one more history entry");
   await capture("attention-second-hop");
   driver.milestone("attention-hop-two", { from: jumped.ref, to: second.ref, url: second.url, paneId: second.paneId });
 
   // Real browser Back restores the previous hop.
   await read("history.back()");
-  const back = await wait(
-    `(() => {
+  const back = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
     return ref === ${q(jumped.ref)} && location.pathname === '/s/' + encodeURIComponent(ref) &&
       history.state && history.state.__evenerAttention ? { ref, url: location.pathname, paneId: body.parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId } : null;
-  })()`,
-    "Back restores the previous hop's exact pane and URL",
-  );
+  })()`, "Back restores the previous hop's exact pane and URL");
   assert.equal(back.paneId, jumped.paneId, "Back restores the same workspace record, not a replacement");
   driver.milestone("attention-back", { to: back.ref, url: back.url, paneId: back.paneId });
 
   // Forward returns to the same second target.
   await read("history.forward()");
-  const forward = await wait(
-    `(() => {
+  const forward = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
     return ref === ${q(second.ref)} && location.pathname === '/s/' + encodeURIComponent(ref) &&
       history.state && history.state.__evenerAttention ? { ref, url: location.pathname, paneId: body.parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId } : null;
-  })()`,
-    "Forward restores the exact same hop entry",
-  );
+  })()`, "Forward restores the exact same hop entry");
   assert.equal(forward.paneId, second.paneId, "Forward reuses the destination record");
   driver.milestone("attention-forward", { to: forward.ref, url: forward.url, paneId: forward.paneId });
 
   // Back to the origin: same pane record, same draft, same staged PNG, same
   // away-reading position, and no editor focus.
   await read("history.back()");
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     const ref = body?.dataset.paneScaffold.slice('session:'.length);
     return ref === ${q(jumped.ref)} && location.pathname === '/s/' + encodeURIComponent(ref) ? true : null;
-  })()`,
-    "the first Back returns to the first hop before the second Back is requested",
-  );
+  })()`, "the first Back returns to the first hop before the second Back is requested");
   await read("history.back()");
-  const origin = await wait(
-    `(() => {
+  const origin = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
     const paneId = body.parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId;
     return ref === ${q(rootRef)} && location.pathname === ${q(`/s/${encodeURIComponent(rootRef)}`)} && paneId === ${q(sourcePaneId)} ? { ref, url: location.pathname, paneId } : null;
-  })()`,
-    "Back twice restores the exact origin session and its workspace record",
-  );
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`,
-    "the restored origin conversation mounts its composer",
-  );
+  })()`, "Back twice restores the exact origin session and its workspace record");
+  await wait(`document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`, "the restored origin conversation mounts its composer");
   const afterBack = await driver.composerState(rootRef);
   assert.equal(afterBack.text, draft.text, "the origin reader keeps its exact structured draft across every hop");
   assert.deepEqual(afterBack.chips, draft.chips, "the origin reader keeps its catalog skill atom");
   assert.equal(afterBack.tiles, pendingTiles, "the origin reader keeps its pending staged image");
-  assert.equal(
-    await read(`document.querySelectorAll(${q(CONTROL)}).length`),
-    1,
-    "exactly one attention control is mounted for the focused reader",
-  );
+  assert.equal(await read(`document.querySelectorAll(${q(CONTROL)}).length`), 1, "exactly one attention control is mounted for the focused reader");
   const originEditorFocused = await read(`(() => {
     const editor = document.querySelector(${q(driver.composerSelector(rootRef))})?.querySelector('[role="textbox"]');
     return editor ? editor.contains(document.activeElement) || document.activeElement === editor : null;
   })()`);
-  assert.equal(
-    originEditorFocused,
-    false,
-    "attention restoration leaves the origin editor unfocused, so the control stays visible",
-  );
+  assert.equal(originEditorFocused, false, "attention restoration leaves the origin editor unfocused, so the control stays visible");
   await controlVisible(null);
-  const restoredPoint = await settledReadingPoint(
-    sourcePortExpr,
-    "the restored origin still has a stable away-reading point",
-  );
+  const restoredPoint = await settledReadingPoint(sourcePortExpr, "the restored origin still has a stable away-reading point");
   assert.equal(restoredPoint.entry, awayPoint.entry, "the origin's first intersecting entry survives the round trip");
   assertReadingContinuity(awayPoint, restoredPoint, "attention round trip");
-  assert.equal(
-    (await read(focusedExpr)).tabs,
-    sourceTabs + 1,
-    "the round trip leaves the independent inspector tab in place",
-  );
-  driver.milestone("attention-origin-restored", {
-    entry: restoredPoint.entry,
-    offset: restoredPoint.offset,
-    paneId: sourcePaneId,
-  });
+  assert.equal((await read(focusedExpr)).tabs, sourceTabs + 1, "the round trip leaves the independent inspector tab in place");
+  driver.milestone("attention-origin-restored", { entry: restoredPoint.entry, offset: restoredPoint.offset, paneId: sourcePaneId });
 
   // A real native encoder completion after the round trip: the exact bytes
   // settle into the original reader without touching the newer draft.
   await read("window.__cascadeEncode.release(true)");
-  await wait(
-    `document.querySelector('button[aria-label="View staged.png"] img')?.src.startsWith('data:image/png;base64,')`,
-    "the late native PNG settles in the original source reader",
-  );
+  await wait(`document.querySelector('button[aria-label="View staged.png"] img')?.src.startsWith('data:image/png;base64,')`, "the late native PNG settles in the original source reader");
   const settledDraft = await driver.composerState(rootRef);
   assert.equal(settledDraft.text, draft.text, "late image completion never rolls back the preserved draft");
   const sourcePNG = await read(`document.querySelector('button[aria-label="View staged.png"] img').src`);
@@ -765,51 +636,23 @@ export async function attentionJourney(ctx) {
   if (await read(`document.querySelector('[data-testid="activity-sidebar"]') !== null`)) {
     await key("Escape", 27);
   }
-  await wait(
-    `document.querySelector('[data-testid="activity-sidebar"]') === null`,
-    "the activity sidebar is closed before the matrix",
-  );
-  assert.equal(
-    await read(`document.querySelector('[data-testid="activity-sidebar"]') === null`),
-    true,
-    "the activity sidebar overlay is gone before the first geometry sample",
-  );
+  await wait(`document.querySelector('[data-testid="activity-sidebar"]') === null`, "the activity sidebar is closed before the matrix");
+  assert.equal(await read(`document.querySelector('[data-testid="activity-sidebar"]') === null`), true,
+    "the activity sidebar overlay is gone before the first geometry sample");
 
   // Step 3 of the diagnosis: a 390 px host swap, probed immediately (the first
   // React commit after the swap) and again after the mount gate has had time to
   // settle. This separates a stale scene from a persistent absence.
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 390,
-    height: 844,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   const swapImmediate = await probeControl("390-host-swap-immediate");
-  const swapVisible = await controlVisible(null, { timeoutMs: 5000 })
-    .then(() => true)
-    .catch(() => false);
+  const swapVisible = await controlVisible(null, { timeoutMs: 5000 }).then(() => true).catch(() => false);
   const swapSettled = await probeControl("390-host-swap-settled", { visibleAfterWait: swapVisible });
   driver.milestone("attention-390-host-swap-probe", {
     visibleAfterWait: swapVisible,
-    immediate: {
-      controlExists: swapImmediate.controlExists,
-      next: swapImmediate.next,
-      nextCenterHit: swapImmediate.nextCenterHit,
-      pane: swapImmediate.pane,
-    },
-    settled: {
-      controlExists: swapSettled.controlExists,
-      next: swapSettled.next,
-      nextCenterHit: swapSettled.nextCenterHit,
-      pane: swapSettled.pane,
-    },
+    immediate: { controlExists: swapImmediate.controlExists, next: swapImmediate.next, nextCenterHit: swapImmediate.nextCenterHit, pane: swapImmediate.pane },
+    settled: { controlExists: swapSettled.controlExists, next: swapSettled.next, nextCenterHit: swapSettled.nextCenterHit, pane: swapSettled.pane },
   });
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 900,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
   await controlVisible(null, { timeoutMs: 5000 }).catch(() => undefined);
 
   const widths = [320, 390, 700, 899, 900, 1024, 1400];
@@ -818,17 +661,10 @@ export async function attentionJourney(ctx) {
   const missingControls = [];
   for (const theme of themes) {
     for (const width of widths) {
-      await driver.send("Emulation.setDeviceMetricsOverride", {
-        width,
-        height: 900,
-        deviceScaleFactor: 1,
-        mobile: false,
-      });
+      await driver.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
       if (theme === "light") await read(`document.documentElement.setAttribute('data-theme', 'light')`);
       else await read(`document.documentElement.removeAttribute('data-theme')`);
-      const visible = await controlVisible(null, { timeoutMs: 2000 })
-        .then(() => true)
-        .catch(() => false);
+      const visible = await controlVisible(null, { timeoutMs: 2000 }).then(() => true).catch(() => false);
       if (!visible) {
         // Record the absence and keep measuring the widths that do offer it:
         // the matrix must report every width it could not observe.
@@ -868,26 +704,21 @@ export async function attentionJourney(ctx) {
       // the stack's height plus the inset it floats above that edge.
       const requiredClearance = sample.port && sample.stack ? sample.port.bottom - sample.stack.top : null;
       assert.ok(
-        sample.clearanceHeight === 0 ||
-          (requiredClearance !== null && Math.abs(sample.clearanceHeight - requiredClearance) <= 0.5),
-        `${label} the end clearance reaches the stack top, got ${sample.clearanceHeight} vs ${requiredClearance ?? "unmeasured"}`,
-      );
+        sample.clearanceHeight === 0 || (requiredClearance !== null && Math.abs(sample.clearanceHeight - requiredClearance) <= 0.5),
+        `${label} the end clearance reaches the stack top, got ${sample.clearanceHeight} vs ${requiredClearance ?? "unmeasured"}`);
       assert.ok(sample.stack && sample.stack.height > 0, `${label} the floating stack owns a measured height`);
       if (sample.pill) {
         assert.ok(!intersects(sample.pill, sample.next), `${label} New Content and Next do not overlap`);
       }
       assert.ok(sample.nextOverflow, `${label} the Next label is measurable`);
-      assert.ok(
-        sample.nextOverflow.button <= Math.min(18 * 16, width * 0.55) + 18,
-        `${label} the long title stays inside the compact ceiling, got ${sample.nextOverflow.button}`,
-      );
+      assert.ok(sample.nextOverflow.button <= Math.min(18 * 16, width * 0.55) + 18,
+        `${label} the long title stays inside the compact ceiling, got ${sample.nextOverflow.button}`);
       // At the end the reader's own last content row sits above the stack.
       // The sizer can grow after a width change lands: a tall row above the
       // viewport re-measures, scroll anchoring holds the visible content still,
       // and the reader ends up short of the end. A person at the end scrolls
       // again, so the poll re-pins the reader before it measures.
-      const bottom = await wait(
-        `(() => {
+      const bottom = await wait(`(() => {
         const port = ${sourcePortExpr};
         if (!port) return null;
         if (port.scrollTop + port.clientHeight < port.scrollHeight - 1) {
@@ -915,45 +746,13 @@ export async function attentionJourney(ctx) {
         const hit = document.elementFromPoint(box.x + Math.min(10, box.width / 2), y);
         return last.contains(hit) && box.bottom <= stackBox.top + 1
           ? { lastBottom: box.bottom, stackTop: stackBox.top, stackBottom: stackBox.bottom } : null;
-      })()`,
-        `${label}: final transcript content scrolls above the floating controls`,
-      );
-      geometry.push({
-        width,
-        theme,
-        next: sample.next,
-        more: sample.more,
-        stack: sample.stack,
-        pill: sample.pill,
-        send: sample.send,
-        clearance: sample.clearanceHeight,
-        lastRowBottom: bottom.lastBottom,
-        stackTop: bottom.stackTop,
-        stackBottom: bottom.stackBottom,
-      });
-      driver.milestone(label, {
-        width,
-        theme,
-        next: sample.next,
-        more: sample.more,
-        stack: sample.stack,
-        pill: sample.pill,
-        send: sample.send,
-        clearance: sample.clearanceHeight,
-        nextText: sample.nextText,
-        lastRowBottom: bottom.lastBottom,
-        stackBottom: bottom.stackBottom,
-        ...(passingProbe ? { probe: passingProbe } : {}),
-      });
+      })()`, `${label}: final transcript content scrolls above the floating controls`);
+      geometry.push({ width, theme, next: sample.next, more: sample.more, stack: sample.stack, pill: sample.pill, send: sample.send, clearance: sample.clearanceHeight, lastRowBottom: bottom.lastBottom, stackTop: bottom.stackTop, stackBottom: bottom.stackBottom });
+      driver.milestone(label, { width, theme, next: sample.next, more: sample.more, stack: sample.stack, pill: sample.pill, send: sample.send, clearance: sample.clearanceHeight, nextText: sample.nextText, lastRowBottom: bottom.lastBottom, stackBottom: bottom.stackBottom, ...(passingProbe ? { probe: passingProbe } : {}) });
     }
   }
   await read(`document.documentElement.removeAttribute('data-theme')`);
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 900,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
   await capture("attention-geometry-1000-dark");
   // Every width must offer the control; report the matrix's own gaps before the
   // legs that depend on a mounted control.
@@ -962,12 +761,7 @@ export async function attentionJourney(ctx) {
   // ---- native hold and cancel -----------------------------------------
 
   // 320 px: the tightest scene the control must survive.
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 320,
-    height: 700,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 700, deviceScaleFactor: 1, mobile: false });
   await controlVisible(null);
   // This leg is the first thing after the geometry matrix's own scrolling and
   // viewport changes; a stray event landing after the hold opens the list
@@ -979,10 +773,7 @@ export async function attentionJourney(ctx) {
   await wait(`document.querySelector(${q(LIST)}) !== null`, "a completed 500ms native hold opens the attention list");
   assert.equal(await read("location.pathname"), holdStart, "the completed hold never navigates on its own");
   await releaseAt(holdPoint);
-  await wait(
-    `document.querySelector(${q(LIST)}) !== null`,
-    "the release click belonging to the hold is consumed, leaving the list open",
-  );
+  await wait(`document.querySelector(${q(LIST)}) !== null`, "the release click belonging to the hold is consumed, leaving the list open");
   assert.equal(await read("location.pathname"), holdStart, "the post-hold click does not navigate");
   await key("Escape", 27);
   await wait(`document.querySelector(${q(LIST)}) === null`, "Escape closes the attention list");
@@ -994,41 +785,19 @@ export async function attentionJourney(ctx) {
   // click, which is supposed to navigate. This exercises cancellation only.
   await driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cancelPoint.x + 30, y: cancelPoint.y - 60 });
   await new Promise((resolve) => setTimeout(resolve, 620));
-  assert.equal(
-    await read(`document.querySelector(${q(LIST)}) !== null`),
-    false,
-    "movement beyond 10px cancels the hold before it completes",
-  );
-  await driver.send("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: cancelPoint.x + 30,
-    y: cancelPoint.y - 60,
-    button: "left",
-    clickCount: 1,
-  });
+  assert.equal(await read(`document.querySelector(${q(LIST)}) !== null`), false, "movement beyond 10px cancels the hold before it completes");
+  await driver.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cancelPoint.x + 30, y: cancelPoint.y - 60, button: "left", clickCount: 1 });
   // A release after the pointer left the button must not deliver the button's
   // own click (the pending hold's pointer capture stays on the element, so a
   // retargeted click would navigate here). Give a navigation the beat it needs
   // to commit before asserting, and check focus as well as the URL.
   await new Promise((resolve) => setTimeout(resolve, 750));
   assert.equal(await read("location.pathname"), holdStart, "a cancelled hold leaves the reader where it was");
-  assert.equal(
-    await read(`document.querySelector(${q(LIST)}) !== null`),
-    false,
-    "the cancelled hold's release opens no attention list",
-  );
-  assert.equal(
-    await read(`${driver.paneScopeExpr(rootRef)} !== null`),
-    true,
-    "the cancelled hold's release keeps the source reader mounted",
-  );
+  assert.equal(await read(`document.querySelector(${q(LIST)}) !== null`), false, "the cancelled hold's release opens no attention list");
+  assert.equal(await read(`${driver.paneScopeExpr(rootRef)} !== null`), true, "the cancelled hold's release keeps the source reader mounted");
   driver.milestone("attention-hold-cancel", { width: 320, entry: holdStart });
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 900,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
+
 
   // ---- an already-presented target -------------------------------------
   //
@@ -1043,88 +812,56 @@ export async function attentionJourney(ctx) {
 
   // ---- secondary/cascade origin ---------------------------------------
 
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const pane = ${driver.paneScopeExpr(rootRef)};
     return pane?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId === ${q(sourcePaneId)} ? true : null;
-  })()`,
-    "the source pane is mounted before the cascade origin",
-  );
-  const sourceAfterPresented = await read(
-    `${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId ?? null`,
-  );
+  })()`, "the source pane is mounted before the cascade origin");
+  const sourceAfterPresented = await read(`${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId ?? null`);
   assert.equal(sourceAfterPresented, sourcePaneId, "the origin record survives an already-presented focus");
   // The host swaps above discard the inspector opened before the hops, so open
   // a fresh one from the source's own Agents collection.
-  const cascadeAgents = await wait(
-    `(() => {
+  const cascadeAgents = await wait(`(() => {
     const button = ${driver.paneScopeExpr(rootRef)}?.querySelector('button[aria-label^="Agents,"]');
     const r = button?.getBoundingClientRect();
     if (!r || r.width <= 0) return null;
     const x = r.x + r.width / 2, y = r.y + r.height / 2;
     return button.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
-  })()`,
-    "the source Agents control has a native target",
-  );
+  })()`, "the source Agents control has a native target");
   await driver.clickAt(cascadeAgents.x, cascadeAgents.y);
-  await wait(
-    `document.querySelector('[data-testid="activity-sidebar"]') !== null`,
-    "the source Agents collection is open for the cascade origin",
-  );
+  await wait(`document.querySelector('[data-testid="activity-sidebar"]') !== null`, "the source Agents collection is open for the cascade origin");
   await ctx.drill(fixture.edges[0], 1);
   const cascadeInspectorId = fixture.inspectorPaneId;
   // Focus the inspector pane's active cascade column, whose own conversation
   // embeds the attention control (the leaf, not every readable column).
-  await driver.click(
-    '[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf] [data-testid="transcript-virtual-list"]',
-  );
-  await wait(
-    `document.querySelector('[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf] [data-testid="next-needs-you"]') !== null`,
-    "the cascade leaf conversation mounts its own attention control",
-  );
-  assert.equal(
-    await read(`document.querySelectorAll(${q(CONTROL)}).length`),
-    1,
-    "only the focused cascade leaf offers attention navigation",
-  );
-  const leafRef = await read(
-    `document.querySelector('[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf]')?.dataset.scopeRef ?? null`,
-  );
+  await driver.click('[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf] [data-testid="transcript-virtual-list"]');
+  await wait(`document.querySelector('[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf] [data-testid="next-needs-you"]') !== null`, "the cascade leaf conversation mounts its own attention control");
+  assert.equal(await read(`document.querySelectorAll(${q(CONTROL)}).length`), 1, "only the focused cascade leaf offers attention navigation");
+  const leafRef = await read(`document.querySelector('[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf]')?.dataset.scopeRef ?? null`);
   assert.ok(leafRef, "the cascade inspector has an active leaf");
   const cascadeNext = `${'[data-pane-scaffold="cascade"] [data-testid="cascade-column"][data-leaf]'} [data-testid="next-needs-you-next"]`;
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const button = document.querySelector(${q(cascadeNext)});
     const r = button?.getBoundingClientRect();
     return r && r.width > 0 && r.height > 0 && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) ? true : null;
-  })()`,
-    "the cascade leaf's Next control is hit-testable",
-  );
-  const cascadePaneId = await read(
-    `document.querySelector('[data-pane-scaffold="cascade"]').parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]').dataset.paneId`,
-  );
+  })()`, "the cascade leaf's Next control is hit-testable");
+  const cascadePaneId = await read(`document.querySelector('[data-pane-scaffold="cascade"]').parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]').dataset.paneId`);
   const cascadePoint = await read(`(() => {
     const button = document.querySelector(${q(cascadeNext)});
     const r = button.getBoundingClientRect();
     return { x:r.x + r.width / 2, y:r.y + r.height / 2 };
   })()`);
-  const paneIdsBefore = await read(
-    `[...document.querySelectorAll('[data-testid="statusbar"] [data-pane-id]')].map((node) => node.dataset.paneId)`,
-  );
+  const paneIdsBefore = await read(`[...document.querySelectorAll('[data-testid="statusbar"] [data-pane-id]')].map((node) => node.dataset.paneId)`);
   assert.ok(paneIdsBefore.includes(cascadePaneId), "the origin inspector is presented before the cascade-origin hop");
   assert.ok(paneIdsBefore.includes(sourcePaneId), "the ordinary source is presented before the cascade-origin hop");
   await driver.clickAt(cascadePoint.x, cascadePoint.y);
-  const cascadeHop = await wait(
-    `(() => {
+  const cascadeHop = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
     const paneId = body.parentElement.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId;
     return location.pathname === '/s/' + encodeURIComponent(ref) && paneId && history.state?.__evenerAttention
       ? { ref, url: location.pathname, paneId } : null;
-  })()`,
-    "a cascade-origin hop moves URL, focused pane ref and attention token together",
-  );
+  })()`, "a cascade-origin hop moves URL, focused pane ref and attention token together");
   const cascadeAfter = await read(`(() => ({
     paneIds: [...document.querySelectorAll('[data-testid="statusbar"] [data-pane-id]')].map((node) => node.dataset.paneId),
     sourcePaneId: ${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId ?? null,
@@ -1136,38 +873,20 @@ export async function attentionJourney(ctx) {
   assert.equal(cascadeAfter.sourcePaneId, sourcePaneId, "a cascade-origin hop never moves the ordinary source pane");
   assert.equal(cascadeAfter.cascade, false, "the origin inspector record is parked, not presented");
   const presentedAfter = [...new Set(cascadeAfter.paneIds)].sort();
-  const expectedPresented = [
-    ...new Set([...paneIdsBefore.filter((id) => id !== cascadePaneId), cascadeHop.paneId]),
-  ].sort();
-  assert.deepEqual(
-    presentedAfter,
-    expectedPresented,
-    "exactly one seat was replaced: the origin removed, the destination added, the source retained",
-  );
-  assert.equal(
-    (await driver.composerState(rootRef)).text,
-    draft.text,
-    "the ordinary source draft survives a cascade-origin hop",
-  );
-  driver.milestone("attention-cascade-origin", {
-    from: leafRef,
-    to: cascadeHop.ref,
-    parkedPaneId: cascadePaneId,
-    paneId: cascadeHop.paneId,
-  });
+  const expectedPresented = [...new Set([...paneIdsBefore.filter((id) => id !== cascadePaneId), cascadeHop.paneId])].sort();
+  assert.deepEqual(presentedAfter, expectedPresented, "exactly one seat was replaced: the origin removed, the destination added, the source retained");
+  assert.equal((await driver.composerState(rootRef)).text, draft.text, "the ordinary source draft survives a cascade-origin hop");
+  driver.milestone("attention-cascade-origin", { from: leafRef, to: cascadeHop.ref, parkedPaneId: cascadePaneId, paneId: cascadeHop.paneId });
 
   // ---- explicit Close --------------------------------------------------
 
   await read("history.back()");
-  await wait(
-    `(() => {
+  await wait(`(() => {
     const inspector = document.querySelector('[data-pane-scaffold="cascade"]');
     const leaf = inspector?.querySelector('[data-testid="cascade-column"][data-leaf]');
     const active = inspector?.closest('.dv-groupview')?.classList.contains('dv-active-group');
     return leaf?.dataset.scopeRef === ${q(leafRef)} && active && history.state?.__evenerAttention ? true : null;
-  })()`,
-    "Back restores the cascade origin's own reader and focus",
-  );
+  })()`, "Back restores the cascade origin's own reader and focus");
   // Ordinary Close of the inspector pane: the attention binding for that pane
   // must not survive to resurrect it.
   // The active tab's close action can sit outside its own 200px group (the tab
@@ -1192,46 +911,19 @@ export async function attentionJourney(ctx) {
       hit: hit ? { tag: hit.tagName, cls: typeof hit.className === "string" ? hit.className.slice(0, 60) : null } : null };
   })()`);
   assert.equal(closedInspector.closed, true, "the inspector's active tab carries its ordinary Close action");
-  await wait(
-    `document.querySelector('[data-pane-scaffold="cascade"]') === null`,
-    "explicit Close removes the inspector pane",
-  );
-  assert.equal(
-    await read(
-      `${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId ?? null`,
-    ),
-    sourcePaneId,
-    "explicit Close leaves the source record alive",
-  );
-  assert.equal(
-    await read(`document.querySelector('button[aria-label="View staged.png"] img')?.src`),
-    sourcePNG,
-    "the staged image's exact bytes survive the explicit Close",
-  );
-  assert.equal(
-    (await driver.composerState(rootRef)).text,
-    draft.text,
-    "the source keeps its exact draft through the explicit Close",
-  );
+  await wait(`document.querySelector('[data-pane-scaffold="cascade"]') === null`, "explicit Close removes the inspector pane");
+  assert.equal(await read(`${driver.paneScopeExpr(rootRef)}?.querySelector('[data-testid="statusbar"] [data-pane-id]')?.dataset.paneId ?? null`), sourcePaneId,
+    "explicit Close leaves the source record alive");
+  assert.equal(await read(`document.querySelector('button[aria-label="View staged.png"] img')?.src`), sourcePNG,
+    "the staged image's exact bytes survive the explicit Close");
+  assert.equal((await driver.composerState(rootRef)).text, draft.text, "the source keeps its exact draft through the explicit Close");
   // A closed attention reader is never resurrected by history.
-  await read(
-    `window.__attentionPopstates = 0; window.addEventListener('popstate', () => { window.__attentionPopstates += 1 }, { once:true })`,
-  );
+  await read(`window.__attentionPopstates = 0; window.addEventListener('popstate', () => { window.__attentionPopstates += 1 }, { once:true })`);
   await read("history.back()");
-  await wait(
-    `window.__attentionPopstates >= 1 ? true : null`,
-    "the browser performs a real Back traversal after the explicit Close",
-  );
-  assert.equal(
-    await read(`document.querySelector('[data-pane-scaffold="cascade"]') === null`),
-    true,
-    "Back after the explicit Close does not resurrect the closed inspector",
-  );
-  driver.milestone("attention-explicit-close", {
-    sourcePaneId,
-    closedInspector: cascadeInspectorId,
-    how: closedInspector.how,
-  });
+  await wait(`window.__attentionPopstates >= 1 ? true : null`, "the browser performs a real Back traversal after the explicit Close");
+  assert.equal(await read(`document.querySelector('[data-pane-scaffold="cascade"]') === null`), true,
+    "Back after the explicit Close does not resurrect the closed inspector");
+  driver.milestone("attention-explicit-close", { sourcePaneId, closedInspector: cascadeInspectorId, how: closedInspector.how });
 
   // ---- host swap -------------------------------------------------------
 
@@ -1240,51 +932,27 @@ export async function attentionJourney(ctx) {
   // test is not this leg's subject).
   const closeFocusPoint = await readerClickPoint(sourcePortExpr);
   await driver.clickAt(closeFocusPoint.x, closeFocusPoint.y);
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(rootRef))}) !== null && ${driver.paneScopeExpr(rootRef)}.closest('.dv-groupview').classList.contains('dv-active-group')`,
-    "the source conversation is focused after the explicit Close",
-  );
+  await wait(`document.querySelector(${q(driver.composerSelector(rootRef))}) !== null && ${driver.paneScopeExpr(rootRef)}.closest('.dv-groupview').classList.contains('dv-active-group')`, "the source conversation is focused after the explicit Close");
   await controlVisible(null);
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 390,
-    height: 844,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`,
-    "the phone host swaps the source conversation in",
-  );
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await wait(`document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`, "the phone host swaps the source conversation in");
   await wait(`document.querySelector(${q(CONTROL)}) !== null`, "the attention control survives the phone host swap");
   const phoneDraft = await driver.composerState(rootRef);
   assert.equal(phoneDraft.text, draft.text, "the phone host swap preserves the source draft");
-  await driver.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 900,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  await wait(
-    `document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`,
-    "the desktop host swaps the source conversation back in",
-  );
+  await driver.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
+  await wait(`document.querySelector(${q(driver.composerSelector(rootRef))}) !== null`, "the desktop host swaps the source conversation back in");
   const desktopDraft = await driver.composerState(rootRef);
   assert.equal(desktopDraft.text, draft.text, "the desktop host swap preserves the source draft");
-  assert.equal(
-    await read(`document.querySelector('button[aria-label="View staged.png"] img')?.src`),
-    sourcePNG,
-    "host swaps keep the exact staged PNG bytes",
-  );
+  assert.equal(await read(`document.querySelector('button[aria-label="View staged.png"] img')?.src`), sourcePNG, "host swaps keep the exact staged PNG bytes");
   driver.milestone("attention-host-swap", { ref: rootRef });
+
 
   // ---- a later-page target beyond the 50-row boundary ------------------
 
   await controlVisible(null);
   // The host swap just changed the emulated metrics and the reader is still
   // restoring its position; both dismiss the list.
-  await awaitNoOuterScrollOrResize(
-    "the host swap's resize and the reader's scroll have settled before the attention list opens",
-  );
+  await awaitNoOuterScrollOrResize("the host swap's resize and the reader's scroll have settled before the attention list opens");
   await activate(MORE, "the More trigger opens the attention list for the later-page target");
   await wait(`document.querySelector(${q(LIST)}) !== null`, "the attention list opens for the later-page target");
   const listBounds = await read(`(() => {
@@ -1293,15 +961,8 @@ export async function attentionJourney(ctx) {
     return { x:r.x, y:r.y, width:r.width, height:r.height, left:r.left, right:r.right, top:r.top, bottom:r.bottom,
       viewport:{ width:innerWidth, height:innerHeight }, scrollHeight:panel.scrollHeight, clientHeight:panel.clientHeight };
   })()`);
-  inside(
-    { left: listBounds.left, right: listBounds.right, top: listBounds.top, bottom: listBounds.bottom },
-    listBounds.viewport,
-    "the attention list",
-  );
-  assert.ok(
-    listBounds.height <= Math.min(20 * 16, 0.6 * listBounds.viewport.height) + 1,
-    `the list is bounded by its own max height, got ${listBounds.height}`,
-  );
+  inside({ left: listBounds.left, right: listBounds.right, top: listBounds.top, bottom: listBounds.bottom }, listBounds.viewport, "the attention list");
+  assert.ok(listBounds.height <= Math.min(20 * 16, 0.6 * listBounds.viewport.height) + 1, `the list is bounded by its own max height, got ${listBounds.height}`);
   // The store may have loaded the second page already, in which case the Load
   // more control has retired; only press it while the list is still one page.
   const firstPageRows = await read(`[...document.querySelectorAll(${q(ROW)})].map((row) => row.dataset.ref)`);
@@ -1339,22 +1000,17 @@ export async function attentionJourney(ctx) {
   // press path itself is proven by the transport-retry leg's single offset-50
   // read; this assertion proves the later page is present and reachable.
   const laterRows = allRows.slice(50);
-  assert.ok(
-    allRows.length === 52 && laterRows.length === 2,
-    `the list carries both pages with two rows past the 50-row boundary, got ${allRows.length} rows and ${laterRows.length} past it`,
-  );
+  assert.ok(allRows.length === 52 && laterRows.length === 2,
+    `the list carries both pages with two rows past the 50-row boundary, got ${allRows.length} rows and ${laterRows.length} past it`);
   const laterRef = laterRows[0];
-  const laterRow = await wait(
-    `(() => {
+  const laterRow = await wait(`(() => {
     const row = document.querySelector(${q(`${ROW}[data-ref="${laterRef}"]`)});
     if (!row) return null;
     const section = row.closest('section');
     if (section) section.scrollTop = section.scrollHeight;
     const r = row.getBoundingClientRect();
     return row.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) ? { rows: document.querySelectorAll(${q(ROW)}).length, text: row.textContent } : null;
-  })()`,
-    "a target beyond the first 50 rows is a real, clickable list row",
-  );
+  })()`, "a target beyond the first 50 rows is a real, clickable list row");
   const laterPoint = await read(`(() => {
     const row = document.querySelector(${q(`${ROW}[data-ref="${laterRef}"]`)});
     const r = row.getBoundingClientRect();
@@ -1362,11 +1018,7 @@ export async function attentionJourney(ctx) {
   })()`);
   await driver.clickAt(laterPoint.x, laterPoint.y);
   await waitFocused(laterRef, "a later-page target opens with URL and pane agreeing");
-  assert.equal(
-    await read(`document.querySelector(${q(LIST)}) === null`),
-    true,
-    "choosing a later-page row closes the list",
-  );
+  assert.equal(await read(`document.querySelector(${q(LIST)}) === null`), true, "choosing a later-page row closes the list");
   driver.milestone("attention-later-page", { ref: laterRef, rows: laterRow.rows });
 
   // ---- a real socket reconnect after multiple pages --------------------
@@ -1375,9 +1027,7 @@ export async function attentionJourney(ctx) {
   // Only conversation owners still mounted have a subscription to recover;
   // the cascade readers the hops and the explicit Close disposed must not be
   // required to re-subscribe.
-  const mountedOwners = await read(
-    `[...document.querySelectorAll('[data-composer]')].map((node) => node.dataset.composer)`,
-  );
+  const mountedOwners = await read(`[...document.querySelectorAll('[data-composer]')].map((node) => node.dataset.composer)`);
   assert.ok(mountedOwners.length > 0, "the attention scene has mounted conversation owners before the reconnect");
   await reconnect({ expectRefs: mountedOwners });
   await wait(`${driver.paneScopeExpr(rootRef)} !== null`, "the source pane survives a real socket reconnect");
@@ -1429,10 +1079,7 @@ export async function attentionJourney(ctx) {
   const awayReaderPoint = await readerClickPoint(sourcePortExpr);
   await driver.clickAt(awayReaderPoint.x, awayReaderPoint.y);
   await controlVisible(null);
-  await wait(
-    `document.querySelector('[data-testid="new-content-pill"]') !== null`,
-    "a real new turn surfaces the New Content pill for an away reader",
-  );
+  await wait(`document.querySelector('[data-testid="new-content-pill"]') !== null`, "a real new turn surfaces the New Content pill for an away reader");
   const pillWhileAway = await read(`document.querySelector('[data-testid="new-content-pill"]') !== null`);
   // The toggle this leg was written for was editing-suppression: focusing the
   // composer hid the control and removed the measured clearance. Jesse's ruling
@@ -1451,10 +1098,7 @@ export async function attentionJourney(ctx) {
     return { submit:{ left:submit.left, right:submit.right, top:submit.top, bottom:submit.bottom, width:submit.width, height:submit.height },
       overlap: submit.left < control.right && control.left < submit.right && submit.top < control.bottom && control.top < submit.bottom };
   })()`);
-  assert.ok(
-    afterJourney && afterJourney.overlap === false,
-    "the control leaves the Send button's box and hit area unchanged",
-  );
+  assert.ok(afterJourney && afterJourney.overlap === false, "the control leaves the Send button's box and hit area unchanged");
   driver.milestone("attention-send-geometry");
   assert.deepEqual(missingControls, [], `the floating control was not offered at ${missingControls.join(", ")}`);
   // ---- journey 2: a held native response and a transport-boundary retry --
@@ -1466,27 +1110,19 @@ export async function attentionJourney(ctx) {
   for (let poll = 0; poll < 1200 && !existsSync(fixture.attentionHeldPath); poll++) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.ok(
-    existsSync(fixture.attentionHeldPath),
-    "the fixture starts a real session whose response is held at native delivery",
-  );
+  assert.ok(existsSync(fixture.attentionHeldPath), "the fixture starts a real session whose response is held at native delivery");
   const heldRef = JSON.parse(readFileSync(fixture.attentionHeldPath, "utf8")).ref;
   assert.ok(heldRef, "the held session has a real ref");
   for (let poll = 0; poll < 600 && !existsSync(fixture.attentionHeldCallPath); poll++) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.ok(
-    existsSync(fixture.attentionHeldCallPath),
-    "the hub's real provider call is parked at the native delivery boundary",
-  );
+  assert.ok(existsSync(fixture.attentionHeldCallPath), "the hub's real provider call is parked at the native delivery boundary");
   await driver.openSession(heldRef);
   await controlVisible(null);
   // The held source was opened from the rail, not by an attention hop, so it
   // carries no attention token; its ref, URL and pane must still agree.
   const heldURL = `/s/${encodeURIComponent(heldRef)}`;
-  const heldFocused = (label) =>
-    wait(
-      `(() => {
+  const heldFocused = (label) => wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     if (!body) return null;
     const ref = body.dataset.paneScaffold.slice('session:'.length);
@@ -1495,76 +1131,43 @@ export async function attentionJourney(ctx) {
     return ref === ${q(heldRef)} && location.pathname === ${q(heldURL)} && paneId
       ? { ref, url: location.pathname, paneId, token: history.state?.__evenerAttention ?? null, length: history.length }
       : null;
-  })()`,
-      label,
-    );
+  })()`, label);
   const heldOrigin = await heldFocused("the held source is the focused reader with URL and pane agreeing");
-  const heldReplyIn = (ref) =>
-    read(`(${driver.paneScopeExpr(ref)}?.textContent ?? "").includes("CASCADE_ATTENTION_HELD_REPLY")`);
+  const heldReplyIn = (ref) => read(`(${driver.paneScopeExpr(ref)}?.textContent ?? "").includes("CASCADE_ATTENTION_HELD_REPLY")`);
   assert.equal(await heldReplyIn(heldRef), false, "the parked reply has not been delivered to its reader");
   // Leave and return while the reply stays parked.
   await pressNext();
-  const heldAway = await wait(
-    `(() => {
+  const heldAway = await wait(`(() => {
     const body = document.querySelector('.dv-active-group [data-pane-scaffold^="session:"]');
     const ref = body?.dataset.paneScaffold.slice('session:'.length) ?? null;
     return ref && ref !== ${q(heldRef)} && location.pathname === '/s/' + encodeURIComponent(ref) ? { ref, url: location.pathname } : null;
-  })()`,
-    "the reader leaves the held source for a needs-you target",
-  );
+  })()`, "the reader leaves the held source for a needs-you target");
   assert.equal(await heldReplyIn(heldRef), false, "leaving the held source does not deliver its parked reply");
   await read("history.back()");
   const heldReturned = await heldFocused("the reader returns to the held source before its reply is released");
   assert.equal(await heldReplyIn(heldRef), false, "the reply is still held after the reader returns");
-  assert.equal(
-    heldReturned.paneId,
-    heldOrigin.paneId,
-    "the held source keeps its own pane across leaving and returning",
-  );
+  assert.equal(heldReturned.paneId, heldOrigin.paneId, "the held source keeps its own pane across leaving and returning");
   // Release the unchanged response while its reader is back on the source.
   appendFileSync(fixture.attentionControlPath, `${JSON.stringify({ command: "release-attention-response" })}\n`);
-  await wait(
-    `(${driver.paneScopeExpr(heldRef)}?.textContent ?? "").includes("CASCADE_ATTENTION_HELD_REPLY")`,
-    "the unchanged held provider response is delivered to its reader",
-    { timeoutMs: 20000 },
-  );
+  await wait(`(${driver.paneScopeExpr(heldRef)}?.textContent ?? "").includes("CASCADE_ATTENTION_HELD_REPLY")`,
+    "the unchanged held provider response is delivered to its reader", { timeoutMs: 20000 });
   await new Promise((resolve) => setTimeout(resolve, 1500));
   const afterRelease = await focused();
   assert.deepEqual(
-    {
-      url: afterRelease.url,
-      ref: afterRelease.ref,
-      paneId: afterRelease.paneId,
-      token: afterRelease.token,
-      length: afterRelease.length,
-    },
-    {
-      url: heldReturned.url,
-      ref: heldReturned.ref,
-      paneId: heldReturned.paneId,
-      token: heldReturned.token,
-      length: heldReturned.length,
-    },
+    { url: afterRelease.url, ref: afterRelease.ref, paneId: afterRelease.paneId, token: afterRelease.token, length: afterRelease.length },
+    { url: heldReturned.url, ref: heldReturned.ref, paneId: heldReturned.paneId, token: heldReturned.token, length: heldReturned.length },
     "releasing the unchanged held response performs no late navigation",
   );
   await controlVisible(null);
-  driver.milestone("attention-held-response", {
-    ref: heldRef,
-    away: heldAway.ref,
-    url: heldReturned.url,
-    paneId: heldReturned.paneId,
-  });
+  driver.milestone("attention-held-response", { ref: heldRef, away: heldAway.ref, url: heldReturned.url, paneId: heldReturned.paneId });
 
   // A fresh boot leaves only the hub's first needs_you page loaded, so the
   // later page is a real read the transport can refuse, not a retained store
   // page from the earlier later-page leg.
   await driver.send("Page.reload", { ignoreCache: true });
-  await wait(
-    `document.querySelector('[data-pane-scaffold]') !== null &&
+  await wait(`document.querySelector('[data-pane-scaffold]') !== null &&
     (window.__cascadeSockets ?? []).some((socket) => socket.readyState === WebSocket.OPEN && new URL(socket.url).pathname === '/rpc')`,
-    "the SPA boots and reconnects after the reload",
-    { timeoutMs: 30000 },
-  );
+    "the SPA boots and reconnects after the reload", { timeoutMs: 30000 });
   await driver.openSession(heldRef);
   const heldReloaded = await heldFocused("the held source is the focused reader after the reload");
   assert.equal(heldReloaded.ref, heldRef, "the reload keeps the held source as the focused reader");
@@ -1602,71 +1205,36 @@ export async function attentionJourney(ctx) {
   await wait(`window.__attentionTransport.attempts.length === 1`, "the later-page read reaches the transport boundary");
   const refused = await read("window.__attentionTransport.attempts[0]");
   assert.ok(refused.offset > 0, `the refused read is a later page, got offset ${refused.offset}`);
-  assert.equal(
-    await read(`document.querySelector(${q(LIST)}) !== null`),
-    true,
-    "the list stays open when its later read fails",
-  );
+  assert.equal(await read(`document.querySelector(${q(LIST)}) !== null`), true, "the list stays open when its later read fails");
+  assert.deepEqual(await read(`[...document.querySelectorAll(${q(ROW)})].map((row) => row.dataset.ref)`), pageOneRefs,
+    "a failed later read leaves the earlier page intact");
   assert.deepEqual(
-    await read(`[...document.querySelectorAll(${q(ROW)})].map((row) => row.dataset.ref)`),
-    pageOneRefs,
-    "a failed later read leaves the earlier page intact",
-  );
-  assert.deepEqual(
-    sent(beforeFailedRead)
-      .filter(
-        (frame) =>
-          frame.method === "evener/navigation/read" &&
-          frame.params?.section === "needs_you" &&
-          (frame.params?.offset ?? 0) > 0,
-      )
-      .map((frame) => frame.id),
+    sent(beforeFailedRead).filter((frame) => frame.method === "evener/navigation/read" &&
+      frame.params?.section === "needs_you" && (frame.params?.offset ?? 0) > 0).map((frame) => frame.id),
     [],
     "the refused later read never reaches the hub",
   );
   // Deliberate retry: the same control, the same later page.
   await activate(LOAD_MORE, "the list's Load more control retries the later page deliberately");
-  await wait(`document.querySelectorAll(${q(ROW)}).length > 50`, "the deliberate retry loads the later page", {
-    timeoutMs: 20000,
-  });
-  const retried = sent(beforeFailedRead).filter(
-    (frame) =>
-      frame.method === "evener/navigation/read" &&
-      frame.params?.section === "needs_you" &&
-      (frame.params?.offset ?? 0) > 0,
-  );
+  await wait(`document.querySelectorAll(${q(ROW)}).length > 50`, "the deliberate retry loads the later page", { timeoutMs: 20000 });
+  const retried = sent(beforeFailedRead).filter((frame) => frame.method === "evener/navigation/read" &&
+    frame.params?.section === "needs_you" && (frame.params?.offset ?? 0) > 0);
   assert.equal(retried.length, 1, `the deliberate retry issues exactly one later-page read, got ${retried.length}`);
-  assert.equal(
-    retried[0].params.offset,
-    50,
-    `the retried read asks for the later page at offset 50, got ${retried[0].params.offset}`,
-  );
+  assert.equal(retried[0].params.offset, 50, `the retried read asks for the later page at offset 50, got ${retried[0].params.offset}`);
   assert.ok(answered(retried[0]), "the hub answers the retried later read");
   const rowsAfterRetry = await read(`[...document.querySelectorAll(${q(ROW)})].map((row) => row.dataset.ref)`);
   assert.equal(rowsAfterRetry.length, 52, `the retry carries both pages, got ${rowsAfterRetry.length}`);
-  assert.deepEqual(
-    rowsAfterRetry.slice(0, pageOneRefs.length),
-    pageOneRefs,
-    "the earlier choices keep their order after the retry",
-  );
+  assert.deepEqual(rowsAfterRetry.slice(0, pageOneRefs.length), pageOneRefs, "the earlier choices keep their order after the retry");
   // An earlier choice is still a usable target, not just a surviving string.
   const earlierChoice = pageOneRefs[0];
-  const earlierRow = await wait(
-    `(() => {
+  const earlierRow = await wait(`(() => {
     const row = document.querySelector(${q(`${ROW}[data-ref="${earlierChoice}"]`)});
     if (!row) return null;
     row.scrollIntoView({ block: "nearest", inline: "nearest" });
     const r = row.getBoundingClientRect();
     return row.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
-  })()`,
-    "an earlier choice is a clickable row after the transport retry",
-  );
+  })()`, "an earlier choice is a clickable row after the transport retry");
   await driver.clickAt(earlierRow.x, earlierRow.y);
   await waitFocused(earlierChoice, "the earlier choice still opens with URL and pane agreeing after the retry");
-  driver.milestone("attention-transport-retry", {
-    refusedOffset: refused.offset,
-    retriedOffset: retried[0].params.offset,
-    rows: rowsAfterRetry.length,
-    earlierChoice,
-  });
+  driver.milestone("attention-transport-retry", { refusedOffset: refused.offset, retriedOffset: retried[0].params.offset, rows: rowsAfterRetry.length, earlierChoice });
 }

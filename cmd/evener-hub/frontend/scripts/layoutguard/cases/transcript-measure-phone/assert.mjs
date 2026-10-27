@@ -10,10 +10,7 @@ const MIN_CHARS_PER_LINE = 30;
 export default function assert(m) {
   const span = m.proseWidth / m.paneInner;
   if (m.viewport > 699) {
-    return {
-      pass: false,
-      reason: `harness viewport is ${m.viewport}px; the phone rules need <700px (case.json viewport)`,
-    };
+    return { pass: false, reason: `harness viewport is ${m.viewport}px; the phone rules need <700px (case.json viewport)` };
   }
   if (span < MIN_SPAN) {
     return {

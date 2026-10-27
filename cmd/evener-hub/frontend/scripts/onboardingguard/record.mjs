@@ -30,9 +30,7 @@ export async function captureAcquisition(
   try {
     await driver.waitPage(ready, { label: `${label} ${width}x${height} ${theme} acquisition` });
   } catch (error) {
-    const state = await evaluate(
-      driver.send,
-      `(() => ({
+    const state = await evaluate(driver.send, `(() => ({
       theme: document.documentElement.dataset.theme ?? 'dark',
       viewport: { width: innerWidth, height: innerHeight },
       dialog: document.querySelector('[role="dialog"]') !== null,
@@ -43,13 +41,10 @@ export async function captureAcquisition(
       tiles: document.querySelectorAll('[data-testid="spawn-attachments"] [data-testid="attachment-tile"]').length,
       focus: document.activeElement?.tagName + '#' + (document.activeElement?.id ?? ''),
       body: document.body.innerText.slice(0, 400)
-    }))()`,
-    );
+    }))()`);
     throw new Error(`${error.message}; acquisition state ${JSON.stringify(state)}`);
   }
-  const detail = await evaluate(
-    driver.send,
-    `(() => {
+  const detail = await evaluate(driver.send, `(() => {
     const editor = document.querySelector('[data-testid="spawn-prompt-card"] [contenteditable="true"]');
     return { theme: document.documentElement.dataset.theme ?? 'dark',
       viewport: { width: innerWidth, height: innerHeight },
@@ -64,8 +59,7 @@ export async function captureAcquisition(
       focused: document.activeElement === editor,
       focus: document.activeElement?.tagName + '#' + (document.activeElement?.id ?? ''),
       pageWidth: document.documentElement.scrollWidth };
-  })()`,
-  );
+  })()`);
   if (!detail.focused) throw new Error(`${label} ${width} ${theme}: composer lost focus: ${detail.focus}`);
   if (!detail.task.includes(task)) throw new Error(`${label} ${width} ${theme}: task draft lost`);
   if (detail.tiles !== 1) throw new Error(`${label} ${width} ${theme}: attachment draft lost`);
@@ -92,10 +86,7 @@ export async function captureSession(driver, { artifactDir, evidenceDir, label, 
   writeFileSync(path.join(artifactDir, filename), Buffer.from(image.result.data, "base64"));
   if (evidenceDir) copyFileSync(path.join(artifactDir, filename), path.join(evidenceDir, filename));
   const jsonName = `session-${label}-${width}-${theme}.json`;
-  writeFileSync(
-    path.join(artifactDir, jsonName),
-    `${JSON.stringify({ filename, phase: "session", theme, viewport: { width, height } }, null, 2)}\n`,
-  );
+  writeFileSync(path.join(artifactDir, jsonName), `${JSON.stringify({ filename, phase: "session", theme, viewport: { width, height } }, null, 2)}\n`);
   if (evidenceDir) copyFileSync(path.join(artifactDir, jsonName), path.join(evidenceDir, jsonName));
 }
 

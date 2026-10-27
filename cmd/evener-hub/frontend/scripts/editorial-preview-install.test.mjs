@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test, { after } from "node:test";
+import test from "node:test";
+import { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { isSharedNodeModules } from "./editorial-preview-install.mjs";
 

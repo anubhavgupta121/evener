@@ -169,9 +169,7 @@ async function waitObservedRequest(method, label, timeoutMs = 20000) {
     const found = sent.map(parseFrame).find((frame) => frame?.method === method);
     if (found) return found;
     if (Date.now() > deadline) {
-      throw new Error(
-        `${label}: the browser never sent ${method} (saw ${JSON.stringify(sent.map(parseFrame).map((f) => f?.method))})`,
-      );
+      throw new Error(`${label}: the browser never sent ${method} (saw ${JSON.stringify(sent.map(parseFrame).map((f) => f?.method))})`);
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -314,10 +312,7 @@ try {
     // The checkpoint also proves no session, launch or generation exists
     // before Start.
     await checkpoint(2);
-    assert.equal(
-      await read(`document.querySelector('[contenteditable="true"]').textContent.includes(${JSON.stringify(task)})`),
-      true,
-    );
+    assert.equal(await read(`document.querySelector('[contenteditable="true"]').textContent.includes(${JSON.stringify(task)})`), true);
     assert.ok(
       await read(
         `document.querySelector('#spawn-cwd').getAttribute('aria-label').includes(${JSON.stringify(args.work)})`,
@@ -325,9 +320,7 @@ try {
       "working directory retained",
     );
     assert.equal(
-      await read(
-        `document.querySelectorAll('[data-testid="spawn-attachments"] [data-testid="attachment-tile"]').length`,
-      ),
+      await read(`document.querySelectorAll('[data-testid="spawn-attachments"] [data-testid="attachment-tile"]').length`),
       1,
       "attachment retained",
     );
@@ -347,10 +340,7 @@ try {
     const mobile = width <= 390;
     let firstSession;
     if (mobile) {
-      await wait(
-        `document.body.innerText.includes('ONBOARDING_REPLY_72e') && !document.querySelector('[role="dialog"]')`,
-        "mobile session producer reply",
-      );
+      await wait(`document.body.innerText.includes('ONBOARDING_REPLY_72e') && !document.querySelector('[role="dialog"]')`, "mobile session producer reply");
       // The narrow layout has no dock tab strip, but the rendered session pane
       // still carries the real hub ref the Go owner joins to its daemon.
       const ref = await read(`(() => {
@@ -455,9 +445,7 @@ try {
         const afterLate = await read(intent);
         assert.deepEqual(afterLate, beforeLate, "late success did not mutate the cancelled intent or steal focus");
         assert.equal(
-          await read(
-            `document.querySelector('[data-testid="credential-saved"]') === null && document.body.innerText.includes("Signed in to") === false`,
-          ),
+          await read(`document.querySelector('[data-testid="credential-saved"]') === null && document.body.innerText.includes("Signed in to") === false`),
           true,
           "cancelled flow did not complete the UI",
         );
@@ -476,10 +464,7 @@ try {
         // the real reply is an error rather than an authorized state. Its
         // arrival still means production finished the exchange and the check.
         const retiredReply = await observedResponse(retiredPoll.id, "changed sign-in");
-        assert.ok(
-          retiredReply?.error,
-          `changed sign-in: expected the refusal reply, got ${JSON.stringify(retiredReply)}`,
-        );
+        assert.ok(retiredReply?.error, `changed sign-in: expected the refusal reply, got ${JSON.stringify(retiredReply)}`);
         await browserHandledRpcReply();
         await waitStage("oauth-late-settled");
         // The listing refresh the instance edit scheduled may itself wait for
@@ -534,17 +519,10 @@ try {
       return { visible: !!rect && rect.width > 0 && rect.height > 0, enabled: !!button && !button.disabled,
         modelState: slot?.dataset.state ?? 'missing', model: value?.textContent?.trim() ?? '' };
     })()`);
-    assert.equal(
-      oauthSettled.visible && oauthSettled.enabled,
-      true,
-      `explicit Start enabled after automatic OAuth completion (${JSON.stringify(oauthSettled)})`,
-    );
+    assert.equal(oauthSettled.visible && oauthSettled.enabled, true, `explicit Start enabled after automatic OAuth completion (${JSON.stringify(oauthSettled)})`);
     assert.equal(oauthSettled.modelState, "chosen", "OAuth completion adopted the configured instance default");
     assert.ok(oauthSettled.model.includes(adopted), `OAuth adopted model ${oauthSettled.model} missing ${adopted}`);
-    assert.equal(
-      await read(`document.querySelector('[contenteditable="true"]').textContent.includes(${JSON.stringify(task)})`),
-      true,
-    );
+    assert.equal(await read(`document.querySelector('[contenteditable="true"]').textContent.includes(${JSON.stringify(task)})`), true);
     await captureAcquisition(driver, {
       artifactDir: args["artifact-dir"],
       evidenceDir,
@@ -556,9 +534,7 @@ try {
       task,
       adopted,
     });
-    console.log(
-      `PASS ${scenario}: real issuer flow, automatic access check and completion, explicit Start, no pre-Start generation`,
-    );
+    console.log(`PASS ${scenario}: real issuer flow, automatic access check and completion, explicit Start, no pre-Start generation`);
   }
 } catch (error) {
   try {

@@ -487,13 +487,10 @@ async function runLiveTwoTabs(driver, harnessUrl) {
   } catch (error) {
     await sibling.screenshot("second-tab-failure");
     await sibling.dumpState("second-tab-failure");
-    const evidence = await evaluate(
-      sibling.send,
-      `({
+    const evidence = await evaluate(sibling.send, `({
       model: window.backgroundTranscriptEvidence?.model(${JSON.stringify(SESSION_B)}),
       route: window.backgroundTranscriptEvidence?.entryRoute(${JSON.stringify(SESSION_B)})
-    })`,
-    );
+    })`);
     writeFileSync(path.join(ARTIFACT_DIR, "second-tab-failure-model.json"), JSON.stringify(evidence), { mode: 0o600 });
     throw error;
   } finally {
@@ -617,12 +614,8 @@ function itemIdentity(item) {
 // Preserve source metadata in the raw reopen/resize evidence as well as bodies.
 // Keep wire-window normalization separate: its reconciliation contract is unchanged.
 function recordedItemIdentity(item) {
-  return {
-    ...itemIdentity(item),
-    transcriptKey: item.transcriptKey ?? null,
-    version: item.version ?? null,
-    position: item.position ?? null,
-  };
+  return { ...itemIdentity(item), transcriptKey: item.transcriptKey ?? null,
+    version: item.version ?? null, position: item.position ?? null };
 }
 
 // Ordered structured equality over items, in order.
@@ -1848,11 +1841,8 @@ async function runEntryProductionJourney(driver, harnessUrl) {
   const restoredNarrow = await waitForRestoredDomain(driver, SESSION_B, laterPageSentinel);
   const readingAfter = await settledReading(driver, SESSION_B);
   driver.milestone("responsive-reading", {
-    before: readingBefore,
-    after: readingAfter,
-    sentinel: laterPageSentinel,
-    traceBefore: narrowTraceBefore,
-    traceAfter: traceBytes(),
+    before: readingBefore, after: readingAfter, sentinel: laterPageSentinel,
+    traceBefore: narrowTraceBefore, traceAfter: traceBytes(),
     beforePayload: (narrowBefore?.items ?? []).map(recordedItemIdentity),
     afterPayload: (restoredNarrow?.items ?? []).map(recordedItemIdentity),
     entry: await evaluate(driver.send, `window.backgroundTranscriptEvidence.entryRoute(${JSON.stringify(SESSION_B)})`),
@@ -1865,10 +1855,7 @@ async function runEntryProductionJourney(driver, harnessUrl) {
   const closedReading = await settledReading(driver, SESSION_B);
   await driver.screenshot("older-before-close");
   await openSessionInCurrentShell(driver, SESSION_A);
-  const closedPanes = await evaluate(
-    driver.send,
-    `window.backgroundTranscriptEvidence.panes(${JSON.stringify(SESSION_B)})`,
-  );
+  const closedPanes = await evaluate(driver.send, `window.backgroundTranscriptEvidence.panes(${JSON.stringify(SESSION_B)})`);
   if (closedPanes.length !== 0) throw new Error("switching the main session did not retire the target pane");
   await openSessionInCurrentShell(driver, SESSION_B);
   const newReading = await settledReading(driver, SESSION_B);
@@ -2000,13 +1987,10 @@ async function waitForRestoredDomain(driver, ref, sentinel, timeoutMs = 30000) {
 // change event does not fire). Callers that hide the page must bring it back
 // to the front before waiting here.
 async function waitForResponsiveHost(driver) {
-  await driver.waitPage(
-    `(() => {
+  await driver.waitPage(`(() => {
     const mobile = matchMedia("(max-width: 899px)").matches;
     return mobile === Boolean(document.querySelector("[data-stacked-pane-type]"));
-  })()`,
-    { label: "the responsive host has committed" },
-  );
+  })()`, { label: "the responsive host has committed" });
 }
 
 // openSessionInCurrentShell activates a session through whichever shell the
@@ -2031,16 +2015,13 @@ async function openSessionInCurrentShell(driver, ref) {
       if (await rowVisible()) break;
     }
   }
-  await driver.waitPage(
-    `(() => {
+  await driver.waitPage(`(() => {
     const row = document.querySelector(${JSON.stringify(rowSelector)});
     if (!row) return false;
     const rect = row.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 &&
       row.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-  })()`,
-    { label: "the session row is exposed for the click" },
-  );
+  })()`, { label: "the session row is exposed for the click" });
   await driver.click(rowSelector);
   await driver.waitPage(
     `(() => document.querySelector(${JSON.stringify(driver.composerSelector(ref))}) !== null ? true : null)()`,
@@ -2563,11 +2544,9 @@ async function settledReading(driver, ref) {
 
 async function positionOlderReading(driver, ref, sentinel) {
   const domain = await waitForRestoredDomain(driver, ref, sentinel);
-  const item = domain?.items.find((item) => item.text === sentinel);
+  const item = domain?.items.find(item => item.text === sentinel);
   if (!item) throw new Error(`older fixture item absent: ${sentinel}`);
-  const result = await evaluate(
-    driver.send,
-    `(async () => {
+  const result = await evaluate(driver.send, `(async () => {
     const port = ${SCROLL_PORT_EXPR(ref)};
     if (!port) throw new Error("older reading has no scroll port");
     const deadline = performance.now() + 15000;
@@ -2588,23 +2567,15 @@ async function positionOlderReading(driver, ref, sentinel) {
       }
     }
     throw new Error("older fixture row never rendered");
-  })()`,
-  );
+  })()`);
   if (!result) throw new Error("older reading gesture failed");
-  const box = await evaluate(
-    driver.send,
-    `(() => {
+  const box = await evaluate(driver.send, `(() => {
     const port = ${SCROLL_PORT_EXPR(ref)};
     const rect = port.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, top: port.scrollTop };
-  })()`,
-  );
+  })()`);
   await driver.send("Input.dispatchMouseEvent", {
-    type: "mouseWheel",
-    x: box.x,
-    y: box.y,
-    deltaX: 0,
-    deltaY: 8,
+    type: "mouseWheel", x: box.x, y: box.y, deltaX: 0, deltaY: 8,
   });
   await driver.waitPage(`(${SCROLL_PORT_EXPR(ref)}).scrollTop > ${box.top}`, {
     label: "the native wheel moves the older reader",
@@ -2618,48 +2589,34 @@ function assertResponsiveReading(before, after, sentinel) {
   // Two CSS px cover integer scroll read-back, not a different reading point.
   const oldEntry = before.semantic;
   const newEntry = after.semantic;
-  if (
-    before.width !== 1440 ||
-    after.width !== 420 ||
-    before.panes.length !== 1 ||
-    after.panes.length !== 1 ||
-    before.panes[0].identity !== after.panes[0].identity ||
-    before.panes[0].id !== after.panes[0].id ||
-    !before.anchor.itemId ||
-    before.anchor.itemId !== after.anchor.itemId ||
-    !oldEntry?.id ||
-    oldEntry.id !== newEntry?.id ||
-    !Number.isFinite(oldEntry.offset) ||
-    !Number.isFinite(newEntry.offset) ||
-    !(oldEntry.height > 0 && oldEntry.height < before.clientHeight && oldEntry.offset < 0) ||
-    !(newEntry.height > 0 && newEntry.offset <= 0 && newEntry.offset + newEntry.height > 0) ||
-    !(before.viewportWidth > 0 && after.viewportWidth > 0 && before.viewportWidth !== after.viewportWidth) ||
-    Math.abs(oldEntry.offset + oldEntry.height - (newEntry.offset + newEntry.height)) > 2 ||
-    !oldEntry.text.includes(sentinel) ||
-    !newEntry.text.includes(sentinel) ||
-    before.scrollHeight - before.clientHeight - before.scrollTop <= before.clientHeight ||
-    after.scrollHeight - after.clientHeight - after.scrollTop <= after.clientHeight ||
-    !before.visibleRows.some((row) => row.id === before.anchor.itemId && row.text.includes(sentinel)) ||
-    !after.visibleRows.some((row) => row.id === after.anchor.itemId && row.text.includes(sentinel))
-  ) {
+  if (before.width !== 1440 || after.width !== 420 ||
+      before.panes.length !== 1 || after.panes.length !== 1 ||
+      before.panes[0].identity !== after.panes[0].identity ||
+      before.panes[0].id !== after.panes[0].id ||
+      !before.anchor.itemId || before.anchor.itemId !== after.anchor.itemId ||
+      !oldEntry?.id || oldEntry.id !== newEntry?.id ||
+      !Number.isFinite(oldEntry.offset) || !Number.isFinite(newEntry.offset) ||
+      !(oldEntry.height > 0 && oldEntry.height < before.clientHeight && oldEntry.offset < 0) ||
+      !(newEntry.height > 0 && newEntry.offset <= 0 && newEntry.offset + newEntry.height > 0) ||
+      !(before.viewportWidth > 0 && after.viewportWidth > 0 && before.viewportWidth !== after.viewportWidth) ||
+      Math.abs((oldEntry.offset + oldEntry.height) - (newEntry.offset + newEntry.height)) > 2 ||
+      !oldEntry.text.includes(sentinel) || !newEntry.text.includes(sentinel) ||
+      before.scrollHeight - before.clientHeight - before.scrollTop <= before.clientHeight ||
+      after.scrollHeight - after.clientHeight - after.scrollTop <= after.clientHeight ||
+      !before.visibleRows.some(row => row.id === before.anchor.itemId && row.text.includes(sentinel)) ||
+      !after.visibleRows.some(row => row.id === after.anchor.itemId && row.text.includes(sentinel))) {
     throw new Error(`responsive older reading changed: ${JSON.stringify({ before, after })}`);
   }
 }
 
 function assertNewPaneLatest(before, after) {
-  if (
-    before.panes.length !== 1 ||
-    before.scrollHeight - before.clientHeight - before.scrollTop <= before.clientHeight ||
-    !before.visibleRows.some(
-      (row) => row.id === before.anchor.itemId && row.text.includes(historySentinel(LATER_PAGE)),
-    ) ||
-    after.panes.length !== 1 ||
-    after.panes[0].identity === before.panes[0].identity ||
-    after.clientHeight <= 0 ||
-    !Number.isFinite(after.scrollTop) ||
-    Math.abs(after.scrollHeight - after.clientHeight - after.scrollTop) > 2 ||
-    !after.visibleRows.some((row) => row.text.includes(GAP_SENTINEL))
-  ) {
+  if (before.panes.length !== 1 ||
+      before.scrollHeight - before.clientHeight - before.scrollTop <= before.clientHeight ||
+      !before.visibleRows.some(row => row.id === before.anchor.itemId && row.text.includes(historySentinel(LATER_PAGE))) ||
+      after.panes.length !== 1 || after.panes[0].identity === before.panes[0].identity ||
+      after.clientHeight <= 0 || !Number.isFinite(after.scrollTop) ||
+      Math.abs(after.scrollHeight - after.clientHeight - after.scrollTop) > 2 ||
+      !after.visibleRows.some(row => row.text.includes(GAP_SENTINEL))) {
     throw new Error(`new pane did not open at latest: ${JSON.stringify({ before, after })}`);
   }
 }

@@ -1,17 +1,7 @@
 // Hold the real lazy DockHost request across the floating fixture's first
 // workspace read. Capturing a Settings ID before restore retires that ID.
 import assert from "node:assert/strict";
-import {
-  applyViewport,
-  clearViewportOverride,
-  closePage,
-  connectPage,
-  createStartupDeadline,
-  evaluate,
-  navigateTo,
-  openPage,
-  waitForFonts,
-} from "../browserGuardCdp.mjs";
+import { applyViewport, clearViewportOverride, closePage, connectPage, createStartupDeadline, evaluate, navigateTo, openPage, waitForFonts } from "../browserGuardCdp.mjs";
 import { Driver } from "../skillguard/run.mjs";
 
 export function startupCancellation(signal) {
@@ -48,13 +38,10 @@ export async function measureDelayedFloatingDock(endpoint, url, boot, viewport, 
     await send("Storage.clearDataForOrigin", { origin, storageTypes: "local_storage" });
     await navigateTo(page, url, boot);
     await evaluate(send, "window.settledShell");
-    await driver.waitPage(
-      `(async () => {
+    await driver.waitPage(`(async () => {
       const { getDockviewApi } = await import('/src/shell/workspace.ts');
       return getDockviewApi() != null && localStorage.getItem('evener.workspace.layout.v2') != null;
-    })()`,
-      { label: "real workspace and saved startup layout" },
-    );
+    })()`, { label: "real workspace and saved startup layout" });
 
     page.ws.addEventListener("message", handler);
     await send("Network.setCacheDisabled", { cacheDisabled: true });
@@ -77,14 +64,11 @@ export async function measureDelayedFloatingDock(endpoint, url, boot, viewport, 
       (error) => ({ error }),
     );
     await Promise.race([firstRead.promise, aborted]);
-    const before = await evaluate(
-      send,
-      `(async () => {
+    const before = await evaluate(send, `(async () => {
       const { workspaceStore, getDockviewApi } = await import('/src/shell/workspace.ts');
       return { ready: getDockviewApi() != null, types: workspaceStore.getState().panes.map(p => p.type),
         errors: window.__shellGuardErrors ?? [] };
-    })()`,
-    );
+    })()`);
     assert.equal(before.ready, false, "the real DockHost request must still be held");
     assert.deepEqual(before.errors, []);
     assert.deepEqual(before.types, ["welcome"], "floating fixture opens Settings before workspace restore completes");

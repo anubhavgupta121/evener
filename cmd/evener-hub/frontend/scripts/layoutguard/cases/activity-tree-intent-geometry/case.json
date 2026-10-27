@@ -12,7 +12,11 @@
     "widgets/openbutton/openbutton.module.css"
   ],
   "viewport": { "width": 1200, "height": 1100, "deviceScaleFactor": 1, "mobile": false },
-  "widthMatrix": [{ "width": 360, "depth": 0 }, { "width": 390, "depth": 2 }, { "width": 430, "depth": 4 }],
+  "widthMatrix": [
+    { "width": 360, "depth": 0 },
+    { "width": 390, "depth": 2 },
+    { "width": 430, "depth": 4 }
+  ],
   "mutation": {
     "declaration": "activitypanel.module.css: remove only .denseMeta's max-width: 60%",
     "verified": "2026-10-23",

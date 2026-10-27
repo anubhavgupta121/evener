@@ -69,7 +69,6 @@ func communicateCallArgs(id string, args map[string]any) llm.ToolCallData {
 	}
 }
 
-
 // TestCommunicate_ToolChoiceNotForced_OnEveryRequest checks the whole request
 // sequence, not just the first: no round may force a tool call, including the
 // rounds that follow a communicate. See TestProcessInput_ToolChoiceIsNeverForced

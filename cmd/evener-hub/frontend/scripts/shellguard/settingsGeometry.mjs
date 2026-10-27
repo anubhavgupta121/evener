@@ -3,15 +3,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  applyViewport,
-  closePage,
-  connectPage,
-  evaluate,
-  navigateTo,
-  openPage,
-  waitForFonts,
-} from "../browserGuardCdp.mjs";
+import { applyViewport, closePage, connectPage, evaluate, navigateTo, openPage, waitForFonts } from "../browserGuardCdp.mjs";
 import { startBrowserGuard, waitForBrowserReady } from "../browserGuardProcess.mjs";
 
 async function wait(send, predicate) {

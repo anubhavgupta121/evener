@@ -109,7 +109,7 @@ function visibleBox(el) {
     : box(el);
 }
 
-window.measure = () => {
+window.measure = function () {
   // CDP forcePseudoState applies to the first matching node for each selector.
   // Focus is a style contract, not a per-width contract, so measure those four
   // deliberately forced controls once and attach the result to every fixture.

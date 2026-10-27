@@ -1,6 +1,8 @@
 {
   "description": "Real TranscriptBody editorial evidence and collaborators",
-  "cssFiles": ["styles/global.css"],
+  "cssFiles": [
+    "styles/global.css"
+  ],
   "viewport": {
     "width": 390,
     "height": 900,

@@ -67,22 +67,14 @@ export default function assert(m) {
     failures.push(`dock escapes the transcript's content column (${short.dock.left}..${short.dock.right})`);
   }
   if (Math.abs(leftMargin - rightMargin) > tolerance) {
-    failures.push(
-      `dock is not centered on the reading measure (margins ${leftMargin.toFixed(1)}px / ${rightMargin.toFixed(1)}px)`,
-    );
+    failures.push(`dock is not centered on the reading measure (margins ${leftMargin.toFixed(1)}px / ${rightMargin.toFixed(1)}px)`);
   }
 
   if (short.dock.top < short.lastTurn.top + tolerance) {
-    failures.push(
-      `dock does not follow the last turn row (dock top ${short.dock.top}px, last turn top ${short.lastTurn.top}px)`,
-    );
+    failures.push(`dock does not follow the last turn row (dock top ${short.dock.top}px, last turn top ${short.lastTurn.top}px)`);
   }
 
   return failures.length === 0
-    ? {
-        pass: true,
-        reason:
-          "the questions widget is a content-sized, centered transcript row; the virtual list's root owns all scrolling",
-      }
+    ? { pass: true, reason: "the questions widget is a content-sized, centered transcript row; the virtual list's root owns all scrolling" }
     : { pass: false, reason: failures.join("; ") };
 }

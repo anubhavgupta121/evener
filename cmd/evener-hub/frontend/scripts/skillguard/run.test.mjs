@@ -7,8 +7,8 @@
 // These cases evaluate the REAL expression string in jsdom, so the
 // not-ready (null) / ready (rows) contract is pinned without a browser.
 
-import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { rmSync } from "node:fs";
 
 import { CHROME_SOCKET_PATH_LIMIT, chromeSingletonSocketPath } from "../browserGuardProcess.mjs";
 import { Driver, skillGuardChromeProfileDir } from "./run.mjs";
@@ -64,10 +64,7 @@ describe("pressRailRowExpr finds, hit-tests and presses in one turn", () => {
   });
 
   function renderRows() {
-    document.body.innerHTML = `<button data-session-ref="target">status chip</button><nav data-sidebar-rail>${[
-      "other",
-      "target",
-    ]
+    document.body.innerHTML = `<button data-session-ref="target">status chip</button><nav data-sidebar-rail>${["other", "target"]
       .map((ref) => `<span data-session-ref="${ref}"><span class="text"><b>${ref}</b></span><span>now</span></span>`)
       .join("")}</nav>`;
     const clicks = [];

@@ -29,8 +29,7 @@ function sidebar(markup, doc = document) {
 
 const current = (id) => `<button id="current-${id}" data-activity-anchor="delegate:${id}">running delegate</button>`;
 const inactive = (id) => `<button id="inactive-${id}" data-activity-anchor="delegate:${id}">finished delegate</button>`;
-const fold = ({ id = "inactive-fold", attrs = "" } = {}) =>
-  `<div><button id="${id}" ${attrs}>Inactive subagents (51)</button></div>`;
+const fold = ({ id = "inactive-fold", attrs = "" } = {}) => `<div><button id="${id}" ${attrs}>Inactive subagents (51)</button></div>`;
 const show = (id = "show-more") => `<button id="${id}">Show 20 more · 31 remaining</button>`;
 const loadMore = (id = "load-more") => `<button id="${id}">Load more subagents</button>`;
 
@@ -47,9 +46,7 @@ function evaluateStep(root, selector, topmost) {
 function clickRecorder(root) {
   const clicked = { id: null };
   for (const button of root.querySelectorAll("button"))
-    button.addEventListener("click", (event) => {
-      clicked.id = event.currentTarget.id;
-    });
+    button.addEventListener("click", (event) => { clicked.id = event.currentTarget.id; });
   return clicked;
 }
 
@@ -101,13 +98,7 @@ test("the helper keeps working on a document with no browsing context", () => {
 
 test("the serialized function source needs neither the document nor the Node global", () => {
   const root = sidebar(`${current("a")}${fold()}`);
-  const evaluate = new Function(
-    "container",
-    "refused",
-    "Node",
-    "document",
-    `return (${revealControl})(container, refused);`,
-  );
+  const evaluate = new Function("container", "refused", "Node", "document", `return (${revealControl})(container, refused);`);
   expect(evaluate(root, REFUSED_BUTTON_SELECTOR, undefined, undefined)?.id).toBe("inactive-fold");
 });
 

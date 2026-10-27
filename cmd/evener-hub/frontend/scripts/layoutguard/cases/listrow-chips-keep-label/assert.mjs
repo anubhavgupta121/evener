@@ -9,12 +9,7 @@ const TOLERANCE = 1;
 const MAX_BESIDE_GAP = 16;
 
 function overlaps(a, b) {
-  return (
-    a.left < b.right - TOLERANCE &&
-    b.left < a.right - TOLERANCE &&
-    a.top < b.bottom - TOLERANCE &&
-    b.top < a.bottom - TOLERANCE
-  );
+  return a.left < b.right - TOLERANCE && b.left < a.right - TOLERANCE && a.top < b.bottom - TOLERANCE && b.top < a.bottom - TOLERANCE;
 }
 
 export default function assert(measurements) {

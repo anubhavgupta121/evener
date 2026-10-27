@@ -12,9 +12,7 @@ export default function assert(fixtures) {
   for (const f of fixtures) {
     const at = `${f.width}px ${f.name} name`;
     if (f.label.scrollWidth > f.label.clientWidth + 1) {
-      failures.push(
-        `${at}: the name is clipped (${f.label.scrollWidth}px of text in a ${f.label.clientWidth}px label)`,
-      );
+      failures.push(`${at}: the name is clipped (${f.label.scrollWidth}px of text in a ${f.label.clientWidth}px label)`);
     }
     if (f.label.rect.right > f.row.rect.right + 1) {
       failures.push(`${at}: the label escapes the row by ${(f.label.rect.right - f.row.rect.right).toFixed(1)}px`);

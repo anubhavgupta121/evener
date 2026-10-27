@@ -348,7 +348,9 @@ export function createChromeProfileDir(
     // prefix there; this matches the win32 exemptions on the existence check
     // below and on the fit check after mkdtemp.
     const prefix =
-      platform === "win32" ? profilePrefix : trimToByteBudget(profilePrefix, maxProfilePrefixBytes(root, socketLimit));
+      platform === "win32"
+        ? profilePrefix
+        : trimToByteBudget(profilePrefix, maxProfilePrefixBytes(root, socketLimit));
     let dir;
     try {
       // Keep a trailing separator when the prefix was trimmed away so mkdtemp
@@ -1046,15 +1048,11 @@ export async function startBrowserGuard({
   });
 
   try {
-    vite = spawnProcess(
-      process.execPath,
-      ["scripts/browserguard-vite.mjs", ...(viteConfigFile ? [viteConfigFile] : [])],
-      {
-        cwd: frontend,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: useProcessGroups,
-      },
-    );
+    vite = spawnProcess(process.execPath, ["scripts/browserguard-vite.mjs", ...(viteConfigFile ? [viteConfigFile] : [])], {
+      cwd: frontend,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: useProcessGroups,
+    });
     lifecycle.addChild(vite, {
       processGroupId: useProcessGroups && Number.isInteger(vite.pid) ? vite.pid : null,
     });

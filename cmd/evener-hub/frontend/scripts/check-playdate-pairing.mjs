@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import nacl from "tweetnacl";
-import { loadPairingModules } from "./pairingModules.mjs";
 import { buildNativePairingCheck } from "./playdateNativeCheck.mjs";
+import { loadPairingModules } from "./pairingModules.mjs";
 
 const { binary, cleanup } = buildNativePairingCheck();
 const server = await loadPairingModules();

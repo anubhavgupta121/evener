@@ -1,12 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  applyViewport,
-  clearViewportOverride,
-  closePage,
-  connectPage,
-  evaluate,
-  openPage,
-} from "../browserGuardCdp.mjs";
+import { applyViewport, clearViewportOverride, closePage, connectPage, evaluate, openPage } from "../browserGuardCdp.mjs";
 
 // Removing native content sizing from applyViewport must fail this case on macOS:
 // after a tab switch Chrome still reports the emulated viewport and delivers a
@@ -34,21 +27,16 @@ export async function assertNativeViewportWheel(endpoint) {
     for (const { viewport, x, y } of cases) {
       await send("Page.bringToFront");
       await applyViewport(send, viewport);
-      await evaluate(
-        send,
-        `(async () => {
+      await evaluate(send, `(async () => {
         document.body.innerHTML = '<div id="port" style="position:absolute;left:${x - 100}px;top:${y - 100}px;width:200px;height:200px;overflow:auto"><div style="height:20000px"></div></div>';
         const port = document.querySelector('#port');
         port.scrollTop = 6326;
         await new Promise(requestAnimationFrame);
         return true;
-      })()`,
-      );
+      })()`);
       await sibling.page.send("Page.bringToFront");
       await send("Page.bringToFront");
-      await evaluate(
-        send,
-        `(() => {
+      await evaluate(send, `(() => {
         const port = document.querySelector('#port');
         const before = port.scrollTop;
         const evidence = { before, wheel: null };
@@ -66,30 +54,22 @@ export async function assertNativeViewportWheel(endpoint) {
           port.addEventListener('scroll', onScroll);
         });
         return true;
-      })()`,
-      );
+      })()`);
       await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: 8 });
       const result = await evaluate(send, "window.nativeWheelDone");
-      assert.ok(
-        result.wheel?.trusted && !result.wheel.prevented && result.wheel.delta === 8,
-        `native wheel delivery after tab switch: ${JSON.stringify(result)}`,
-      );
-      assert.ok(
-        result.after > result.before,
-        `native wheel must scroll at (${x},${y}) after tab switch: ${JSON.stringify(result)}`,
-      );
+      assert.ok(result.wheel?.trusted && !result.wheel.prevented && result.wheel.delta === 8,
+        `native wheel delivery after tab switch: ${JSON.stringify(result)}`);
+      assert.ok(result.after > result.before,
+        `native wheel must scroll at (${x},${y}) after tab switch: ${JSON.stringify(result)}`);
     }
     await clearViewportOverride(send);
-    const restored = await evaluate(
-      send,
-      `(async () => {
+    const restored = await evaluate(send, `(async () => {
       const deadline = performance.now() + 15000;
       while ((innerWidth !== ${original.width} || innerHeight !== ${original.height}) && performance.now() < deadline) {
         await new Promise(requestAnimationFrame);
       }
       return {width: innerWidth, height: innerHeight};
-    })()`,
-    );
+    })()`);
     assert.deepEqual(restored, original, "clearing viewport restores original native content bounds");
 
     // A failed native restore must not prevent either emulation cleanup. Only
@@ -104,49 +84,34 @@ export async function assertNativeViewportWheel(endpoint) {
       return send(method, params);
     };
     await applyViewport(interruptedSend, {
-      width: 420,
-      height: 844,
-      deviceScaleFactor: originalFeatures.scale + 1,
-      mobile: true,
-      touch: true,
+      width: 420, height: 844, deviceScaleFactor: originalFeatures.scale + 1, mobile: true, touch: true,
     });
     assert.deepEqual(await evaluate(send, features), { scale: originalFeatures.scale + 1, coarse: true });
     rejectRestore = true;
     await clearViewportOverride(interruptedSend);
-    assert.deepEqual(
-      await evaluate(send, features),
-      originalFeatures,
-      "native restore failure still clears metrics and touch emulation",
-    );
+    assert.deepEqual(await evaluate(send, features), originalFeatures,
+      "native restore failure still clears metrics and touch emulation");
     rejectRestore = false;
     await clearViewportOverride(interruptedSend);
-    const retried = await evaluate(
-      send,
-      `(async () => {
+    const retried = await evaluate(send, `(async () => {
       const deadline = performance.now() + 15000;
       while ((innerWidth !== ${original.width} || innerHeight !== ${original.height}) && performance.now() < deadline) {
         await new Promise(requestAnimationFrame);
       }
       return {width: innerWidth, height: innerHeight};
-    })()`,
-    );
+    })()`);
     assert.deepEqual(retried, original, "retrying viewport cleanup restores original native content bounds");
   } catch (error) {
     failures.push(error);
   } finally {
-    const closed = await Promise.allSettled(
-      tabs.map(async ({ target, page }) => {
-        page?.close();
-        await closePage(endpoint, target.id);
-      }),
-    );
-    failures.push(...closed.filter((result) => result.status === "rejected").map((result) => result.reason));
+    const closed = await Promise.allSettled(tabs.map(async ({ target, page }) => {
+      page?.close();
+      await closePage(endpoint, target.id);
+    }));
+    failures.push(...closed.filter(result => result.status === "rejected").map(result => result.reason));
   }
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) {
-    throw new AggregateError(
-      failures,
-      `native viewport assertion or cleanup failed: ${failures.map(String).join("\n")}`,
-    );
+    throw new AggregateError(failures, `native viewport assertion or cleanup failed: ${failures.map(String).join("\n")}`);
   }
 }

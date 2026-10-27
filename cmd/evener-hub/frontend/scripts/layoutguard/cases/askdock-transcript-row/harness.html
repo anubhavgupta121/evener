@@ -102,7 +102,7 @@ function snapshot() {
     lastTurn: rect(lastTurn),
   };
 }
-window.measure = () => {
+window.measure = function () {
   const content = document.querySelector(".questionContent");
   const short = snapshot();
   content.style.height = "1200px";
