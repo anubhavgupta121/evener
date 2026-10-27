@@ -1079,61 +1079,6 @@ func TestAskUser_QueuedInputDrainsAsReply(t *testing.T) {
 	}
 }
 
-// TestAskUser_BoundaryDrainPreservesFollowUp exercises the follow-up
-// preservation concern directly: Session.FollowUp is exported, thread-safe
-// public API with zero production callers today (grep across every module
-// finds only two direct test callers) — so nothing at the type level prevents
-// some future caller from queueing one while an asking round is in flight. A
-// same-round test tool simulates that race. The drain-ladder gate must HOLD the
-// follow-up rung while awaiting WITHOUT popping it and discarding the result:
-// the message must survive intact in the follow-up queue, not be lost, so it
-// still runs once the session leaves awaiting.
-func TestAskUser_BoundaryDrainPreservesFollowUp(t *testing.T) {
-	t.Parallel()
-	ask := askUserCall("ask1", askUserArgsValid())
-	queueFollowUp := llm.ToolCallData{ID: "fu1", Name: "enqueue_test_followup_direct", Arguments: json.RawMessage(`{}`), Type: "function"}
-	f := &fakeAdapter{
-		name: "openai",
-		steps: []func(req llm.Request) llm.Response{
-			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask, queueFollowUp) },
-			func(req llm.Request) llm.Response {
-				t.Fatalf("should not reach a second LLM call: an asking boundary must hold the follow-up rung")
-				return llm.Response{}
-			},
-		},
-	}
-	sess := newSession(t, withAdapter(f))
-	sess.RegisterTool("enqueue_test_followup_direct",
-		"test-only: calls Session.FollowUp mid-round, simulating a concurrent caller racing the asking round",
-		map[string]any{"type": "object", "properties": map[string]any{}},
-		func(context.Context, any) (any, error) {
-			if err := sess.FollowUp("investigate the flaky test next"); err != nil {
-				t.Fatal(err)
-			}
-			return "queued", nil
-		})
-
-	// TRIPWIRE: scripted in-process adapter, no real I/O; only fires on a genuine hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := sess.ProcessInput(ctx, "which db should we use?", nil); err != nil {
-		t.Fatalf("ProcessInput: %v", err)
-	}
-
-	if got := sess.State(); got != SessionAwaiting {
-		t.Fatalf("state = %q, want %q", got, SessionAwaiting)
-	}
-	if got := len(f.Requests()); got != 1 {
-		t.Fatalf("requests = %d, want 1 (a follow-up queued mid-ask must not run before the reply)", got)
-	}
-	sess.mu.Lock()
-	pending := len(sess.followups)
-	sess.mu.Unlock()
-	if pending != 1 {
-		t.Fatalf("pending follow-ups after the awaiting rest = %d, want 1 (held, not dropped)", pending)
-	}
-}
-
 // --- Task 7: Compact refused / Clear dismisses, while awaiting (spec §5.3) ---
 //
 // "Compact and Clear are live at rest and touch the transcript the pending
@@ -3713,30 +3658,22 @@ func TestAskUser_ConsumeSteeringMessageEmitsInjectedBeforeAdmissionWarning(t *te
 	}
 }
 
-// TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
-// covers RoboRev #1907 round 2's Medium (session_lifecycle.go's drain-ladder
-// gate, ~line 1399): the gate's comment used to prove `s.State() ==
-// SessionAwaiting` there is equivalent to `askPendingCount() > 0`, on the
-// premise that processOneInput's entry always cleared askPending
-// unconditionally -- true before this PR, false now for a human-note
-// carrier (steeringCarrierClaimAnswersAsk skips the clear). A note carrier's
-// own round, if it merely acknowledges the note (askedThisRound stays false
-// since nothing NEW was posted), settles deliverIfCommunicated's boundary
-// SessionIdle at this exact capture point -- armAwaitingAtSettle's general
-// upgrade runs later, at the outer loop's own terminal settle -- so reading
-// state alone reported "not awaiting" with ask1 still genuinely unanswered,
-// and the ladder popped and ran a queued FollowUp it should have left
-// intact. Drives the real ProcessPendingUserInput path for the note
-// carrier's round (a real "communicate" tool call, matching
-// TestAskUser_RestoreDoesNotResolveAcrossASuccessfulHumanNoteCarrierCompletion's
-// shape) with a real FollowUp queued beforehand, and asserts the follow-up's
-// own model request never ran within that same call.
-func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound(t *testing.T) {
+// TestAskUser_NotificationHeldWhilePendingAskSurvivesAHumanNoteCarrierRound
+// covers the drain-ladder gate's awaiting read (session_lifecycle.go): a human
+// note carrier's own round, if it merely acknowledges the note (askedThisRound
+// stays false since nothing NEW was posted), settles deliverIfCommunicated's
+// boundary SessionIdle at the capture point while ask1 is still genuinely
+// unanswered, so reading state alone reported "not awaiting" and the ladder ran
+// a pending job notification it should have held. Drives the real
+// ProcessPendingUserInput path for the note carrier's round (a real
+// "communicate" tool call) with a real job notification queued beforehand, and
+// asserts the notification's model request never ran within that same call.
+func TestAskUser_NotificationHeldWhilePendingAskSurvivesAHumanNoteCarrierRound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ask := askUserCall("ask1", askUserArgsValid())
 	comm := communicateCall("c1", "noted")
-	var followUpRan bool
+	var notificationRan bool
 	c := llm.NewClient()
 	c.Register(&fakeAdapter{
 		name: "openai",
@@ -3744,8 +3681,8 @@ func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
 			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(ask) },
 			func(req llm.Request) llm.Response { return agenttest.ToolCallResponse(comm) },
 			func(req llm.Request) llm.Response {
-				followUpRan = true
-				return agenttest.FinalResponse("ran the followup")
+				notificationRan = true
+				return agenttest.FinalResponse("ran the notification")
 			},
 		},
 	})
@@ -3764,9 +3701,7 @@ func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
 	if got := sess.askPendingCount(); got != 1 {
 		t.Fatalf("pre-note pending count = %d, want 1 (test setup broken)", got)
 	}
-	if err := sess.FollowUp("run the tests"); err != nil {
-		t.Fatalf("FollowUp: %v", err)
-	}
+	sess.enqueueJobNotification(watchNotification("job_during_ask", "output_match: done"))
 
 	if _, err := sess.SetHumanNote("note-1", "watch the ingest path"); err != nil {
 		t.Fatalf("SetHumanNote: %v", err)
@@ -3775,8 +3710,8 @@ func TestAskUser_FollowUpNotDrainedWhilePendingAskSurvivesAHumanNoteCarrierRound
 		t.Fatalf("ProcessPendingUserInput: ran=%v err=%v", ran, err)
 	}
 
-	if followUpRan {
-		t.Fatal("the queued follow-up ran while ask1 was still pending; the drain ladder must not pop it")
+	if notificationRan {
+		t.Fatal("the pending notification ran while ask1 was still pending; the drain ladder must hold it")
 	}
 	if got := sess.askPendingCount(); got != 1 {
 		t.Fatalf("live pending count after the note's round = %d, want 1 (still unanswered)", got)

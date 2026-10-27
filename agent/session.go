@@ -294,7 +294,7 @@ type Session struct {
 	//   env so the two never observe a torn intermediate state), the mutable
 	//   cfg knobs (ReasoningEffort, command timeouts, MaxToolRoundsPerInput),
 	//   cachedSystemPrompt, cachedToolDefs, the comm communicate-result,
-	//   steeringQueue, activeProvenance, followups, inputQueue,
+	//   steeringQueue, activeProvenance, inputQueue,
 	//   loopDetectionCount, the task* reminder counters, depth, the goalInTurn
 	//   flag and kickFunc callback, the naming name-state, envTracker,
 	//   envContextState, currentRoundRecorder, salvagedTurnRound, and the worktree
@@ -487,7 +487,6 @@ type Session struct {
 	// mu.
 	steeringParked   bool
 	visionTurnOwners []*struct{ _ byte }
-	followups        []string
 
 	// activeProvenance is the causal provenance carried by the input currently
 	// being processed. It is stamped onto every event the turn emits, reset to

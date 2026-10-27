@@ -123,7 +123,7 @@ func TestWorkMillis_FailedTurnCounts(t *testing.T) {
 }
 
 // TestWorkMillis_MultiTurnDrainEachCounts drives a user input followed by a
-// queued FollowUp (two processOneInput calls in the same ProcessInput drain
+// queued message (two processOneInput calls in the same ProcessInput drain
 // loop) and asserts each drained turn's elapsed contributes — not just the
 // last one.
 func TestWorkMillis_MultiTurnDrainEachCounts(t *testing.T) {
@@ -141,7 +141,7 @@ func TestWorkMillis_MultiTurnDrainEachCounts(t *testing.T) {
 			return agenttest.FinalResponse("second reply")
 		},
 	))
-	if err := sess.FollowUp("do second"); err != nil {
+	if err := sess.Enqueue(context.Background(), "do second"); err != nil {
 		t.Fatal(err)
 	}
 

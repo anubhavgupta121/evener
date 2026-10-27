@@ -385,25 +385,6 @@ func (s *Session) deliverHookUserMessage(text string) {
 	s.emitDiagnosticWarning(events.WarningData{Source: string(diagnostic.SourceHook), Message: text})
 }
 
-// FollowUp queues a message to process after the current input completes.
-func (s *Session) FollowUp(msg string) error {
-	release, err := s.beginRetirementMutation("input")
-	if err != nil {
-		return err
-	}
-	defer release()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closingOrClosedLocked() {
-		return nil
-	}
-	if strings.TrimSpace(msg) == "" {
-		return nil
-	}
-	s.followups = append(s.followups, msg)
-	return nil
-}
-
 // queuedInput is one entry on the per-session input queue. Text and Images
 // are forwarded together when the entry is drained as a fresh user turn.
 // Provenance carries the causal watch origin (nil for human-typed input) so a
@@ -1369,16 +1350,5 @@ func steeringMessageToLLM(entry steeringMessage) llm.Message {
 			msg.Content[i].Machinery = true
 		}
 	}
-	return msg
-}
-
-func (s *Session) popFollowUp() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.followups) == 0 {
-		return ""
-	}
-	msg := s.followups[0]
-	s.followups = s.followups[1:]
 	return msg
 }
