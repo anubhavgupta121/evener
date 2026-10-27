@@ -342,8 +342,11 @@ contract:
 - The attach check is read-only. Every other check writes to the host, so each is
   a separate opt-in. Isolation differs by check:
   - Deploy, container, push and UI run a private hub from a run-unique directory
-    they create on the host and remove when they finish, but only after proving
-    shutdown (an unproved shutdown fails the check and leaves the directory).
+    they create on the host and remove when they finish. Deploy, and the
+    container pipeline check against an external host, remove it only after
+    proving shutdown: an unproved shutdown fails the check and leaves the
+    directory. Push and UI stop the listener and remove the directory in separate
+    cleanups, so an unproved shutdown does not retain it.
   - Deploy hashes the host's real install (`~/.local/bin/evener`) before and
     after and fails if it changed. Push and UI hash that install and the real
     `~/.config/evener/credentials.toml` and fail if either appeared or changed. A
