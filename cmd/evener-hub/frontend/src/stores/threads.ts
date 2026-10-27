@@ -6875,13 +6875,13 @@ async function refreshTrackedThreadNow(
     // this hydration, and a consumer that starts waiting while this read runs
     // must still span the recovery behind it. Hydration-only registrations
     // still displace each other — the newer attempt owns the ref's
-    // convergence.
+    // convergence. The compose is allSettled on purpose: a rejected hydration
+    // is the failed refresh's own concern and must not settle the composed
+    // completion while the chain's span is still pending, or a waiting
+    // consumer resumes before recovery establishes the display and cursor.
     const outstandingRecovery = openingRecoveryCompletions.get(ref);
     const completion = outstandingRecovery
-      ? Promise.all([hydration, outstandingRecovery]).then(
-          () => undefined,
-          () => undefined,
-        )
+      ? Promise.allSettled([hydration, outstandingRecovery]).then(() => undefined)
       : hydration.then(
           () => undefined,
           () => undefined,
