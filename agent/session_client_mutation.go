@@ -1114,8 +1114,8 @@ func (s *Session) InterruptClientMutation(
 	s.clientMutations.clearInterruptCallbackCompleted(params.ClientMutationID)
 	s.steeringMarked(recordedIDs)
 	if returnedClaim {
-		// The durable queue grew a claimed-but-unrun message back. QueueDepth,
-		// QueuePreview and WireState read the process-local copy, so without this
+		// The durable queue grew a claimed-but-unrun message back. QueueDepth
+		// and WireState read the process-local copy, so without this
 		// the message is durably present and invisible. No wake: this Stop parks
 		// the queue, so the returned message waits for the user's next run.
 		s.reflectDurableInputQueue()
