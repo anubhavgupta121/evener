@@ -16,7 +16,7 @@ import {
   WireError,
 } from "@evener/appwire-client";
 import { deferred } from "@evener/appwire-client/testing/deferred";
-import { FakeClient } from "@evener/appwire-client/testing/fakeClient";
+import type { FakeClient } from "@evener/appwire-client/testing/fakeClient";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
@@ -26,7 +26,7 @@ import { conversationPaneLifetime } from "../../../shell/paneLifetime";
 import { resetMobileViewportForTests } from "../../../shell/useIsMobile";
 import { type OpenPaneRecord, resetWorkspaceStoreForTests, workspaceStore } from "../../../shell/workspace";
 import { installLocalStorage, MemoryStorage } from "../../../storageTestUtils";
-import { connectionStore } from "../../../stores/connection";
+import { connectionStore, resetConnectionStoreForTests } from "../../../stores/connection";
 import { MutationOutboxIndexedDB } from "../../../stores/mutationOutboxIndexedDB";
 import { holdIndexedDBEvent, holdNextWriteTransaction } from "../../../stores/testing/stalledIndexedDB";
 import {
@@ -35,6 +35,7 @@ import {
   subscribeMutationPersistence,
   threadsStore,
 } from "../../../stores/threads";
+import { connectReadyFakeClient } from "../../../testing/connectionTestUtils";
 import { Toast } from "../../../widgets";
 import { getToasts, resetToastStoreForTests } from "../../../widgets/toast/store";
 import { toastKinds } from "../../../widgets/toast/toastTestUtils";
@@ -163,18 +164,12 @@ function readResponse(ref: string, overrides: Partial<Thread> = {}): ThreadReadR
   };
 }
 
-function connectFakeClient(): FakeClient {
-  const fake = new FakeClient("ready");
-  connectionStore.getState().connect(fake);
-  return fake;
-}
-
 async function mountComposer(
   ref: string,
   overrides: Partial<Thread> = {},
   source = createTestComposerSource(ref),
 ): Promise<FakeClient> {
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse(ref, overrides));
   await threadsStore.getState().ensureThread(ref);
   render(
@@ -191,7 +186,7 @@ beforeEach(() => {
   resetToastStoreForTests();
   globalThis.indexedDB = new IDBFactory();
   localStorage.clear();
-  connectionStore.setState({ state: "idle", serverInfo: undefined, client: null });
+  resetConnectionStoreForTests();
   resetThreadsStoreForTests();
   resetPendingTurnsStoreForTests();
   resetAskDockStoreForTests();
@@ -1933,7 +1928,7 @@ test("the composer's Stop button cancels the row a mid-swap resume moved to the 
   const user = userEvent.setup();
   const storage = new MutationOutboxIndexedDB();
   setMutationStorageForTests(storage);
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   const ref = "local:btn-stop-from";
   const toRef = "local:btn-stop-to";
   const fromShape = () =>
@@ -2060,7 +2055,7 @@ test("the composer's Stop button cancels the row a mid-swap resume moved to the 
 
 test("mobile composer omits the working path and repository without a git lookup", async () => {
   installMobileViewport();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("local:ref_loc", { cwd: "/home/jesse/repo" }));
   fake.on("evener/git/head", () => ({ head: "composer-line", originUrl: "git@github.com:owner/repo.git" }));
   await threadsStore.getState().ensureThread("local:ref_loc");
@@ -2081,7 +2076,7 @@ test("mobile composer omits the working path and repository without a git lookup
 
 test("mobile finished session with no composer card omits repository metadata", async () => {
   installMobileViewport();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () =>
     readResponse("local:ref_ended", {
       cwd: "/home/jesse/repo",
@@ -2118,7 +2113,7 @@ test("mobile finished session with no composer card omits repository metadata", 
 // path would render as that session's branch.
 test("mobile source-backed session omits repository metadata without a local git lookup", async () => {
   installMobileViewport();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   fake.on("thread/read", () => readResponse("remote:ref_remote", { cwd: "/srv/remote/repo", source: "remote" }));
   await threadsStore.getState().ensureThread("remote:ref_remote");
   render(
@@ -2261,7 +2256,7 @@ test("a queue submit also exposes its durable pending entry in the composed UI w
 
 test("relay recovery refreshes stale queue capability without reconnecting or remounting the composer", async () => {
   const user = userEvent.setup();
-  const fake = connectFakeClient();
+  const fake = connectReadyFakeClient();
   let readCount = 0;
   fake.on("thread/read", (params) => {
     readCount += 1;
