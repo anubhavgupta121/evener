@@ -1284,9 +1284,8 @@ func (s *Session) processInputKindWithProvenance(ctx context.Context, input stri
 		// The durable selection belonged to the turn that just ran; a
 		// follow-up turn must not re-admit it.
 		processCtx = withDurableSkillSelection(processCtx, nil)
-		// Follow-up turns (after the first) carry no attachments and are
-		// user-driven, not continuations.
-		nextImages = nil
+		// Follow-up turns (after the first) are user-driven, not
+		// continuations; each drain rung sets the attachments it carries.
 		nextKind = EntryUserInput
 		nextProvenance = nil
 		if strings.TrimSpace(out) != "" {
@@ -1535,8 +1534,7 @@ func (s *Session) processInputKindWithProvenance(ctx context.Context, input stri
 			SteeringParked:       s.steeringParkedNow(),
 		})
 
-		switch action {
-		case runQueued:
+		if action == runQueued {
 			next = queued.Text
 			nextImages = queued.Images
 			processCtx = s.claimedInputContext(processCtx, queued)
