@@ -9,7 +9,6 @@ import { LaunchModelPicker } from "./LaunchModelPicker";
 import { render } from "./renderNative.testkit";
 
 vi.mock("react-native", async () => (await import("./renderNative.testkit")).nativeModuleMock());
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 
 function picker(client: ConversationClientLike | null, value = "", onChange = () => {}) {
 	return render(

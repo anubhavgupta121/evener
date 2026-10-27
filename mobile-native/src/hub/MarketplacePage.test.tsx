@@ -22,7 +22,6 @@ vi.mock("react-native", async () => ({
 vi.mock("../ConnectionProvider", () => ({
 	useConnection: () => ({ state: "ready", error: null, activeProfile: null }),
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 vi.mock("react-native-safe-area-context", () => ({ SafeAreaView: "SafeAreaView" }));
 
 function slotFor(hubId: string, ready = true): PluginsScreenSlot {

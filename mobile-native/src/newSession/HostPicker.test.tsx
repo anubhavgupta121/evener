@@ -25,7 +25,6 @@ vi.mock("@react-navigation/native", async () => {
 vi.mock("react-native", async () => ({
 	...(await import("../renderNative.testkit")).nativeModuleMock(),
 }));
-vi.mock("expo-symbols", () => ({ SymbolView: "SymbolView" }));
 
 async function mount(hosts: HostRow[], source = "local") {
 	const fleet = scriptedFleet(hosts, [
