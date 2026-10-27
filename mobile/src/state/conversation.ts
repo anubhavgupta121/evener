@@ -91,13 +91,11 @@ export {
 	truncateText,
 } from "../../../mobile-native/src/projectedRows";
 
-import type { ActivityView } from "../services/activity";
 import type {
 	ConversationReadProjection,
 	ConversationService,
 	LiveConversationService,
 } from "../services/conversation";
-import type { ActivityIdentity, NotificationOutcome } from "./activity";
 import {
 	type ConversationMutationAdmission,
 	type ConversationMutationContext,
@@ -183,19 +181,18 @@ interface DrainScheduler {
 	request(key: string, effect: () => Promise<void>): Promise<void>;
 }
 
-// A structural activity sink accepted by openProjected/rehydrate. Uses the
-// approved LiveActivityState contract from state/activity.ts directly via an
-// exact structural Pick so argument order cannot drift from the real store.
-// The applyLiveNotification return value drives the shared drain scheduler.
-export interface LiveActivitySink {
-	setLiveView(view: ActivityView, identity: ActivityIdentity): boolean;
-	applyLiveNotification(n: AnyNotification, identity: ActivityIdentity): NotificationOutcome;
-	reset(): void;
+// The frames that owe the store one authoritative reread no matter what the
+// reducer folds: a settled turn (its scalars carry per-turn usage, never the
+// cumulative aggregate, so only the canonical read has the session totals) and
+// a change to the jobs tree (the frame names no rows).
+function frameOwesReread(n: AnyNotification): boolean {
+	if (n.method === "history/updated") return (n.params.turns ?? []).some((turn) => turn.status !== "inProgress");
+	return n.method === "evener/jobs/treeUpdated";
 }
 
 // I1: Binding snapshot captured at request time. Every request through the
 // drain scheduler captures the current bindingEpoch + ref + generation +
-// service + sink object identities. The effect verifies ALL fields are still
+// service object identity and projected flag. The effect verifies ALL fields are still
 // current BEFORE any read, suppressing stale work at the boundary — a request
 // queued for conversation A can never call serviceA with refB after the store
 // switched to B. This is an internal exact tuple; it is never exported.
@@ -205,9 +202,9 @@ interface RequestBinding {
 	readonly ref: string;
 	readonly generation: number;
 	readonly service: LiveConversationService;
-	// C1: sink is null for plain open() (no projected sink), non-null for
-	// openProjected. Both paths validate exact service identity.
-	readonly sink: LiveActivitySink | null;
+	// C1: false for plain open(), true once openProjected/rehydrate bound the
+	// service. Both paths validate exact service identity.
+	readonly projected: boolean;
 }
 
 // Production-owned drain scheduler with per-key completion promises. Each
@@ -334,10 +331,6 @@ function createDrainScheduler(): DrainScheduler {
 	};
 }
 
-// F4: No legacy createActivitySink adapter — the activity store's own
-// LiveActivityState (Coordinate B) implements LiveActivitySink directly.
-// Do not fabricate "applied" — use the real applyLiveNotification outcome.
-
 export interface ConversationState {
 	readonly ref: string | null;
 	readonly profileId: string | null;
@@ -392,7 +385,7 @@ export interface ConversationState {
 
 	// The non-projected compatibility surface, kept for screen test mocks; no
 	// production screen calls it (they open through openProjected /
-	// resumeProjected). It binds no activity sink, so it does not self-recover:
+	// resumeProjected). It binds no projected read, so it does not self-recover:
 	// a refused mutation surfaces its error and issues no reread.
 	open(service: ConversationService, ref: string): Promise<void>;
 	loadOlder(service: ConversationService): Promise<LoadOlderResult>;
@@ -455,15 +448,10 @@ export interface LiveConversationState extends ConversationState {
 	// Readiness is false synchronously before the read starts and stays false if
 	// it fails. Retirement resolves the wait without undoing a commit.
 	refreshPendingMutations(): Promise<void>;
-	openProjected(
-		service: LiveConversationService,
-		activitySink: LiveActivitySink,
-		ref: string,
-		replacement?: ConversationReadProjection,
-	): Promise<void>;
+	openProjected(service: LiveConversationService, ref: string, replacement?: ConversationReadProjection): Promise<void>;
 	suspendProjected(): void;
-	resumeProjected(service: LiveConversationService, activitySink: LiveActivitySink, ref: string): Promise<void>;
-	rehydrate(service: LiveConversationService, activitySink: LiveActivitySink): Promise<void>;
+	resumeProjected(service: LiveConversationService, ref: string): Promise<void>;
+	rehydrate(service: LiveConversationService): Promise<void>;
 	// Task3: store-owned external error publication seam. The dispatcher passes
 	// a generic sanitized message plus the exact ref and conversationGeneration
 	// it captured when deciding to publish. The store writes the error ONLY when
@@ -1341,7 +1329,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 		// Schedule one trailing reread through the store-owned scheduler. The
 		// effect validates the exact captured binding again (double-check after
 		// the scheduler microtask), rechecks mutation revision and terminal status,
-		// and calls rehydrate with the captured service and sink — never the
+		// and calls rehydrate with the captured service — never the
 		// closure's. If a newer mutation is pending, the effect re-defers instead
 		// of reading.
 		scheduler.request(binding.ref, async () => {
@@ -1363,10 +1351,10 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					return; // zero read
 				}
 			}
-			// captureBinding only returns non-null when boundSink is non-null, so
-			// binding.sink is always non-null here.
-			if (binding.sink === null) return;
-			await storeGet?.().rehydrate(binding.service, binding.sink);
+			// captureBinding only returns non-null when boundProjected is true, so
+			// binding.projected is always true here.
+			if (!binding.projected) return;
+			await storeGet?.().rehydrate(binding.service);
 		});
 	}
 
@@ -1374,17 +1362,16 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	// activity rehydrate, structural notification gaps, and mutation capability
 	// recovery all request through it rather than owning timers/coalescers.
 	const scheduler = createDrainScheduler();
-	let activitySink: LiveActivitySink | null = null;
-	// The service+sink bound by the last openProjected/rehydrate, used by
+	// The service bound by the last openProjected/rehydrate, used by
 	// requestRehydrate so applyNotification can request through the scheduler
 	// without holding its own service reference.
 	let boundService: LiveConversationService | null = null;
-	let boundSink: LiveActivitySink | null = null;
-	let acceptedRehydrate: { generation: number; sink: LiveActivitySink } | null = null;
+	let boundProjected = false;
+	let acceptedRehydrate: { generation: number } | null = null;
 	// I1: Binding epoch — incremented on every openProjected/open/close/reset so
 	// a request queued for an older binding (serviceA+refA) can never run after
 	// the store switched to a newer binding (serviceB+refB). Every request
-	// captures epoch+ref+generation+service+sink; the effect verifies all still
+	// captures epoch+ref+generation+service+projected; the effect verifies all still
 	// current before any read.
 	let bindingEpoch = 0;
 	// Late-bound store getter — assigned inside create() so requestRehydrate
@@ -1396,13 +1383,13 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	let markLatestReadState: ((state: LatestReadState) => void) | null = null;
 
 	// I1: Capture the current binding snapshot at request time. The effect
-	// verifies ALL fields (epoch+ref+generation+service+sink object identities)
+	// verifies ALL fields (epoch+ref+generation+service object identity+projected)
 	// are still current BEFORE any read — stale work is suppressed at the
-	// boundary. Object identity comparison means a rebind with different service
-	// or sink objects (even if same ref) produces a different binding and the
+	// boundary. Object identity comparison means a rebind with a different
+	// service object (even if same ref) produces a different binding and the
 	// old effect is suppressed.
 	function captureBinding(): RequestBinding | null {
-		if (boundService === null || boundSink === null) return null;
+		if (boundService === null || !boundProjected) return null;
 		const state = storeGet?.();
 		if (state === undefined || state.ref === null || state.status !== "open") return null;
 		return {
@@ -1410,14 +1397,14 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			ref: state.ref,
 			generation: state.conversationGeneration,
 			service: boundService,
-			sink: boundSink,
+			projected: boundProjected,
 		};
 	}
 
 	// C1: Capture a service-specific operation binding for loadOlder and
 	// mutations. The supplied service MUST equal boundService (wrong service
-	// after B bound => zero request/state). sink is boundSink (null for plain
-	// open, non-null for openProjected). epoch/ref/gen are captured from
+	// after B bound => zero request/state). projected is false for plain
+	// open, true for openProjected. epoch/ref/gen are captured from
 	// current state. Returns null if no service is bound or ref is null.
 	function captureOperationBinding(service: ConversationService): RequestBinding | null {
 		if (boundService === null) return null;
@@ -1432,13 +1419,13 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			ref: state.ref,
 			generation: state.conversationGeneration,
 			service: boundService,
-			sink: boundSink,
+			projected: boundProjected,
 		};
 	}
 
 	// Verify a captured binding is still current. This applies to scheduled
 	// rereads, paging, and mutations. If the epoch, ref,
-	// generation, or service/sink object identity changed, suppress the stale
+	// generation, or service object identity changed, suppress the stale
 	// request before it can publish into the new binding.
 	function isBindingCurrent(binding: RequestBinding): boolean {
 		const state = storeGet?.();
@@ -1448,17 +1435,16 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			binding.ref === state.ref &&
 			binding.generation === state.conversationGeneration &&
 			boundService === binding.service &&
-			boundSink === binding.sink
+			boundProjected === binding.projected
 		);
 	}
 
 	// Request one authoritative reread through the store-owned drain scheduler.
 	// I1: captures the binding at request time; the effect verifies it is still
-	// current before calling rehydrate with the expected service+sink.
+	// current before calling rehydrate with the expected service.
 	function requestRehydrate(ref: string): void {
 		const binding = captureBinding();
 		const service = boundService;
-		const sink = boundSink;
 		if (binding === null) {
 			// A resume that is still opening can still receive a frame that needs
 			// the canonical read (a newer-epoch resync invalidates the retained
@@ -1471,7 +1457,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			}
 			return;
 		}
-		if (service === null || sink === null) return;
+		if (service === null) return;
 		// A read request invalidates live-tail authority at once: the model on
 		// screen stays readable, but it is no longer the verified canonical
 		// session until this read (or a newer accepted one) publishes.
@@ -1480,7 +1466,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 			// I1: Suppress stale work BEFORE any read — if the binding changed,
 			// do not call rehydrate (serviceA must never be called with refB).
 			if (!isBindingCurrent(binding)) return;
-			await storeGet?.().rehydrate(service, sink);
+			await storeGet?.().rehydrate(service);
 		});
 	}
 
@@ -1488,24 +1474,19 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 	// exactly once, when that resume commits.
 	let deferredRereadRef: string | null = null;
 
-	// One frame about the open thread, routed to BOTH stores: the activity sink
-	// first (its outcome decides whether one shared reread is owed), then the
-	// conversation store's own fold. Every live handler goes through here, so
-	// the two cannot drift about which notifications reach which store.
-	function routeLiveFrame(
-		notification: AnyNotification,
-		sink: LiveActivitySink,
-		ref: string,
-		generation: number,
-	): void {
+	// One frame about the open thread: a frame that owes the store a reread
+	// (frameOwesReread) requests the one shared reread first, then the
+	// conversation store folds it. Every live handler goes through here, so the
+	// frames that owe a reread cannot drift between handlers.
+	function routeLiveFrame(notification: AnyNotification, ref: string): void {
 		const conversation = storeGet?.().conversation;
-		if (conversation !== null && conversation !== undefined) {
-			const outcome = sink.applyLiveNotification(notification, {
-				threadId: conversation.threadId,
-				ref,
-				generation,
-			});
-			if (outcome === "rehydrate") requestRehydrate(ref);
+		if (
+			conversation !== null &&
+			conversation !== undefined &&
+			notificationTargetsThread(notification, conversation) &&
+			frameOwesReread(notification)
+		) {
+			requestRehydrate(ref);
 		}
 		storeGet?.().applyNotification(notification);
 	}
@@ -1998,7 +1979,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// refresh is suppressed at the boundary.
 				bindingEpoch += 1;
 				boundService = null;
-				boundSink = null;
+				boundProjected = false;
 				// Fix round 1 I2: invalidate page ownership on conversation transition.
 				loadOlderToken += 1;
 				// C1+I1: clear any stale deferred trailing-reread request.
@@ -2038,9 +2019,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						olderCursor: null,
 						latestReadState: historySupportsCanonicalRead(bounded) ? "ready" : "unknown",
 					});
-					// C1: Track the plain-open service as boundService with a null
-					// sink so loadOlder/mutations validate exact service
-					// identity via captureOperationBinding.
+					// C1: Track the plain-open service as boundService (not projected)
+					// so loadOlder/mutations validate exact service identity via
+					// captureOperationBinding.
 					boundService = service as LiveConversationService;
 					// Subscribe to notifications for this thread.
 					service.subscribeNotifications((n) => {
@@ -2057,19 +2038,18 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				}
 			},
 
-			async openProjected(service, sink, ref, replacement) {
+			async openProjected(service, ref, replacement) {
 				// Same rule as open(): any thread open retires the prior seam and its
 				// rows (the durable target key is hub + ref, and the store cannot see
 				// the hub), and the host rebinds for the conversation it opens. The
 				// carried provenance survives, keyed by client mutation id.
 				detachPendingRows();
 				const gen = ++conversationGen;
-				// I1: increment the binding epoch and bind service+sink so queued
+				// I1: increment the binding epoch and bind the service so queued
 				// requests from an older binding are suppressed at the boundary.
 				bindingEpoch += 1;
-				activitySink = sink;
 				boundService = service;
-				boundSink = sink;
+				boundProjected = true;
 				// Fix round 1 I2: invalidate page ownership on conversation transition.
 				loadOlderToken += 1;
 				// C1+I1: clear any stale deferred trailing-reread request.
@@ -2078,8 +2058,6 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				releaseBoundedTextCache();
 				// Reset thread-scoped state (draft, pending mutation) — presentation state
 				// now lives outside the store (in live-ui-store).
-				// F4: reset the activity sink on thread change.
-				sink.reset();
 				retireMutationAttempt();
 				set({
 					status: "opening",
@@ -2109,25 +2087,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 						if (!active || gen !== conversationGen) return;
 						liveHandler?.(notification);
 					});
-					const { conversation, activity, olderCursor, hasEarlierItems, hasLaterItems } =
+					const { conversation, olderCursor, hasEarlierItems, hasLaterItems } =
 						replacement ?? (await service.readProjection(ref));
 					if (gen !== conversationGen) return;
-					const identity: ActivityIdentity = {
-						threadId: conversation.threadId,
-						ref,
-						generation: gen,
-					};
-					// Strict activity sink: call setLiveView BEFORE committing the paired
-					// conversation projection. If it returns false (stale/invalid identity),
-					// do not commit the conversation projection — the two stores stay
-					// atomically consistent under the same exact identity tuple.
-					const accepted = sink.setLiveView(activity, identity);
-					if (!accepted) {
-						// Nothing was committed as this generation's canonical
-						// projection; no read backs the display.
-						markLatest("unknown");
-						return;
-					}
 					adoptRead(conversation);
 					const { conversation: bounded, trimmed } = capAndTruncate(conversation);
 					set({
@@ -2141,7 +2103,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					});
 					liveHandler = (n) => {
 						if (gen !== conversationGen) return;
-						routeLiveFrame(n, sink, ref, gen);
+						routeLiveFrame(n, ref);
 					};
 				} catch (err) {
 					if (gen !== conversationGen) return;
@@ -2168,7 +2130,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				loadOlderToken += 1;
 				trailingReread = null;
 				boundService = null;
-				boundSink = null;
+				boundProjected = false;
 				retireMutationAttempt();
 				set({
 					status: "opening",
@@ -2181,7 +2143,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				});
 			},
 
-			async resumeProjected(service, sink, ref) {
+			async resumeProjected(service, ref) {
 				const state = get();
 				// A rebuilt client (reconnect, app foreground) resumes the same ref
 				// with a new service object. This store lives for one hub and ref, so
@@ -2189,7 +2151,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// merge. A read from another instance replaces the history in
 				// rehydrate, which owns that decision.
 				if (state.ref !== ref || state.conversation === null) {
-					await get().openProjected(service, sink, ref);
+					await get().openProjected(service, ref);
 					return;
 				}
 				// Connection recovery is an explicit freshness event for the retained
@@ -2201,9 +2163,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				bindingEpoch += 1;
 				loadOlderToken += 1;
 				trailingReread = null;
-				activitySink = sink;
 				boundService = service;
-				boundSink = sink;
+				boundProjected = true;
 				retireMutationAttempt();
 				set({
 					status: "opening",
@@ -2219,23 +2180,18 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// Install the handler before the read: the retained conversation is
 				// on screen, so a frame during the read folds into it and rehydrate
 				// merges the read against the result.
-				const liveHandler = (notification: AnyNotification) => routeLiveFrame(notification, sink, ref, gen);
+				const liveHandler = (notification: AnyNotification) => routeLiveFrame(notification, ref);
 				const unsubscribe = service.subscribeNotifications((notification) => {
 					if (!active || gen !== conversationGen) return;
 					liveHandler(notification);
 				});
 				try {
-					await get().rehydrate(service, sink);
+					await get().rehydrate(service);
 					if (!active || gen !== conversationGen) return;
 					const current = get();
-					if (
-						current.error !== null ||
-						acceptedRehydrate === null ||
-						acceptedRehydrate.generation !== gen ||
-						acceptedRehydrate.sink !== sink
-					) {
+					if (current.error !== null || acceptedRehydrate === null || acceptedRehydrate.generation !== gen) {
 						boundService = null;
-						boundSink = null;
+						boundProjected = false;
 						set({
 							status: "error",
 							error: current.error ?? "Could not load the session. Try again.",
@@ -2258,7 +2214,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				}
 			},
 
-			async rehydrate(service, sink) {
+			async rehydrate(service) {
 				// Rehydrate uses readProjection to refresh the conversation without
 				// calling destructive open(). Preserves draft.
 				// F3: rehydrate triggers the same shared reread.
@@ -2268,9 +2224,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// rather than resnapshotting current state mid-flight. It can never
 				// call serviceA with refB — the scheduler effect verifies the binding
 				// epoch before calling this, and rehydrate itself re-checks.
-				// I1: Any rehydrate(service, sink) with different objects than the
+				// I1: Any rehydrate(service) with a different service object than the
 				// current binding increments bindingEpoch BEFORE assignment, so queued
-				// effects captured with the old service/sink are suppressed.
+				// effects captured with the old service are suppressed.
 				// R1: capture monotonic mutation-owner revision and error-owner revision
 				// (not mutationId/null or error string) at entry. After the await, if
 				// either changed, the rehydrate is stale with respect to that owner.
@@ -2278,7 +2234,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// arrange one bounded trailing authoritative reread after the mutation
 				// settles via the scheduler (no loop, no reentrant await).
 				// R2: if page owner changed, safely merge/preserve newer page-owned
-				// items/cursor while committing the reread conversation+activity.
+				// items/cursor while committing the reread conversation.
 				const state = get();
 				if (state.ref === null) return;
 				acceptedRehydrate = null;
@@ -2287,15 +2243,15 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				markLatest("reading");
 				const ref = state.ref;
 				const gen = state.conversationGeneration;
-				// I1: If the service or sink objects differ from the current binding,
-				// increment bindingEpoch BEFORE assignment so queued effects captured
-				// with the old service/sink are suppressed.
+				// I1: If the service object differs from the current binding (or the
+				// binding was not projected), increment bindingEpoch BEFORE assignment
+				// so queued effects captured with the old service are suppressed.
 				// I5: The rebind transition itself settles any old pending/loading
 				// ownership so A's late completion makes ZERO state changes — no
 				// permanent UI state stuck. This is the new binding transition, not
 				// A's completion. A pending mutation or loadingOlder from the old
 				// binding is invalidated by incrementing its operation tokens.
-				if (service !== boundService || sink !== boundSink) {
+				if (service !== boundService || !boundProjected) {
 					bindingEpoch += 1;
 					// I5: Invalidate old page/loading ownership so a held loadOlder
 					// completion from A cannot write loadingOlder/items/cursor.
@@ -2334,13 +2290,12 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				// cursor merge below reads to keep a successful page's advancement
 				// without letting a failed page pin a stale pre-race cursor.
 				const entryOlderCursor = get().olderCursor;
-				activitySink = sink;
 				boundService = service;
-				boundSink = sink;
+				boundProjected = true;
 				try {
-					const { conversation, activity, hasEarlierItems, hasLaterItems } = await service.readProjection(ref);
+					const { conversation, hasEarlierItems, hasLaterItems } = await service.readProjection(ref);
 					// I1: Suppress stale work — if the binding epoch changed, the store
-					// switched to a different service/sink/ref. Do not commit.
+					// switched to a different service/ref. Do not commit.
 					if (entryEpoch !== bindingEpoch) return;
 					// Guard: a newer generation may have opened during the await.
 					if (get().conversationGeneration !== gen) {
@@ -2419,23 +2374,9 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// just declined to apply it) — mark it accepted before returning,
 					// or resumeProjected reads the untouched acceptedRehydrate=null
 					// from entry as a failure and tears down a healthy subscription
-					// over a read that merely lost an identity race. The activity
-					// sink is a strict identity gate (applyLiveNotification drops
-					// anything whose identity, generation included, does not match
-					// what setLiveView last installed) — resumeProjected bumps the
-					// generation before this call and binds its live handler to it,
-					// so a discard that skips setLiveView leaves the sink pinned to
-					// the PRE-suspend generation and silently drops every live frame
-					// from here on, freezing the activity/jobs/usage panel. Install
-					// the current generation's identity exactly as the accepted path
-					// does, keeping the held conversation model.
+					// over a read that merely lost an identity race.
 					if (sameInstance && currentConvForMerge !== null && appliedModel === currentConvForMerge) {
-						const discardAccepted = sink.setLiveView(activity, {
-							threadId: conversation.threadId,
-							ref,
-							generation: gen,
-						});
-						if (discardAccepted) acceptedRehydrate = { generation: gen, sink };
+						acceptedRehydrate = { generation: gen };
 						// The wire answered but this model declined the read by its own
 						// identity rules: a discarded read never restores canonical
 						// authority.
@@ -2513,24 +2454,7 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// own cursor actually moved during the await.
 					const pageCursorAdvanced = sameInstance && currentSnapshot.olderCursor !== entryOlderCursor;
 					if (pageCursorAdvanced) mergedCursor = currentSnapshot.olderCursor;
-					const identity: ActivityIdentity = {
-						threadId: conversation.threadId,
-						ref,
-						generation: gen,
-					};
-					// Strict activity sink: call setLiveView BEFORE committing the paired
-					// conversation projection. If it returns false, do not commit.
-					const accepted = sink.setLiveView(activity, identity);
-					if (!accepted) {
-						// The sink rejected this publication, so nothing committed and it
-						// is not canonical authority. Settle into the recoverable failure
-						// state rather than leaving "reading": the entry read actor retries
-						// "error", while the screen's demand only handles "unknown". The
-						// displayed model stays readable.
-						markLatest("error");
-						return;
-					}
-					acceptedRehydrate = { generation: gen, sink };
+					acceptedRehydrate = { generation: gen };
 					adoptRead(conversation);
 					// R1: Success preserves any newer error owner. Only clear error if
 					// the error-owner revision hasn't changed AND no failed mutation
@@ -2936,11 +2860,11 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 					// A stale v4 item cursor invalidates the visible transcript
 					// incarnation. Rehydrate before surfacing the failure so the next
 					// user retry starts from the refreshed bounded state and cursor.
-					if (isStaleCursorError(err) && opBinding.sink !== null && isBindingCurrent(opBinding)) {
+					if (isStaleCursorError(err) && opBinding.projected && isBindingCurrent(opBinding)) {
 						// Rehydrate only the operation's still-current binding. A stale
-						// page from service A must not use service B's sink after a
+						// page from service A must not use service B after a
 						// rebind, even if both conversations share a ref.
-						await get().rehydrate(opBinding.service, opBinding.sink);
+						await get().rehydrate(opBinding.service);
 					}
 					// C1: Recheck the exact operation binding after the await. If the
 					// binding changed (rebind to B), A's completion makes ZERO state
@@ -3127,8 +3051,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				demandBoundPendingRead();
 				return scheduler.request(binding.ref, async () => {
 					if (!isBindingCurrent(binding)) return;
-					if (binding.sink === null) return;
-					await storeGet?.().rehydrate(binding.service, binding.sink);
+					if (!binding.projected) return;
+					await storeGet?.().rehydrate(binding.service);
 				});
 			},
 
@@ -3366,13 +3290,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				releaseBoundedTextCache();
 				detachPendingRows();
 				forgetPendingProvenance();
-				// F4: reset the activity sink on close.
-				if (activitySink !== null) {
-					activitySink.reset();
-					activitySink = null;
-				}
 				boundService = null;
-				boundSink = null;
+				boundProjected = false;
 				retireMutationAttempt();
 				set({
 					status: "closed",
@@ -3598,13 +3517,8 @@ export function createConversationStore(options: ConversationStoreOptions = {}) 
 				releaseBoundedTextCache();
 				detachPendingRows();
 				forgetPendingProvenance();
-				// F4: reset the activity sink on thread change.
-				if (activitySink !== null) {
-					activitySink.reset();
-					activitySink = null;
-				}
 				boundService = null;
-				boundSink = null;
+				boundProjected = false;
 				retireMutationAttempt();
 				set({
 					ref: null,

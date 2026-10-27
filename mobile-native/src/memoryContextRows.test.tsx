@@ -28,7 +28,6 @@ import { wireThread } from "@evener/appwire-client/testing/notifications";
 import { act, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConversationService } from "../../mobile/src/services/conversation";
-import { createActivityStore } from "../../mobile/src/state/activity";
 import { createConversationStore } from "../../mobile/src/state/conversation";
 import { markers } from "./markerTestUtils";
 import { nativeDisclosureStore } from "./nativeDisclosure";
@@ -649,9 +648,8 @@ describe("a store-bounded refresh keeps the complete original beyond the row bou
 		client.on("thread/unsubscribe", () => ({}));
 		const service = createConversationService(client, { now: () => T0, resolveDisplayConfig: () => config });
 		const store = createConversationStore({ displayConfig: config });
-		const activity = createActivityStore();
 		try {
-			await store.getState().openProjected(service, activity.getState(), "ref-1");
+			await store.getState().openProjected(service, "ref-1");
 			const conversation = store.getState().conversation;
 			if (!conversation) throw new Error("no stored conversation");
 			const presentation = projectNativeTranscript(conversation, config);
