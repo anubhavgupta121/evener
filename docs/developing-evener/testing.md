@@ -339,8 +339,8 @@ contract:
   an unmanaged host: the bootstrap selects evener hub launchd/systemd units by
   name, without matching the private config or port, so a loaded unit on a
   managed host can start or restart the regular hub.
-- The attach check is read-only. Every other check writes to the host, so each is
-  a separate opt-in. Isolation differs by check:
+- Every check except attach is its own opt-in because it writes to the host.
+  Isolation differs by check:
   - Deploy, container, push and UI run a private hub from a run-unique directory
     they create on the host and remove when they finish. Deploy, and the
     container pipeline check against an external host, remove it only after
@@ -355,16 +355,12 @@ contract:
     hub, so it uses the host's real provider configuration, credentials and state
     root, and the session record survives the run. Only its working directory is
     run-unique.
-- The attach and session checks run a test hub with no `BuildSource`, so its
-  version-match ladder cannot deploy: it refuses an on-disk host build whose
-  version differs from the controller's and restarts a host hub reporting another
-  version. For those, install a matching host build, built the way the harness
-  builds the controller (a plain `go build` of `./cmd/evener/`, reporting `dev`)
-  or stamped with the same `-ldflags`. The deploy checks instead cross-compile the
+- Where a check expects a host build already installed, install one matching
+  the controller's build: a plain `go build` of `./cmd/evener/` (reporting `dev`),
+  or both stamped with the same `-ldflags`. The deploy checks cross-compile the
   tree under test; they need a **clean** checkout (the build identity is stamped
   from `HEAD`; a dirty tree skips) and the embedded web UI built (`make
-  build-web`). Ordinary attachment of a protocol-compatible host does not depend
-  on build labels (`TestHostCompatibleConnectContainerE2E` pins that).
+  build-web`). Each test's doc comment states its exact prerequisites.
 
 | Opt-in (besides `EVENER_SSH_E2E=1`) | Test | What it proves |
 | --- | --- | --- |
